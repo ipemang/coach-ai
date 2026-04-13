@@ -8,9 +8,9 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from ..core.security import AuthenticatedPrincipal, require_roles, resolve_coach_scope
-from ..services.coach_workflow import CoachWorkflow
-from ..services.whatsapp_service import WhatsAppService
+from app.core.security import AuthenticatedPrincipal, require_roles, resolve_coach_scope
+from app.services.coach_workflow import CoachWorkflow
+from app.services.whatsapp_service import WhatsAppService
 
 router = APIRouter(prefix="/api/v1/coach", tags=["coach"])
 
@@ -68,6 +68,7 @@ async def _resolve_supabase_client(request: Request) -> Any:
 async def _resolve_whatsapp_service(request: Request) -> WhatsAppService | None:
     scope = getattr(request.app.state, "scope", None)
     service = getattr(request.app.state, "whatsapp_service", None)
+
     if service is not None and hasattr(service, "send_text_message"):
         if getattr(service, "scope", None) is None and scope is not None:
             service.scope = scope
@@ -78,7 +79,11 @@ async def _resolve_whatsapp_service(request: Request) -> WhatsAppService | None:
         return None
 
     supabase_client = getattr(request.app.state, "supabase_client", None)
-    return WhatsAppService(whatsapp_client=whatsapp_client, supabase_client=supabase_client, scope=scope)
+    return WhatsAppService(
+        whatsapp_client=whatsapp_client,
+        supabase_client=supabase_client,
+        scope=scope,
+    )
 
 
 @router.get("/triage", response_model=list[CoachTriageResponseItem])
@@ -95,12 +100,12 @@ async def coach_triage(
         coach_id=coach_id,
         fallback_scope=getattr(request.app.state, "scope", None),
     )
-    workflow_kwargs = {
-        "supabase_client": supabase_client,
-        "whatsapp_service": await _resolve_whatsapp_service(request),
-        "scope": scope,
-    }
-    workflow = CoachWorkflow(**workflow_kwargs)
+
+    workflow = CoachWorkflow(
+        supabase_client=supabase_client,
+        whatsapp_service=await _resolve_whatsapp_service(request),
+        scope=scope,
+    )
     items = await workflow.build_triage()
     return [CoachTriageResponseItem.model_validate(asdict(item)) for item in items]
 
@@ -118,6 +123,7 @@ async def coach_verify(
         coach_id=payload.coach_id,
         fallback_scope=getattr(request.app.state, "scope", None),
     )
+
     workflow = CoachWorkflow(
         supabase_client=supabase_client,
         whatsapp_service=await _resolve_whatsapp_service(request),
@@ -134,7 +140,7 @@ async def coach_verify(
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except Exception as exc:  # pragma: no cover - downstream failures
+    except Exception as exc:  # pragma: no cover
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return CoachVerifyResponse.model_validate(asdict(result))
