@@ -1,5 +1,17 @@
 from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from .scope import DataScope, apply_scope_query, resolve_scope_from_env
+from .whatsapp_service import WhatsAppRecipient, WhatsAppService
+from .methodology_extractor import (
+    METHODOLOGY_EXTRACTION_PROMPT,
+    extract_methodology_from_transcript,
+    persist_methodology_extraction
+)
+from .coach_workflow import update_coach_methodology
+
+supabase_client = None
+whatsapp_client = None
+whatsapp_service = None
 
 class Settings(BaseSettings):
     groq_api_key: Optional[str] = None
