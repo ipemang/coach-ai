@@ -3,10 +3,11 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.agents.check_in import AthleteCheckIn, CheckInRecommendation, assess_check_in, persist_check_in_state
+from app.core.security import AuthenticatedPrincipal, require_roles, resolve_coach_scope
 from app.services import extract_methodology_from_transcript, get_settings, persist_methodology_extraction
 from app.services.athlete_memory_search import AthleteMemorySearchService
 from app.services.scope import DataScope
@@ -63,25 +64,50 @@ def health() -> dict[str, str]:
 
 
 @router.post("/check-in", tags=["athlete"], response_model=CheckInRecommendation)
-def check_in(payload: AthleteCheckIn) -> CheckInRecommendation:
+def check_in(
+    request: Request,
+    payload: AthleteCheckIn,
+    principal: AuthenticatedPrincipal = Depends(require_roles("authenticated", "athlete", "coach", "admin")),
+) -> CheckInRecommendation:
     recommendation = assess_check_in(payload)
-    persist_check_in_state(payload, recommendation)
+    scope = getattr(request.app.state, "scope", None)
+    if principal.organization_id or principal.coach_id:
+        scope = DataScope(
+            organization_id=principal.organization_id or getattr(request.app.state, "organization_id", None),
+            coach_id=principal.coach_id or getattr(request.app.state, "coach_id", None),
+        )
+    persist_check_in_state(
+        payload,
+        recommendation,
+        organization_id=scope.organization_id if scope and scope.is_configured() else None,
+        coach_id=scope.coach_id if scope and scope.is_configured() else None,
+    )
     return recommendation
 
 
 @router.post("/extract-methodology", tags=["methodology"], response_model=MethodologyExtractionResponse)
-def extract_methodology(payload: ExtractMethodologyRequest) -> MethodologyExtractionResponse:
+def extract_methodology(
+    request: Request,
+    payload: ExtractMethodologyRequest,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach", "admin")),
+) -> MethodologyExtractionResponse:
     settings = get_settings()
+    scope = resolve_coach_scope(
+        principal,
+        organization_id=payload.organization_id,
+        coach_id=payload.coach_id,
+        fallback_scope=getattr(request.app.state, "scope", None),
+    )
 
     try:
         extraction = extract_methodology_from_transcript(payload.transcript, settings)
         persisted = persist_methodology_extraction(
-            payload.coach_id,
+            scope.coach_id or payload.coach_id,
             extraction["methodology_playbook"],
             extraction["persona_system_prompt"],
             payload.transcript,
             settings,
-            organization_id=payload.organization_id,
+            organization_id=scope.organization_id,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
