@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from os import getenv
 from typing import Any
 from urllib.parse import parse_qs
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from app.core.security import verify_whatsapp_signature
@@ -384,6 +386,24 @@ async def _resolve_whatsapp_service(request: Request) -> Any:
         raise HTTPException(status_code=503, detail="WhatsApp service is not configured")
 
     return WhatsAppService(whatsapp_client=whatsapp_client, supabase_client=getattr(request.app.state, "supabase_client", None), scope=scope)
+
+
+@router.get("/whatsapp", response_class=PlainTextResponse)
+async def whatsapp_webhook_handshake(
+    hub_mode: str | None = Query(default=None, alias="hub.mode"),
+    hub_verify_token: str | None = Query(default=None, alias="hub.verify_token"),
+    hub_challenge: str | None = Query(default=None, alias="hub.challenge"),
+) -> str:
+    expected_token = getenv("WHATSAPP_VERIFY_TOKEN")
+    if not expected_token:
+        raise HTTPException(status_code=503, detail="WhatsApp verify token is not configured")
+    if hub_mode not in (None, "subscribe"):
+        raise HTTPException(status_code=400, detail="Unsupported WhatsApp handshake mode")
+    if hub_verify_token != expected_token:
+        raise HTTPException(status_code=403, detail="Invalid WhatsApp verify token")
+    if hub_challenge is None:
+        raise HTTPException(status_code=400, detail="Missing WhatsApp challenge")
+    return hub_challenge
 
 
 @router.post("/whatsapp", response_model=WhatsAppWebhookResponse)
