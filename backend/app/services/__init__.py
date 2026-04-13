@@ -19,8 +19,8 @@ __all__ = ["Settings", "get_settings", "DataScope", "apply_scope_query", "resolv
 class Settings(BaseSettings):
     groq_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
-    stripe_secret_key: Optional[str] = None
     openai_model: str = "gpt-4-turbo"
+    stripe_secret_key: Optional[str] = None
     supabase_url: Optional[str] = None
     supabase_service_role_key: Optional[str] = None
     organization_id: str = "1"
@@ -29,34 +29,6 @@ class Settings(BaseSettings):
     whatsapp_phone_number_id: Optional[str] = None
     whatsapp_verify_token: Optional[str] = None
     whatsapp_webhook_secret: Optional[str] = None
-    integration_frontend_base_url: str | None = None
-
-    garmin_oauth_authorize_url: str | None = None
-    garmin_oauth_token_url: str | None = None
-    garmin_oauth_client_id: str | None = None
-    garmin_oauth_client_secret: str | None = None
-    garmin_oauth_redirect_uri: str | None = None
-    garmin_oauth_scopes: str | None = None
-    garmin_oauth_webhook_secret: str | None = None
-
-    strava_oauth_authorize_url: str | None = None
-    strava_oauth_token_url: str | None = None
-    strava_oauth_client_id: str | None = None
-    strava_oauth_client_secret: str | None = None
-    strava_oauth_redirect_uri: str | None = None
-    strava_oauth_scopes: str | None = None
-    strava_oauth_webhook_secret: str | None = None
-
-    oura_oauth_authorize_url: str | None = None
-    oura_oauth_token_url: str | None = None
-    oura_oauth_client_id: str | None = None
-    oura_oauth_client_secret: str | None = None
-    oura_oauth_redirect_uri: str | None = None
-    oura_oauth_scopes: str | None = None
-    oura_oauth_webhook_secret: str | None = None
-
-    integration_sync_enabled: bool = False
-    integration_sync_poll_interval_seconds: int = 300
 
     model_config = SettingsConfigDict(
         case_sensitive=False,
