@@ -13,8 +13,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from app.core.security import verify_whatsapp_signature
 from app.core.config import get_settings
+from app.core.security import verify_whatsapp_signature
 from app.services.scope import DataScope, apply_scope_query, resolve_scope_from_env
 from app.services.whatsapp_service import WhatsAppRecipient, WhatsAppService
 
@@ -75,6 +75,13 @@ async def _read_payload(request: Request) -> dict[str, Any]:
     return flattened
 
 
+def _normalize_phone_number(phone_number: str) -> str:
+    digits = "".join(ch for ch in phone_number if ch.isdigit())
+    if phone_number.strip().startswith("+"):
+        return f"+{digits}"
+    return digits
+
+
 def _phone_variants(phone_number: str) -> list[str]:
     normalized = _normalize_phone_number(phone_number)
     variants: list[str] = []
@@ -106,13 +113,6 @@ def _sanitize_scope(scope: DataScope | None) -> DataScope | None:
     if organization_id is None and coach_id is None:
         return None
     return DataScope(organization_id=organization_id, coach_id=coach_id)
-
-
-def _normalize_phone_number(phone_number: str) -> str:
-    digits = "".join(ch for ch in phone_number if ch.isdigit())
-    if phone_number.strip().startswith("+"):
-        return f"+{digits}"
-    return digits
 
 
 def _extract_sender_phone(payload: dict[str, Any]) -> str | None:
@@ -193,16 +193,6 @@ def _extract_message_text(payload: dict[str, Any]) -> str | None:
     return None
 
 
-async def _query_rows(query: Any) -> list[dict[str, Any]]:
-    if hasattr(query, "execute"):
-        response = query.execute()
-    elif hasattr(query, "__await__"):
-        response = await query
-    else:
-        response = query
-    return _extract_rows(response)
-
-
 def _extract_rows(response: Any) -> list[dict[str, Any]]:
     if response is None:
         return []
@@ -226,34 +216,14 @@ def _extract_rows(response: Any) -> list[dict[str, Any]]:
     return []
 
 
-async def _find_athlete_by_phone(supabase_client: Any, phone_number: str, scope: DataScope | None) -> AthleteRecord | None:
-    variants = _phone_variants(phone_number)
-    table = supabase_client.table("athletes")
-    query_scope = _sanitize_scope(scope)
-
-    for value in variants:
-        query = table.select("*") if hasattr(table, "select") else table
-        if hasattr(query, "eq"):
-            query = query.eq("phone_number", value)
-        if query_scope is not None:
-            query = apply_scope_query(query, query_scope)
-        rows = await _query_rows(query)
-        if rows:
-            row = _match_row(rows, _normalize_phone_number(phone_number))
-            if row is not None:
-                return row
-
-    return None
-
-
-def _match_row(rows: list[dict[str, Any]], normalized_phone: str) -> AthleteRecord | None:
-    for row in rows:
-        value = row.get("phone_number")
-        if isinstance(value, str) and _normalize_phone_number(value) == normalized_phone:
-            return _build_athlete_record(row, matched_phone=value)
-    if rows:
-        return _build_athlete_record(rows[0], matched_phone=str(rows[0].get("phone_number") or ""))
-    return None
+async def _query_rows(query: Any) -> list[dict[str, Any]]:
+    if hasattr(query, "execute"):
+        response = query.execute()
+    elif hasattr(query, "__await__"):
+        response = await query
+    else:
+        response = query
+    return _extract_rows(response)
 
 
 def _coerce_int(value: Any) -> int | None:
@@ -315,6 +285,40 @@ def _build_athlete_record(row: dict[str, Any], *, matched_phone: str) -> Athlete
     )
 
 
+def _match_row(rows: list[dict[str, Any]], normalized_phone: str) -> AthleteRecord | None:
+    for row in rows:
+        value = row.get("phone_number")
+        if isinstance(value, str) and _normalize_phone_number(value) == normalized_phone:
+            return _build_athlete_record(row, matched_phone=value)
+    if rows:
+        return _build_athlete_record(rows[0], matched_phone=str(rows[0].get("phone_number") or ""))
+    return None
+
+
+async def _find_athlete_by_phone(
+    supabase_client: Any,
+    phone_number: str,
+    scope: DataScope | None,
+) -> AthleteRecord | None:
+    variants = _phone_variants(phone_number)
+    table = supabase_client.table("athletes")
+    query_scope = _sanitize_scope(scope)
+
+    for value in variants:
+        query = table.select("*") if hasattr(table, "select") else table
+        if hasattr(query, "eq"):
+            query = query.eq("phone_number", value)
+        if query_scope is not None:
+            query = apply_scope_query(query, query_scope)
+        rows = await _query_rows(query)
+        if rows:
+            row = _match_row(rows, _normalize_phone_number(phone_number))
+            if row is not None:
+                return row
+
+    return None
+
+
 async def _route_to_checkin_logic(request: Request, athlete: AthleteRecord, message_text: str) -> str:
     checkin_service = getattr(request.app.state, "checkin_service", None)
     if checkin_service is None:
@@ -357,8 +361,6 @@ async def _route_to_checkin_logic(request: Request, athlete: AthleteRecord, mess
     )
 
 
-
-
 def _resolve_scope(request: Request) -> DataScope:
     scope = getattr(request.app.state, "scope", None)
     if isinstance(scope, DataScope) and scope.is_configured():
@@ -375,7 +377,11 @@ def _resolve_scope(request: Request) -> DataScope:
         return candidate
 
     settings = get_settings()
-    return DataScope(organization_id=settings.organization_id or "1", coach_id=settings.coach_id or "1")
+    return DataScope(
+        organization_id=settings.organization_id or "1",
+        coach_id=settings.coach_id or "1",
+    )
+
 
 async def _resolve_supabase_client(request: Request) -> Any:
     supabase_client = getattr(request.app.state, "supabase_client", None)
@@ -403,7 +409,11 @@ async def _resolve_whatsapp_service(request: Request) -> Any:
     if whatsapp_client is None:
         raise HTTPException(status_code=503, detail="WhatsApp service is not configured")
 
-    return WhatsAppService(whatsapp_client=whatsapp_client, supabase_client=getattr(request.app.state, "supabase_client", None), scope=scope)
+    return WhatsAppService(
+        whatsapp_client=whatsapp_client,
+        supabase_client=getattr(request.app.state, "supabase_client", None),
+        scope=scope,
+    )
 
 
 @router.get("/whatsapp", response_class=PlainTextResponse)
@@ -430,6 +440,7 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     raw_body = await request.body()
     verify_whatsapp_signature(request, raw_body)
     payload = await _read_payload(request)
+
     inbound = WhatsAppWebhookPayload(
         sender_phone_number=_extract_sender_phone(payload),
         message_text=_extract_message_text(payload),
@@ -443,6 +454,7 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     supabase_client = await _resolve_supabase_client(request)
     scope = _resolve_scope(request)
     athlete = await _find_athlete_by_phone(supabase_client, inbound.sender_phone_number, scope)
+
     if athlete is None:
         return WhatsAppWebhookResponse(
             status="ignored",
@@ -454,6 +466,7 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     reply_body = await _route_to_checkin_logic(request, athlete, inbound.message_text)
     whatsapp_service = await _resolve_whatsapp_service(request)
     recipient_phone = athlete.phone_number or inbound.sender_phone_number
+
     recipient = WhatsAppRecipient(
         athlete_id=athlete.athlete_id,
         phone_number=recipient_phone,
