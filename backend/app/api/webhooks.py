@@ -11,6 +11,7 @@ from urllib.parse import parse_qs
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.core.security import verify_whatsapp_signature
 from app.services.scope import DataScope, apply_scope_query, resolve_scope_from_env
 from app.services.whatsapp_service import WhatsAppRecipient, WhatsAppService
 
@@ -387,6 +388,8 @@ async def _resolve_whatsapp_service(request: Request) -> Any:
 
 @router.post("/whatsapp", response_model=WhatsAppWebhookResponse)
 async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
+    raw_body = await request.body()
+    verify_whatsapp_signature(request, raw_body)
     payload = await _read_payload(request)
     inbound = WhatsAppWebhookPayload(
         sender_phone_number=_extract_sender_phone(payload),
