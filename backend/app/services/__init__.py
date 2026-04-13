@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from typing import Any
+from typing import Any, Optional
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -15,10 +15,10 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     supabase_url: str
     supabase_service_role_key: str
-    whatsapp_access_token: str | None = None
-    whatsapp_phone_number_id: str | None = None
+    whatsapp_access_token: Optional[str] = None
+    whatsapp_phone_number_id: Optional[str] = None
     whatsapp_graph_api_version: str = "v19.0"
-    whatsapp_verify_token: str | None = None
+    whatsapp_verify_token: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
