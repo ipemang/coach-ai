@@ -14,7 +14,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from app.core.security import verify_whatsapp_signature
-from app.services import get_settings
+from app.core.config import get_settings
 from app.services.scope import DataScope, apply_scope_query, resolve_scope_from_env
 from app.services.whatsapp_service import WhatsAppRecipient, WhatsAppService
 
