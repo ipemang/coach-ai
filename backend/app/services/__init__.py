@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from typing import Any
+from typing import Any, Optional
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -17,20 +17,19 @@ __all__ = ["Settings", "get_settings", "DataScope", "apply_scope_query", "resolv
 
 
 class Settings(BaseSettings):
-    openai_api_key: str | None = None
-    groq_api_key: str | None = None
-    stripe_secret_key: str | None = None
-    openai_model: str = "gpt-4o-mini"
-    supabase_url: str | None = None
-    supabase_service_role_key: str | None = None
-    organization_id: str | None = None
-    coach_id: str | None = None
+    groq_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    stripe_secret_key: Optional[str] = None
+    openai_model: str = "gpt-4-turbo"
+    supabase_url: Optional[str] = None
+    supabase_service_role_key: Optional[str] = None
+    organization_id: str = "1"
+    coach_id: str = "1"
+    whatsapp_access_token: Optional[str] = None
+    whatsapp_phone_number_id: Optional[str] = None
+    whatsapp_verify_token: Optional[str] = None
+    whatsapp_webhook_secret: Optional[str] = None
     integration_frontend_base_url: str | None = None
-
-    whatsapp_access_token: str | None = None
-    whatsapp_phone_number_id: str | None = None
-    whatsapp_verify_token: str | None = None
-    whatsapp_webhook_secret: str | None = None
 
     garmin_oauth_authorize_url: str | None = None
     garmin_oauth_token_url: str | None = None
@@ -59,7 +58,11 @@ class Settings(BaseSettings):
     integration_sync_enabled: bool = False
     integration_sync_poll_interval_seconds: int = 300
 
-    model_config = SettingsConfigDict(case_sensitive=False, env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        case_sensitive=False,
+        env_file=".env",
+        extra="ignore"
+    )
 
 
 @lru_cache
