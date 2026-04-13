@@ -18,6 +18,7 @@ from .api.methodology import router as methodology_router
 from .api.v1.router import router as v1_router
 from .api.webhooks import router as webhooks_router
 from .services import DataScope, get_settings
+from .services.whatsapp_client import WhatsAppGraphClient
 from .services.whatsapp_service import WhatsAppService
 
 
@@ -83,13 +84,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         supabase_client = create_client(settings.supabase_url, settings.supabase_service_role_key)
     app.state.supabase_client = supabase_client
 
-    whatsapp_client = WhatsAppGraphClient(settings.whatsapp_access_token, settings.whatsapp_phone_number_id)
+    whatsapp_client = WhatsAppGraphClient(
+        settings.whatsapp_access_token,
+        settings.whatsapp_phone_number_id,
+        graph_api_version=settings.whatsapp_graph_api_version,
+    )
     app.state.whatsapp_client = whatsapp_client
     app.state.whatsapp_service = WhatsAppService(
         whatsapp_client=whatsapp_client,
         supabase_client=supabase_client,
-        scope=scope,
     )
+    app.state.whatsapp_service.scope = scope
 
     yield
 
