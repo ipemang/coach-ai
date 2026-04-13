@@ -2,8 +2,9 @@
 
 This module keeps the Coach.AI biometric layer modular so provider-specific
 transport/auth logic can be swapped in later without changing the service
-contract. The normalized dataclasses below give us a single shape for both
-Rook and Garmin, while the service keeps the Supabase sync path isolated.
+contract. The normalized dataclasses below give us one shape for Garmin,
+Strava, and Oura payloads, while the service keeps the Supabase sync path
+isolated.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Literal, Protocol
 
-Provider = Literal["rook", "garmin"]
+Provider = Literal["garmin", "strava", "oura"]
 
 
 class SupabaseClientProtocol(Protocol):
@@ -24,7 +25,7 @@ class SupabaseClientProtocol(Protocol):
 
 
 class BiometricsProviderAdapter(Protocol):
-    """Provider adapter contract for Rook/Garmin integrations.
+    """Provider adapter contract for Garmin, Strava, and Oura integrations.
 
     Real adapters can live behind this interface and use OAuth tokens,
     service credentials, webhooks, or any future auth flow without requiring
@@ -36,28 +37,60 @@ class BiometricsProviderAdapter(Protocol):
     async def authenticate(self, context: AthleteAuthContext) -> ProviderAuthResult:
         ...
 
-    async def fetch_sleep_summary(
-        self,
-        athlete_id: str,
-        day: date,
-        auth: ProviderAuthResult,
-    ) -> dict[str, Any]:
-        ...
-
-    async def fetch_hrv_summary(
-        self,
-        athlete_id: str,
-        day: date,
-        auth: ProviderAuthResult,
-    ) -> dict[str, Any]:
-        ...
-
-    async def fetch_workout_summaries(
+    async def fetch_garmin_workout_summaries(
         self,
         athlete_id: str,
         day: date,
         auth: ProviderAuthResult,
     ) -> list[dict[str, Any]]:
+        ...
+
+    async def fetch_garmin_primary_biometrics(
+        self,
+        athlete_id: str,
+        day: date,
+        auth: ProviderAuthResult,
+    ) -> dict[str, Any] | None:
+        ...
+
+    async def fetch_strava_activity_sync(
+        self,
+        athlete_id: str,
+        day: date,
+        auth: ProviderAuthResult,
+    ) -> list[dict[str, Any]]:
+        ...
+
+    async def fetch_strava_segment_data(
+        self,
+        athlete_id: str,
+        day: date,
+        auth: ProviderAuthResult,
+    ) -> list[dict[str, Any]]:
+        ...
+
+    async def fetch_oura_readiness(
+        self,
+        athlete_id: str,
+        day: date,
+        auth: ProviderAuthResult,
+    ) -> dict[str, Any] | None:
+        ...
+
+    async def fetch_oura_hrv(
+        self,
+        athlete_id: str,
+        day: date,
+        auth: ProviderAuthResult,
+    ) -> dict[str, Any] | None:
+        ...
+
+    async def fetch_oura_sleep_quality(
+        self,
+        athlete_id: str,
+        day: date,
+        auth: ProviderAuthResult,
+    ) -> dict[str, Any] | None:
         ...
 
 
@@ -88,44 +121,8 @@ class ProviderAuthResult:
 
 
 @dataclass(slots=True)
-class NormalizedSleepSummary:
-    """Provider-normalized sleep data for a single day."""
-
-    athlete_id: str
-    provider: Provider
-    day: date
-    sleep_start_at: datetime | None = None
-    sleep_end_at: datetime | None = None
-    sleep_duration_minutes: int | None = None
-    sleep_score: float | None = None
-    sleep_efficiency_percent: float | None = None
-    deep_sleep_minutes: int | None = None
-    rem_sleep_minutes: int | None = None
-    light_sleep_minutes: int | None = None
-    awake_minutes: int | None = None
-    resting_hr_bpm: float | None = None
-    source_record_ids: list[str] = field(default_factory=list)
-    raw: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class NormalizedHrvSummary:
-    """Provider-normalized HRV snapshot for a single day."""
-
-    athlete_id: str
-    provider: Provider
-    day: date
-    hrv_ms: float | None = None
-    hrv_sdnn_ms: float | None = None
-    hrv_sample_count: int | None = None
-    resting_hr_bpm: float | None = None
-    source_record_ids: list[str] = field(default_factory=list)
-    raw: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class NormalizedWorkoutSummary:
-    """Provider-normalized workout summary for a single session."""
+class NormalizedGarminWorkoutSummary:
+    """Provider-normalized Garmin workout summary for a single session."""
 
     athlete_id: str
     provider: Provider
@@ -138,20 +135,120 @@ class NormalizedWorkoutSummary:
     distance_meters: float | None = None
     calories_burned: float | None = None
     avg_hr_bpm: float | None = None
+    total_ascent_meters: float | None = None
+    training_effect: float | None = None
     source_record_ids: list[str] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
-class DailyBiometricSummary:
-    """Normalized daily biometric bundle shared by Rook and Garmin."""
+class NormalizedGarminPrimaryBiometrics:
+    """Provider-normalized Garmin primary biometrics for a single day."""
 
     athlete_id: str
     provider: Provider
     day: date
-    sleep: NormalizedSleepSummary | None = None
-    hrv: NormalizedHrvSummary | None = None
-    workouts: list[NormalizedWorkoutSummary] = field(default_factory=list)
+    resting_hr_bpm: float | None = None
+    hrv_ms: float | None = None
+    stress_score: float | None = None
+    body_battery: float | None = None
+    training_readiness: float | None = None
+    sleep_score: float | None = None
+    source_record_ids: list[str] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class NormalizedStravaActivitySync:
+    """Provider-normalized Strava activity sync payload for a single activity."""
+
+    athlete_id: str
+    provider: Provider
+    day: date
+    activity_id: str | None = None
+    activity_type: str | None = None
+    name: str | None = None
+    started_at: datetime | None = None
+    moving_time_minutes: int | None = None
+    elapsed_time_minutes: int | None = None
+    distance_meters: float | None = None
+    total_elevation_gain_meters: float | None = None
+    source_record_ids: list[str] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class NormalizedStravaSegmentData:
+    """Provider-normalized Strava segment data for a single segment result."""
+
+    athlete_id: str
+    provider: Provider
+    day: date
+    segment_id: str | None = None
+    activity_id: str | None = None
+    segment_name: str | None = None
+    elapsed_time_seconds: float | None = None
+    moving_time_seconds: float | None = None
+    effort_count: int | None = None
+    kom_flag: bool | None = None
+    source_record_ids: list[str] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class NormalizedOuraReadiness:
+    """Provider-normalized Oura readiness payload for a single day."""
+
+    athlete_id: str
+    provider: Provider
+    day: date
+    readiness_score: float | None = None
+    temperature_deviation: float | None = None
+    recovery_index: float | None = None
+    source_record_ids: list[str] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class NormalizedOuraHrv:
+    """Provider-normalized Oura HRV payload for a single day."""
+
+    athlete_id: str
+    provider: Provider
+    day: date
+    hrv_ms: float | None = None
+    hrv_sdnn_ms: float | None = None
+    hrv_sample_count: int | None = None
+    source_record_ids: list[str] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class NormalizedOuraSleepQuality:
+    """Provider-normalized Oura sleep quality payload for a single night."""
+
+    athlete_id: str
+    provider: Provider
+    day: date
+    sleep_score: float | None = None
+    sleep_efficiency_percent: float | None = None
+    sleep_duration_minutes: int | None = None
+    deep_sleep_minutes: int | None = None
+    rem_sleep_minutes: int | None = None
+    awake_minutes: int | None = None
+    resting_hr_bpm: float | None = None
+    source_record_ids: list[str] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class BiometricProviderSummary:
+    """Normalized provider bundle shared by Garmin, Strava, and Oura."""
+
+    athlete_id: str
+    provider: Provider
+    day: date
+    sections: dict[str, Any] = field(default_factory=dict)
     metrics: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -160,12 +257,8 @@ class DailyBiometricSummary:
         """Collect source record ids across all normalized provider payloads."""
 
         source_ids: list[str] = []
-        if self.sleep:
-            source_ids.extend(self.sleep.source_record_ids)
-        if self.hrv:
-            source_ids.extend(self.hrv.source_record_ids)
-        for workout in self.workouts:
-            source_ids.extend(workout.source_record_ids)
+        for value in self.sections.values():
+            source_ids.extend(_collect_source_record_ids(value))
         return source_ids
 
     def to_payload(self) -> dict[str, Any]:
@@ -175,9 +268,7 @@ class DailyBiometricSummary:
             "athlete_id": self.athlete_id,
             "provider": self.provider,
             "source_day": self.day.isoformat(),
-            "sleep": _json_safe(self.sleep),
-            "hrv": _json_safe(self.hrv),
-            "workouts": _json_safe(self.workouts),
+            "sections": _json_safe(self.sections),
             "metrics": _json_safe(self.metrics),
             "raw": _json_safe(self.raw),
             "source_record_ids": self.source_record_ids,
@@ -235,6 +326,24 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def _collect_source_record_ids(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if is_dataclass(value):
+        return list(getattr(value, "source_record_ids", []) or [])
+    if isinstance(value, dict):
+        source_ids = list(value.get("source_record_ids") or [])
+        for nested_value in value.values():
+            source_ids.extend(_collect_source_record_ids(nested_value))
+        return source_ids
+    if isinstance(value, (list, tuple, set)):
+        source_ids: list[str] = []
+        for item in value:
+            source_ids.extend(_collect_source_record_ids(item))
+        return source_ids
+    return []
+
+
 class BiometricsService:
     """Orchestrates provider auth, fetch, normalization, and persistence."""
 
@@ -265,91 +374,214 @@ class BiometricsService:
         self,
         context: AthleteAuthContext,
     ) -> ProviderAuthResult:
-        """Authenticate a specific athlete against Rook or Garmin."""
+        """Authenticate a specific athlete against Garmin, Strava, or Oura."""
 
         adapter = self._get_provider_adapter(context.provider)
         return await adapter.authenticate(context)
 
-    async def fetch_daily_sleep_summary(
+    async def fetch_garmin_workout_summaries(
         self,
         athlete_id: str,
-        provider: Provider,
-        day: date,
-        auth: ProviderAuthResult,
-    ) -> dict[str, Any]:
-        """Fetch daily sleep data from the specified provider."""
-
-        adapter = self._get_provider_adapter(provider)
-        return await adapter.fetch_sleep_summary(athlete_id, day, auth)
-
-    async def fetch_daily_hrv_summary(
-        self,
-        athlete_id: str,
-        provider: Provider,
-        day: date,
-        auth: ProviderAuthResult,
-    ) -> dict[str, Any]:
-        """Fetch daily HRV data from the specified provider."""
-
-        adapter = self._get_provider_adapter(provider)
-        return await adapter.fetch_hrv_summary(athlete_id, day, auth)
-
-    async def fetch_daily_workout_summaries(
-        self,
-        athlete_id: str,
-        provider: Provider,
         day: date,
         auth: ProviderAuthResult,
     ) -> list[dict[str, Any]]:
-        """Fetch daily workout summaries from the specified provider."""
+        """Fetch Garmin workout summaries for the requested day."""
 
-        adapter = self._get_provider_adapter(provider)
-        return await adapter.fetch_workout_summaries(athlete_id, day, auth)
+        adapter = self._get_provider_adapter("garmin")
+        return await adapter.fetch_garmin_workout_summaries(athlete_id, day, auth)
 
-    def normalize_daily_biometrics(
+    async def fetch_garmin_primary_biometrics(
         self,
         athlete_id: str,
-        provider: Provider,
         day: date,
-        sleep_summary: dict[str, Any] | None,
-        hrv_summary: dict[str, Any] | None,
+        auth: ProviderAuthResult,
+    ) -> dict[str, Any] | None:
+        """Fetch Garmin primary biometrics for the requested day."""
+
+        adapter = self._get_provider_adapter("garmin")
+        return await adapter.fetch_garmin_primary_biometrics(athlete_id, day, auth)
+
+    async def fetch_strava_activity_sync(
+        self,
+        athlete_id: str,
+        day: date,
+        auth: ProviderAuthResult,
+    ) -> list[dict[str, Any]]:
+        """Fetch Strava activity sync payloads for the requested day."""
+
+        adapter = self._get_provider_adapter("strava")
+        return await adapter.fetch_strava_activity_sync(athlete_id, day, auth)
+
+    async def fetch_strava_segment_data(
+        self,
+        athlete_id: str,
+        day: date,
+        auth: ProviderAuthResult,
+    ) -> list[dict[str, Any]]:
+        """Fetch Strava segment data for the requested day."""
+
+        adapter = self._get_provider_adapter("strava")
+        return await adapter.fetch_strava_segment_data(athlete_id, day, auth)
+
+    async def fetch_oura_readiness(
+        self,
+        athlete_id: str,
+        day: date,
+        auth: ProviderAuthResult,
+    ) -> dict[str, Any] | None:
+        """Fetch Oura readiness payload for the requested day."""
+
+        adapter = self._get_provider_adapter("oura")
+        return await adapter.fetch_oura_readiness(athlete_id, day, auth)
+
+    async def fetch_oura_hrv(
+        self,
+        athlete_id: str,
+        day: date,
+        auth: ProviderAuthResult,
+    ) -> dict[str, Any] | None:
+        """Fetch Oura HRV payload for the requested day."""
+
+        adapter = self._get_provider_adapter("oura")
+        return await adapter.fetch_oura_hrv(athlete_id, day, auth)
+
+    async def fetch_oura_sleep_quality(
+        self,
+        athlete_id: str,
+        day: date,
+        auth: ProviderAuthResult,
+    ) -> dict[str, Any] | None:
+        """Fetch Oura sleep quality payload for the requested day."""
+
+        adapter = self._get_provider_adapter("oura")
+        return await adapter.fetch_oura_sleep_quality(athlete_id, day, auth)
+
+    def normalize_garmin_payload(
+        self,
+        athlete_id: str,
+        day: date,
         workout_summaries: list[dict[str, Any]] | None,
-    ) -> DailyBiometricSummary:
-        """Normalize provider data into a shared daily biometric bundle."""
+        primary_biometrics: dict[str, Any] | None,
+    ) -> BiometricProviderSummary:
+        """Normalize Garmin workout summaries and primary biometrics."""
 
         workout_summaries = workout_summaries or []
-
-        sleep = self._normalize_sleep_summary(athlete_id, provider, day, sleep_summary)
-        hrv = self._normalize_hrv_summary(athlete_id, provider, day, hrv_summary)
         workouts = [
-            self._normalize_workout_summary(athlete_id, provider, day, item)
+            self._normalize_garmin_workout_summary(athlete_id, day, item)
             for item in workout_summaries
+        ]
+        biometrics = self._normalize_garmin_primary_biometrics(
+            athlete_id,
+            day,
+            primary_biometrics,
+        )
+
+        metrics = {
+            "workout_count": len(workouts),
+            "workout_minutes": sum(int(item.duration_minutes or 0) for item in workouts),
+            "distance_meters": sum(float(item.distance_meters or 0.0) for item in workouts),
+            "resting_hr_bpm": biometrics.resting_hr_bpm if biometrics else None,
+            "hrv_ms": biometrics.hrv_ms if biometrics else None,
+            "training_readiness": biometrics.training_readiness if biometrics else None,
+            "sleep_score": biometrics.sleep_score if biometrics else None,
+        }
+
+        return BiometricProviderSummary(
+            athlete_id=athlete_id,
+            provider="garmin",
+            day=day,
+            sections={
+                "workout_summaries": workouts,
+                "primary_biometrics": biometrics,
+            },
+            metrics=metrics,
+            raw={
+                "workout_summaries": workout_summaries,
+                "primary_biometrics": primary_biometrics or {},
+            },
+        )
+
+    def normalize_strava_payload(
+        self,
+        athlete_id: str,
+        day: date,
+        activity_sync: list[dict[str, Any]] | None,
+        segment_data: list[dict[str, Any]] | None,
+    ) -> BiometricProviderSummary:
+        """Normalize Strava activity sync and segment data."""
+
+        activity_sync = activity_sync or []
+        segment_data = segment_data or []
+        activities = [
+            self._normalize_strava_activity_sync(athlete_id, day, item)
+            for item in activity_sync
+        ]
+        segments = [
+            self._normalize_strava_segment_data(athlete_id, day, item)
+            for item in segment_data
         ]
 
         metrics = {
-            "sleep_duration_minutes": sleep.sleep_duration_minutes if sleep else None,
-            "sleep_score": sleep.sleep_score if sleep else None,
-            "hrv_ms": hrv.hrv_ms if hrv else None,
-            "workout_count": len(workouts),
-            "workout_minutes": sum(int(item.duration_minutes or 0) for item in workouts),
-            "resting_hr_bpm": (
-                (sleep.resting_hr_bpm if sleep else None)
-                or (hrv.resting_hr_bpm if hrv else None)
-            ),
+            "activity_count": len(activities),
+            "activity_minutes": sum(int(item.moving_time_minutes or 0) for item in activities),
+            "distance_meters": sum(float(item.distance_meters or 0.0) for item in activities),
+            "segment_count": len(segments),
+            "kom_count": sum(1 for item in segments if item.kom_flag),
         }
 
-        return DailyBiometricSummary(
+        return BiometricProviderSummary(
             athlete_id=athlete_id,
-            provider=provider,
+            provider="strava",
             day=day,
-            sleep=sleep,
-            hrv=hrv,
-            workouts=workouts,
+            sections={
+                "activity_sync": activities,
+                "segment_data": segments,
+            },
             metrics=metrics,
             raw={
-                "sleep": sleep_summary or {},
-                "hrv": hrv_summary or {},
-                "workouts": workout_summaries,
+                "activity_sync": activity_sync,
+                "segment_data": segment_data,
+            },
+        )
+
+    def normalize_oura_payload(
+        self,
+        athlete_id: str,
+        day: date,
+        readiness: dict[str, Any] | None,
+        hrv: dict[str, Any] | None,
+        sleep_quality: dict[str, Any] | None,
+    ) -> BiometricProviderSummary:
+        """Normalize Oura readiness, HRV, and sleep quality payloads."""
+
+        readiness_summary = self._normalize_oura_readiness(athlete_id, day, readiness)
+        hrv_summary = self._normalize_oura_hrv(athlete_id, day, hrv)
+        sleep_summary = self._normalize_oura_sleep_quality(athlete_id, day, sleep_quality)
+
+        metrics = {
+            "readiness_score": readiness_summary.readiness_score if readiness_summary else None,
+            "hrv_ms": hrv_summary.hrv_ms if hrv_summary else None,
+            "sleep_score": sleep_summary.sleep_score if sleep_summary else None,
+            "sleep_duration_minutes": (
+                sleep_summary.sleep_duration_minutes if sleep_summary else None
+            ),
+            "resting_hr_bpm": sleep_summary.resting_hr_bpm if sleep_summary else None,
+        }
+
+        return BiometricProviderSummary(
+            athlete_id=athlete_id,
+            provider="oura",
+            day=day,
+            sections={
+                "readiness": readiness_summary,
+                "hrv": hrv_summary,
+                "sleep_quality": sleep_summary,
+            },
+            metrics=metrics,
+            raw={
+                "readiness": readiness or {},
+                "hrv": hrv or {},
+                "sleep_quality": sleep_quality or {},
             },
         )
 
@@ -369,33 +601,65 @@ class BiometricsService:
         """End-to-end flow for one athlete/day."""
 
         auth = await self.authenticate_athlete(context)
-        sleep_summary = await self.fetch_daily_sleep_summary(
-            context.athlete_id,
-            context.provider,
-            day,
-            auth,
-        )
-        hrv_summary = await self.fetch_daily_hrv_summary(
-            context.athlete_id,
-            context.provider,
-            day,
-            auth,
-        )
-        workout_summaries = await self.fetch_daily_workout_summaries(
-            context.athlete_id,
-            context.provider,
-            day,
-            auth,
-        )
 
-        summary = self.normalize_daily_biometrics(
-            athlete_id=context.athlete_id,
-            provider=context.provider,
-            day=day,
-            sleep_summary=sleep_summary,
-            hrv_summary=hrv_summary,
-            workout_summaries=workout_summaries,
-        )
+        if context.provider == "garmin":
+            workout_summaries = await self.fetch_garmin_workout_summaries(
+                context.athlete_id,
+                day,
+                auth,
+            )
+            primary_biometrics = await self.fetch_garmin_primary_biometrics(
+                context.athlete_id,
+                day,
+                auth,
+            )
+            summary = self.normalize_garmin_payload(
+                athlete_id=context.athlete_id,
+                day=day,
+                workout_summaries=workout_summaries,
+                primary_biometrics=primary_biometrics,
+            )
+        elif context.provider == "strava":
+            activity_sync = await self.fetch_strava_activity_sync(
+                context.athlete_id,
+                day,
+                auth,
+            )
+            segment_data = await self.fetch_strava_segment_data(
+                context.athlete_id,
+                day,
+                auth,
+            )
+            summary = self.normalize_strava_payload(
+                athlete_id=context.athlete_id,
+                day=day,
+                activity_sync=activity_sync,
+                segment_data=segment_data,
+            )
+        else:
+            readiness = await self.fetch_oura_readiness(
+                context.athlete_id,
+                day,
+                auth,
+            )
+            hrv = await self.fetch_oura_hrv(
+                context.athlete_id,
+                day,
+                auth,
+            )
+            sleep_quality = await self.fetch_oura_sleep_quality(
+                context.athlete_id,
+                day,
+                auth,
+            )
+            summary = self.normalize_oura_payload(
+                athlete_id=context.athlete_id,
+                day=day,
+                readiness=readiness,
+                hrv=hrv,
+                sleep_quality=sleep_quality,
+            )
+
         state = summary.to_internal_state()
         await self.push_update_to_memory_states(state)
         return state
@@ -425,66 +689,15 @@ class BiometricsService:
             result = await result
         return result
 
-    def _normalize_sleep_summary(
+    def _normalize_garmin_workout_summary(
         self,
         athlete_id: str,
-        provider: Provider,
-        day: date,
-        summary: dict[str, Any] | None,
-    ) -> NormalizedSleepSummary | None:
-        if not summary:
-            return None
-
-        return NormalizedSleepSummary(
-            athlete_id=athlete_id,
-            provider=provider,
-            day=day,
-            sleep_start_at=summary.get("sleep_start_at"),
-            sleep_end_at=summary.get("sleep_end_at"),
-            sleep_duration_minutes=summary.get("sleep_duration_minutes"),
-            sleep_score=summary.get("sleep_score"),
-            sleep_efficiency_percent=summary.get("sleep_efficiency_percent"),
-            deep_sleep_minutes=summary.get("deep_sleep_minutes"),
-            rem_sleep_minutes=summary.get("rem_sleep_minutes"),
-            light_sleep_minutes=summary.get("light_sleep_minutes"),
-            awake_minutes=summary.get("awake_minutes"),
-            resting_hr_bpm=summary.get("resting_hr_bpm"),
-            source_record_ids=list(summary.get("source_record_ids") or []),
-            raw=dict(summary),
-        )
-
-    def _normalize_hrv_summary(
-        self,
-        athlete_id: str,
-        provider: Provider,
-        day: date,
-        summary: dict[str, Any] | None,
-    ) -> NormalizedHrvSummary | None:
-        if not summary:
-            return None
-
-        return NormalizedHrvSummary(
-            athlete_id=athlete_id,
-            provider=provider,
-            day=day,
-            hrv_ms=summary.get("hrv_ms"),
-            hrv_sdnn_ms=summary.get("hrv_sdnn_ms"),
-            hrv_sample_count=summary.get("hrv_sample_count"),
-            resting_hr_bpm=summary.get("resting_hr_bpm"),
-            source_record_ids=list(summary.get("source_record_ids") or []),
-            raw=dict(summary),
-        )
-
-    def _normalize_workout_summary(
-        self,
-        athlete_id: str,
-        provider: Provider,
         day: date,
         summary: dict[str, Any],
-    ) -> NormalizedWorkoutSummary:
-        return NormalizedWorkoutSummary(
+    ) -> NormalizedGarminWorkoutSummary:
+        return NormalizedGarminWorkoutSummary(
             athlete_id=athlete_id,
-            provider=provider,
+            provider="garmin",
             day=day,
             workout_id=summary.get("workout_id"),
             activity_type=summary.get("activity_type"),
@@ -494,6 +707,138 @@ class BiometricsService:
             distance_meters=summary.get("distance_meters"),
             calories_burned=summary.get("calories_burned"),
             avg_hr_bpm=summary.get("avg_hr_bpm"),
+            total_ascent_meters=summary.get("total_ascent_meters"),
+            training_effect=summary.get("training_effect"),
+            source_record_ids=list(summary.get("source_record_ids") or []),
+            raw=dict(summary),
+        )
+
+    def _normalize_garmin_primary_biometrics(
+        self,
+        athlete_id: str,
+        day: date,
+        summary: dict[str, Any] | None,
+    ) -> NormalizedGarminPrimaryBiometrics | None:
+        if not summary:
+            return None
+
+        return NormalizedGarminPrimaryBiometrics(
+            athlete_id=athlete_id,
+            provider="garmin",
+            day=day,
+            resting_hr_bpm=summary.get("resting_hr_bpm"),
+            hrv_ms=summary.get("hrv_ms"),
+            stress_score=summary.get("stress_score"),
+            body_battery=summary.get("body_battery"),
+            training_readiness=summary.get("training_readiness"),
+            sleep_score=summary.get("sleep_score"),
+            source_record_ids=list(summary.get("source_record_ids") or []),
+            raw=dict(summary),
+        )
+
+    def _normalize_strava_activity_sync(
+        self,
+        athlete_id: str,
+        day: date,
+        summary: dict[str, Any],
+    ) -> NormalizedStravaActivitySync:
+        return NormalizedStravaActivitySync(
+            athlete_id=athlete_id,
+            provider="strava",
+            day=day,
+            activity_id=summary.get("activity_id"),
+            activity_type=summary.get("activity_type"),
+            name=summary.get("name"),
+            started_at=summary.get("started_at"),
+            moving_time_minutes=summary.get("moving_time_minutes"),
+            elapsed_time_minutes=summary.get("elapsed_time_minutes"),
+            distance_meters=summary.get("distance_meters"),
+            total_elevation_gain_meters=summary.get("total_elevation_gain_meters"),
+            source_record_ids=list(summary.get("source_record_ids") or []),
+            raw=dict(summary),
+        )
+
+    def _normalize_strava_segment_data(
+        self,
+        athlete_id: str,
+        day: date,
+        summary: dict[str, Any],
+    ) -> NormalizedStravaSegmentData:
+        return NormalizedStravaSegmentData(
+            athlete_id=athlete_id,
+            provider="strava",
+            day=day,
+            segment_id=summary.get("segment_id"),
+            activity_id=summary.get("activity_id"),
+            segment_name=summary.get("segment_name"),
+            elapsed_time_seconds=summary.get("elapsed_time_seconds"),
+            moving_time_seconds=summary.get("moving_time_seconds"),
+            effort_count=summary.get("effort_count"),
+            kom_flag=summary.get("kom_flag"),
+            source_record_ids=list(summary.get("source_record_ids") or []),
+            raw=dict(summary),
+        )
+
+    def _normalize_oura_readiness(
+        self,
+        athlete_id: str,
+        day: date,
+        summary: dict[str, Any] | None,
+    ) -> NormalizedOuraReadiness | None:
+        if not summary:
+            return None
+
+        return NormalizedOuraReadiness(
+            athlete_id=athlete_id,
+            provider="oura",
+            day=day,
+            readiness_score=summary.get("readiness_score"),
+            temperature_deviation=summary.get("temperature_deviation"),
+            recovery_index=summary.get("recovery_index"),
+            source_record_ids=list(summary.get("source_record_ids") or []),
+            raw=dict(summary),
+        )
+
+    def _normalize_oura_hrv(
+        self,
+        athlete_id: str,
+        day: date,
+        summary: dict[str, Any] | None,
+    ) -> NormalizedOuraHrv | None:
+        if not summary:
+            return None
+
+        return NormalizedOuraHrv(
+            athlete_id=athlete_id,
+            provider="oura",
+            day=day,
+            hrv_ms=summary.get("hrv_ms"),
+            hrv_sdnn_ms=summary.get("hrv_sdnn_ms"),
+            hrv_sample_count=summary.get("hrv_sample_count"),
+            source_record_ids=list(summary.get("source_record_ids") or []),
+            raw=dict(summary),
+        )
+
+    def _normalize_oura_sleep_quality(
+        self,
+        athlete_id: str,
+        day: date,
+        summary: dict[str, Any] | None,
+    ) -> NormalizedOuraSleepQuality | None:
+        if not summary:
+            return None
+
+        return NormalizedOuraSleepQuality(
+            athlete_id=athlete_id,
+            provider="oura",
+            day=day,
+            sleep_score=summary.get("sleep_score"),
+            sleep_efficiency_percent=summary.get("sleep_efficiency_percent"),
+            sleep_duration_minutes=summary.get("sleep_duration_minutes"),
+            deep_sleep_minutes=summary.get("deep_sleep_minutes"),
+            rem_sleep_minutes=summary.get("rem_sleep_minutes"),
+            awake_minutes=summary.get("awake_minutes"),
+            resting_hr_bpm=summary.get("resting_hr_bpm"),
             source_record_ids=list(summary.get("source_record_ids") or []),
             raw=dict(summary),
         )
@@ -501,13 +846,17 @@ class BiometricsService:
 
 __all__ = [
     "AthleteAuthContext",
+    "BiometricProviderSummary",
     "BiometricsProviderAdapter",
     "BiometricsService",
-    "DailyBiometricSummary",
     "InternalBiometricState",
-    "NormalizedHrvSummary",
-    "NormalizedSleepSummary",
-    "NormalizedWorkoutSummary",
+    "NormalizedGarminPrimaryBiometrics",
+    "NormalizedGarminWorkoutSummary",
+    "NormalizedOuraHrv",
+    "NormalizedOuraReadiness",
+    "NormalizedOuraSleepQuality",
+    "NormalizedStravaActivitySync",
+    "NormalizedStravaSegmentData",
     "ProviderAuthResult",
     "Provider",
 ]
