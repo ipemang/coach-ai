@@ -12,13 +12,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     openai_api_key: str | None = None
+    groq_api_key: str | None = None
+    stripe_secret_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     supabase_url: str | None = None
     supabase_service_role_key: str | None = None
+    organization_id: str | None = None
+    coach_id: str | None = None
+    whatsapp_access_token: str | None = None
+    whatsapp_phone_number_id: str | None = None
     whatsapp_verify_token: str | None = None
     whatsapp_webhook_secret: str | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", case_sensitive=False)
+    model_config = SettingsConfigDict(case_sensitive=False, env_file=".env", extra="ignore")
 
 
 @lru_cache

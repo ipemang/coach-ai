@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     integration_sync_enabled: bool = False
     integration_sync_poll_interval_seconds: int = 300
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", case_sensitive=False)
+    model_config = SettingsConfigDict(case_sensitive=False, env_file=".env", extra="ignore")
 
 
 @lru_cache
