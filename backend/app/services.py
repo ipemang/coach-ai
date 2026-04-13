@@ -13,12 +13,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
-    supabase_url: str
-    supabase_service_role_key: str
+    supabase_url: str | None = None
+    supabase_service_role_key: str | None = None
     whatsapp_verify_token: str | None = None
     whatsapp_webhook_secret: str | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", case_sensitive=False)
 
 
 @lru_cache
@@ -122,6 +122,8 @@ def extract_methodology_from_transcript(transcript: str, settings: Settings | No
 
     if not resolved_settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured")
+    if not resolved_settings.supabase_url or not resolved_settings.supabase_service_role_key:
+        raise RuntimeError("Supabase settings are not configured")
 
     response = _request_json(
         "https://api.openai.com/v1/chat/completions",
@@ -164,6 +166,8 @@ def update_coach_methodology(
     settings: Settings | None = None,
 ) -> dict[str, Any] | None:
     resolved_settings = settings or get_settings()
+    if not resolved_settings.supabase_url or not resolved_settings.supabase_service_role_key:
+        raise RuntimeError("Supabase settings are not configured")
     coach_id_filter = quote(coach_id, safe="")
     url = f"{resolved_settings.supabase_url.rstrip('/')}/rest/v1/coaches?coach_id=eq.{coach_id_filter}"
 
