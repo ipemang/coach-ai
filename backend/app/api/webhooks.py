@@ -25,6 +25,9 @@ class AthleteRecord:
     display_name: str | None = None
     organization_id: str | None = None
     coach_id: str | None = None
+    age_years: int | None = None
+    training_age_years: float | None = None
+    biological_baseline: dict[str, Any] = field(default_factory=dict)
     missing_fields: list[str] = field(default_factory=list)
 
 
@@ -233,6 +236,24 @@ def _match_row(rows: list[dict[str, Any]], normalized_phone: str) -> AthleteReco
     return None
 
 
+def _coerce_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _build_athlete_record(row: dict[str, Any], *, matched_phone: str) -> AthleteRecord:
     missing_fields: list[str] = []
     athlete_id = str(row.get("id") or row.get("athlete_id") or "")
@@ -241,6 +262,11 @@ def _build_athlete_record(row: dict[str, Any], *, matched_phone: str) -> Athlete
     display_name = row.get("display_name") or row.get("name")
     organization_id = row.get("organization_id") or row.get("org_id")
     coach_id = row.get("coach_id")
+    age_years = row.get("age_years")
+    training_age_years = row.get("training_age_years")
+    biological_baseline = row.get("biological_baseline")
+    if not isinstance(biological_baseline, dict):
+        biological_baseline = {}
 
     if not athlete_id:
         missing_fields.append("athlete_id")
@@ -262,6 +288,9 @@ def _build_athlete_record(row: dict[str, Any], *, matched_phone: str) -> Athlete
         display_name=display_name,
         organization_id=str(organization_id) if organization_id is not None else None,
         coach_id=str(coach_id) if coach_id is not None else None,
+        age_years=_coerce_int(age_years),
+        training_age_years=_coerce_float(training_age_years),
+        biological_baseline=biological_baseline,
         missing_fields=missing_fields,
     )
 

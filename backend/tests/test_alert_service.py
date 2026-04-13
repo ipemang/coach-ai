@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from app.agents.check_in import AthleteCheckIn, CheckInRecommendation
+from app.agents.check_in import AthleteCheckIn, CheckInRecommendation, assess_check_in
 from app.services.alert_service import AlertService
 
 
@@ -178,3 +178,42 @@ def test_run_scans_latest_check_in_row_per_athlete() -> None:
     assert len(result.findings) == 1
     assert result.findings[0].athlete_id == "athlete-456"
     assert tables["coach_alerts"].inserted[0]["athlete_id"] == "athlete-456"
+
+
+
+def test_assess_check_in_uses_biological_baseline_for_recovery_expectations() -> None:
+    check_in = AthleteCheckIn(
+        athlete_id="athlete-123",
+        readiness=77,
+        hrv="normal",
+        sleep_hours=7.5,
+        sleep_quality="good",
+        soreness=2,
+        biological_baseline={
+            "age_years": 46,
+            "training_age_years": 1,
+            "blood_work": {
+                "markers": {"ferritin": "low"},
+                "notes": ["Recent labs suggest constrained iron stores"],
+            },
+            "dna": {
+                "markers": {"recovery_profile": "slow"},
+                "notes": ["Genetic panel flags slower recovery response"],
+            },
+        },
+    )
+
+    import asyncio
+
+    recommendation = asyncio.run(
+        assess_check_in(
+            check_in,
+            observed_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
+        )
+    )
+
+    assert recommendation.recommended_action == "recovery"
+    assert recommendation.baseline_adjustments
+    assert recommendation.recovery_expectation is not None
+    assert recommendation.fatigue_expectation is not None
+    assert "biological baseline" in recommendation.rationale.lower()
