@@ -121,7 +121,7 @@ class AthleteMemorySearchService:
         candidate_limit: int,
     ) -> list[dict[str, Any]]:
         scope = require_scope(self.scope, context="Athlete memory search")
-        table = await self.supabase_client.table(self.memory_states_table)
+        table = self.supabase_client.table(self.memory_states_table)
         query = table.select("*") if hasattr(table, "select") else table
         query = apply_scope_query(query, scope)
 
@@ -149,10 +149,10 @@ class AthleteMemorySearchService:
 
         rows = await _query_rows(query)
         if not rows and hasattr(table, "select"):
-            fresh_table = await self.supabase_client.table(self.memory_states_table)
+            fresh_table = self.supabase_client.table(self.memory_states_table)
             rows = await _query_rows(apply_scope_query(fresh_table.select("*"), scope))
         if not rows and hasattr(table, "select"):
-            fresh_table = await self.supabase_client.table(self.memory_states_table)
+            fresh_table = self.supabase_client.table(self.memory_states_table)
             rows = await _query_rows(fresh_table.select("*"))
 
         filtered: list[dict[str, Any]] = []

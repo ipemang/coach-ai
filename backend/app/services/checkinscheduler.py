@@ -138,7 +138,7 @@ class CheckinScheduler:
         """Load athlete scheduling rows from Supabase and normalize them."""
 
         scope = require_scope(self.scope, context="Check-in scheduler")
-        table = await self.supabase_client.table(self.config.athletes_table)
+        table = self.supabase_client.table(self.config.athletes_table)
         query = table.select("*") if hasattr(table, "select") else table
         query = apply_scope_query(query, scope)
         if hasattr(query, "eq"):
@@ -185,7 +185,7 @@ class CheckinScheduler:
         """Create or reuse a queued log row to prevent duplicate sends."""
 
         scope = require_scope(self.scope, context="Check-in scheduler send log")
-        table = await self.supabase_client.table(self.config.send_log_table)
+        table = self.supabase_client.table(self.config.send_log_table)
         existing = None
         if hasattr(table, "select") and hasattr(table, "eq"):
             query = apply_scope_query(table.select("*").eq("dedupe_key", send_log.dedupe_key), scope)

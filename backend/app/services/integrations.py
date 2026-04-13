@@ -535,7 +535,7 @@ class IntegrationService:
     async def _resolve_table(self, table_name: str) -> Any:
         if self.supabase_client is None:
             raise RuntimeError("Supabase client is not configured")
-        table = await self.supabase_client.table(table_name)
+        table = self.supabase_client.table(table_name)
         if inspect.isawaitable(table):
             table = await table
         return table

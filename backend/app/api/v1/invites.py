@@ -170,7 +170,7 @@ def _verify_token(token: str) -> dict[str, Any]:
 
 
 async def _find_coach_record(supabase_client: Any, coach_id: str, organization_id: str) -> dict[str, Any] | None:
-    table = await supabase_client.table("coaches")
+    table = supabase_client.table("coaches")
     query = table.select("*") if hasattr(table, "select") else table
     if hasattr(query, "eq"):
         query = query.eq("coach_id", coach_id)
@@ -190,7 +190,7 @@ async def _find_coach_record(supabase_client: Any, coach_id: str, organization_i
 
 
 async def _find_athlete_record(supabase_client: Any, athlete_id: str) -> dict[str, Any] | None:
-    table = await supabase_client.table("athletes")
+    table = supabase_client.table("athletes")
 
     if hasattr(table, "select") and hasattr(table, "eq"):
         for column in ("id", "athlete_id"):
@@ -208,7 +208,7 @@ async def _find_athlete_record(supabase_client: Any, athlete_id: str) -> dict[st
 
 
 async def _update_athlete_roster_membership(supabase_client: Any, athlete_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    table = await supabase_client.table("athletes")
+    table = supabase_client.table("athletes")
     if hasattr(table, "update") and hasattr(table, "eq"):
         updater = table.update(payload).eq("id", athlete_id)
         if hasattr(updater, "execute"):

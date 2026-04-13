@@ -204,7 +204,7 @@ def _extract_rows(response: Any) -> list[dict[str, Any]]:
 async def _find_athlete_by_phone(supabase_client: Any, phone_number: str, scope: DataScope | None) -> AthleteRecord | None:
     normalized_phone = _normalize_phone_number(phone_number)
     variants = _phone_variants(phone_number)
-    table = await supabase_client.table("athletes")
+    table = supabase_client.table("athletes")
 
     search_fields = ("phone_number", "whatsapp_number", "phone")
     for field_name in search_fields:

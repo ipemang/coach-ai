@@ -168,7 +168,7 @@ class WhatsAppService:
             return
 
         scope = require_scope(self.scope, context="WhatsApp send log update")
-        table = await self.supabase_client.table(self.send_log_table)
+        table = self.supabase_client.table(self.send_log_table)
         payload = {
             "status": "sent",
             "sent_at": datetime.now(timezone.utc).isoformat(),
@@ -199,7 +199,7 @@ class WhatsAppService:
             return
 
         scope = require_scope(self.scope, context="WhatsApp send log update")
-        table = await self.supabase_client.table(self.send_log_table)
+        table = self.supabase_client.table(self.send_log_table)
         payload = {
             "status": "failed",
             "error_message": error_message,

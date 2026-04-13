@@ -129,7 +129,7 @@ class AlertService:
         if self.supabase_client is None:
             return []
 
-        table = await self.supabase_client.table(self.config.checkins_table)
+        table = self.supabase_client.table(self.config.checkins_table)
         query = table.select("*") if hasattr(table, "select") else table
         if hasattr(query, "in_"):
             try:
@@ -339,7 +339,7 @@ class AlertService:
         if self.supabase_client is None:
             return []
 
-        table = await self.supabase_client.table(self.config.coaches_table)
+        table = self.supabase_client.table(self.config.coaches_table)
         query = table.select("*") if hasattr(table, "select") else table
         rows = await _query_rows(query)
         if not rows and hasattr(table, "select"):
@@ -373,7 +373,7 @@ class AlertService:
         if self.supabase_client is None or not self.config.enable_dashboard_writes:
             return False
 
-        table = await self.supabase_client.table(self.config.dashboard_alerts_table)
+        table = self.supabase_client.table(self.config.dashboard_alerts_table)
         payload = self._dashboard_payload(finding, now=now)
         if not await self._ensure_not_duplicate(table, finding.dedupe_key, dedupe_field="dedupe_key"):
             return False
@@ -392,7 +392,7 @@ class AlertService:
         if self.supabase_client is None:
             return False
 
-        table = await self.supabase_client.table(self.config.notification_log_table)
+        table = self.supabase_client.table(self.config.notification_log_table)
         dedupe_key = f"{finding.dedupe_key}:{coach.coach_id}"
         if not await self._ensure_not_duplicate(table, dedupe_key, dedupe_field="dedupe_key"):
             return False
