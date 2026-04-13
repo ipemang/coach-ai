@@ -50,7 +50,7 @@ class LLMClient:
         api_key = self.config.resolved_api_key()
         if not api_key:
             raise LLMClientError(
-                f"Missing API key for provider '{self.config.provider}'. Set GROQ_API_KEY or OPENAI_API_KEY."
+                f"Missing API key for provider '{self.config.provider}'. Set GROQ_API_KEY or OPENAI_API_KEY (or LLM_API_KEY)."
             )
 
         url = f"{self.config.resolved_base_url()}/chat/completions"

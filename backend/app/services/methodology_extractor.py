@@ -84,6 +84,18 @@ class MethodologyExtractionRequest:
                 parts.append(transcript.strip())
         return "\n\n".join(parts).strip()
 
+    def missing_context_fields(self) -> list[str]:
+        missing: list[str] = []
+        if not self.athlete_name or not self.athlete_name.strip():
+            missing.append("athlete_name")
+        if not self.sport or not self.sport.strip():
+            missing.append("sport")
+        if not self.event or not self.event.strip():
+            missing.append("event")
+        if not self.notes or not self.notes.strip():
+            missing.append("notes")
+        return missing
+
 
 @dataclass(slots=True)
 class MethodologyExtractionResult:
@@ -91,6 +103,9 @@ class MethodologyExtractionResult:
     provider: str
     model: str
     extracted_at: str
+    status: str = "complete"
+    warnings: list[str] = field(default_factory=list)
+    missing_context: list[str] = field(default_factory=list)
 
 
 class MethodologyExtractor:
@@ -115,15 +130,147 @@ class MethodologyExtractor:
         )
 
     def extract(self, request: MethodologyExtractionRequest) -> MethodologyExtractionResult:
-        user_prompt = self.build_user_prompt(request)
-        raw = self.llm_client.chat_completions(system=SYSTEM_PROMPT, user=user_prompt)
-        playbook = self._parse_json(raw)
+        missing_context = request.missing_context_fields()
+        transcript = request.combined_transcript()
+        extracted_at = datetime.now(timezone.utc).isoformat()
+
+        if not transcript:
+            return self._build_fallback_result(
+                request=request,
+                extracted_at=extracted_at,
+                status="incomplete",
+                warnings=["No transcript was provided."] + self._missing_context_warning(missing_context),
+                missing_context=missing_context,
+            )
+
+        try:
+            user_prompt = self.build_user_prompt(request)
+            raw = self.llm_client.chat_completions(system=SYSTEM_PROMPT, user=user_prompt)
+            playbook = self._parse_json(raw)
+        except LLMClientError as exc:
+            return self._build_fallback_result(
+                request=request,
+                extracted_at=extracted_at,
+                status="pending",
+                warnings=[str(exc)] + self._missing_context_warning(missing_context),
+                missing_context=missing_context,
+            )
+        except ValueError as exc:
+            return self._build_fallback_result(
+                request=request,
+                extracted_at=extracted_at,
+                status="incomplete",
+                warnings=[str(exc)] + self._missing_context_warning(missing_context),
+                missing_context=missing_context,
+            )
+
         return MethodologyExtractionResult(
             playbook=playbook,
             provider=self.llm_client.config.provider,
             model=self.llm_client.config.model,
-            extracted_at=datetime.now(timezone.utc).isoformat(),
+            extracted_at=extracted_at,
+            status="complete" if not missing_context else "incomplete",
+            warnings=self._missing_context_warning(missing_context),
+            missing_context=missing_context,
         )
+
+    def _build_fallback_result(
+        self,
+        *,
+        request: MethodologyExtractionRequest,
+        extracted_at: str,
+        status: str,
+        warnings: list[str],
+        missing_context: list[str],
+    ) -> MethodologyExtractionResult:
+        return MethodologyExtractionResult(
+            playbook=self._build_fallback_playbook(request, status=status, warnings=warnings, missing_context=missing_context),
+            provider=self.llm_client.config.provider,
+            model=self.llm_client.config.model,
+            extracted_at=extracted_at,
+            status=status,
+            warnings=self._dedupe_strings(warnings),
+            missing_context=missing_context,
+        )
+
+    def _build_fallback_playbook(
+        self,
+        request: MethodologyExtractionRequest,
+        *,
+        status: str,
+        warnings: list[str],
+        missing_context: list[str],
+    ) -> dict[str, Any]:
+        summary_bits = [
+            bit
+            for bit in (
+                f"Athlete: {request.athlete_name}" if request.athlete_name else None,
+                f"Sport: {request.sport}" if request.sport else None,
+                f"Event: {request.event}" if request.event else None,
+            )
+            if bit
+        ]
+        source_summary = "; ".join(summary_bits) if summary_bits else "Transcript extraction is waiting on required context."
+        if status == "pending":
+            source_summary = "Transcript extraction is pending because the coach response is not ready yet."
+
+        return {
+            "playbook_name": "Pending transcript review" if status != "complete" else "Coach playbook",
+            "source_summary": source_summary,
+            "athlete_profile": {
+                "sport": request.sport,
+                "event": request.event,
+                "goals": [],
+                "constraints": [],
+                "experience_level": None,
+                "timeline": None,
+            },
+            "joe_friel_methodology": {
+                "principles": [],
+                "periodization": [],
+                "weekly_structure": {
+                    "anchor_workouts": [],
+                    "recovery_logic": warnings,
+                    "long_session": None,
+                    "testing": [],
+                },
+                "execution_rules": [
+                    "Proceed only with explicit information that is available.",
+                    "Mark the output incomplete when required context is missing.",
+                    "Keep the coach path visible until the response is confirmed.",
+                ],
+            },
+            "recommended_next_steps": [
+                "Provide the missing context and rerun extraction.",
+                "Wait for the coach response before sending an unverified recommendation." if status == "pending" else "Review the transcript for any missing details before publishing.",
+            ],
+            "follow_up_questions": self._build_follow_up_questions(missing_context),
+            "evidence": [],
+            "confidence": 0.0,
+        }
+
+    @staticmethod
+    def _build_follow_up_questions(missing_context: list[str]) -> list[str]:
+        if not missing_context:
+            return []
+        questions: list[str] = []
+        for field_name in missing_context:
+            questions.append(f"What is the athlete's {field_name.replace('_', ' ')}?")
+        return questions
+
+    @staticmethod
+    def _missing_context_warning(missing_context: list[str]) -> list[str]:
+        if not missing_context:
+            return []
+        return [f"Missing context: {', '.join(missing_context)}."]
+
+    @staticmethod
+    def _dedupe_strings(values: list[str]) -> list[str]:
+        deduped: list[str] = []
+        for value in values:
+            if value and value not in deduped:
+                deduped.append(value)
+        return deduped
 
     @staticmethod
     def _parse_json(raw: str) -> dict[str, Any]:

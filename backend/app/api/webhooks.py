@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qs
@@ -22,6 +22,7 @@ class AthleteRecord:
     phone_number: str
     timezone_name: str
     display_name: str | None = None
+    missing_fields: list[str] = field(default_factory=list)
 
 
 class WhatsAppWebhookResponse(BaseModel):
@@ -33,6 +34,8 @@ class WhatsAppWebhookResponse(BaseModel):
     reply_sent: bool = False
     provider_message_id: str | None = None
     reply_body: str | None = None
+    missing_fields: list[str] = Field(default_factory=list)
+    delivery_error: str | None = None
 
 
 class WhatsAppWebhookPayload(BaseModel):
@@ -195,11 +198,11 @@ async def _find_athlete_by_phone(supabase_client: Any, phone_number: str) -> Ath
     table = await supabase_client.table("athletes")
 
     search_fields = ("phone_number", "whatsapp_number", "phone")
-    for field in search_fields:
+    for field_name in search_fields:
         for value in variants:
             query = table.select("*") if hasattr(table, "select") else table
             if hasattr(query, "eq"):
-                query = query.eq(field, value)
+                query = query.eq(field_name, value)
             rows = await _query_rows(query)
             if rows:
                 row = _match_row(rows, normalized_phone)
@@ -220,22 +223,35 @@ def _match_row(rows: list[dict[str, Any]], normalized_phone: str) -> AthleteReco
         for key in ("phone_number", "whatsapp_number", "phone"):
             value = row.get(key)
             if isinstance(value, str) and _normalize_phone_number(value) == normalized_phone:
-                return AthleteRecord(
-                    athlete_id=str(row.get("id") or row.get("athlete_id") or ""),
-                    phone_number=value,
-                    timezone_name=str(row.get("timezone_name") or row.get("timezone") or "UTC"),
-                    display_name=row.get("display_name") or row.get("name"),
-                )
+                return _build_athlete_record(row, matched_phone=value)
     if rows:
-        row = rows[0]
-        phone_number = str(row.get("phone_number") or row.get("whatsapp_number") or row.get("phone") or "")
-        return AthleteRecord(
-            athlete_id=str(row.get("id") or row.get("athlete_id") or ""),
-            phone_number=phone_number,
-            timezone_name=str(row.get("timezone_name") or row.get("timezone") or "UTC"),
-            display_name=row.get("display_name") or row.get("name"),
-        )
+        return _build_athlete_record(rows[0], matched_phone=str(rows[0].get("phone_number") or rows[0].get("whatsapp_number") or rows[0].get("phone") or ""))
     return None
+
+
+def _build_athlete_record(row: dict[str, Any], *, matched_phone: str) -> AthleteRecord:
+    missing_fields: list[str] = []
+    athlete_id = str(row.get("id") or row.get("athlete_id") or "")
+    phone_number = str(row.get("phone_number") or row.get("whatsapp_number") or row.get("phone") or matched_phone or "")
+    timezone_name = str(row.get("timezone_name") or row.get("timezone") or "UTC")
+    display_name = row.get("display_name") or row.get("name")
+
+    if not athlete_id:
+        missing_fields.append("athlete_id")
+    if not phone_number:
+        missing_fields.append("phone_number")
+    if not row.get("timezone_name") and not row.get("timezone"):
+        missing_fields.append("timezone_name")
+    if not display_name:
+        missing_fields.append("display_name")
+
+    return AthleteRecord(
+        athlete_id=athlete_id,
+        phone_number=phone_number,
+        timezone_name=timezone_name,
+        display_name=display_name,
+        missing_fields=missing_fields,
+    )
 
 
 async def _route_to_checkin_logic(request: Request, athlete: AthleteRecord, message_text: str) -> str:
@@ -331,31 +347,37 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
 
     reply_body = await _route_to_checkin_logic(request, athlete, inbound.message_text)
     whatsapp_service = await _resolve_whatsapp_service(request)
+    recipient_phone = athlete.phone_number or inbound.sender_phone_number
     recipient = WhatsAppRecipient(
         athlete_id=athlete.athlete_id,
-        phone_number=athlete.phone_number,
+        phone_number=recipient_phone,
         timezone_name=athlete.timezone_name,
         display_name=athlete.display_name,
     )
 
-    try:
-        send_result = await whatsapp_service.send_text_message(
-            recipient,
-            reply_body,
-            source="whatsapp_webhook",
-            inbound_text=inbound.message_text,
-            sent_at=datetime.now(timezone.utc).isoformat(),
-        )
-    except Exception as exc:  # pragma: no cover - downstream transport failure
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    send_result = await whatsapp_service.send_text_message(
+        recipient,
+        reply_body,
+        source="whatsapp_webhook",
+        inbound_text=inbound.message_text,
+        sent_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    status = "processed"
+    if athlete.missing_fields:
+        status = "incomplete"
+    if not send_result.delivered:
+        status = "degraded"
 
     return WhatsAppWebhookResponse(
-        status="processed",
+        status=status,
         matched_athlete=True,
-        athlete_id=athlete.athlete_id,
-        phone_number=athlete.phone_number,
+        athlete_id=athlete.athlete_id or None,
+        phone_number=recipient_phone,
         inbound_text=inbound.message_text,
-        reply_sent=True,
+        reply_sent=send_result.delivered,
         provider_message_id=send_result.provider_message_id,
         reply_body=send_result.body,
+        missing_fields=athlete.missing_fields,
+        delivery_error=send_result.error_message,
     )

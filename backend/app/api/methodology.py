@@ -28,6 +28,9 @@ class TranscriptExtractionOutput(BaseModel):
     provider: str
     model: str
     extracted_at: str
+    status: str
+    warnings: list[str] = Field(default_factory=list)
+    missing_context: list[str] = Field(default_factory=list)
 
 
 @router.post("/extract-methodology", response_model=TranscriptExtractionOutput)
@@ -49,4 +52,7 @@ def extract_methodology(payload: TranscriptExtractionInput) -> TranscriptExtract
         provider=result.provider,
         model=result.model,
         extracted_at=result.extracted_at,
+        status=result.status,
+        warnings=result.warnings,
+        missing_context=result.missing_context,
     )
