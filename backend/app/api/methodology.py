@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..core.security import AuthenticatedPrincipal, require_roles, resolve_coach_scope
-from ..services import get_settings, persist_methodology_extraction
+from ..core.config import get_settings
+from ..services.methodology_extractor import persist_methodology_extraction
 from ..services.methodology_extractor import MethodologyExtractionRequest, MethodologyExtractor
 
 
