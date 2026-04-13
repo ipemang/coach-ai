@@ -1,48 +1,31 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from functools import lru_cache
+from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .scope import DataScope, apply_scope_query, resolve_scope_from_env
-from .whatsapp_service import WhatsAppRecipient, WhatsAppService
-
-supabase_client: Any | None = None
-whatsapp_client: Any | None = None
-whatsapp_service: Any | None = None
-
 
 class Settings(BaseSettings):
-    groq_api_key: Optional[str] = None
-    openai_api_key: Optional[str] = None
-    openai_model: str = "gpt-4-turbo"
-    stripe_secret_key: Optional[str] = None
-    supabase_url: Optional[str] = None
-    supabase_service_role_key: Optional[str] = None
-    organization_id: str = "1"
-    coach_id: str = "1"
-    whatsapp_access_token: Optional[str] = None
-    whatsapp_phone_number_id: Optional[str] = None
+    openai_api_key: str
+    openai_model: str = "gpt-4o-mini"
+    supabase_url: str
+    supabase_service_role_key: str
+    whatsapp_access_token: str | None = None
+    whatsapp_phone_number_id: str | None = None
     whatsapp_graph_api_version: str = "v19.0"
-    whatsapp_verify_token: Optional[str] = None
-    whatsapp_webhook_secret: Optional[str] = None
+    whatsapp_verify_token: str | None = None
 
-    model_config = SettingsConfigDict(
-        case_sensitive=False,
-        env_file=".env",
-        extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
-settings = Settings()
-
-
+@lru_cache
 def get_settings() -> Settings:
-    return settings
+    return Settings()
 
 
 METHODOLOGY_EXTRACTION_PROMPT = """You extract a coach's methodology from a raw voice memo transcript.
@@ -109,8 +92,6 @@ The persona_system_prompt should be concise, written as a durable system prompt,
 
 Focus on endurance coaching concepts aligned with Joe Friel: assessment, goals, constraints, periodization, intensity balance, testing, recovery, race preparation, and athlete communication."""
 
-METHODOLOGY_PROMPT = METHODOLOGY_EXTRACTION_PROMPT
-
 
 def _request_json(url: str, method: str, headers: dict[str, str], payload: Any | None = None, timeout: int = 90) -> Any:
     body = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -140,11 +121,6 @@ def extract_methodology_from_transcript(transcript: str, settings: Settings | No
             },
         ],
     }
-
-    if not resolved_settings.openai_api_key:
-        raise RuntimeError("OPENAI_API_KEY is not configured")
-    if not resolved_settings.supabase_url or not resolved_settings.supabase_service_role_key:
-        raise RuntimeError("Supabase settings are not configured")
 
     response = _request_json(
         "https://api.openai.com/v1/chat/completions",
@@ -185,17 +161,10 @@ def update_coach_methodology(
     methodology_playbook: dict[str, Any],
     persona_system_prompt: str,
     settings: Settings | None = None,
-    *,
-    organization_id: str | None = None,
 ) -> dict[str, Any] | None:
     resolved_settings = settings or get_settings()
-    if not resolved_settings.supabase_url or not resolved_settings.supabase_service_role_key:
-        raise RuntimeError("Supabase settings are not configured")
-
-    filters = [f"coach_id=eq.{quote(coach_id, safe='')}"]
-    if organization_id:
-        filters.append(f"organization_id=eq.{quote(organization_id, safe='')}")
-    url = f"{resolved_settings.supabase_url.rstrip('/')}/rest/v1/coaches?{'&'.join(filters)}"
+    coach_id_filter = quote(coach_id, safe="")
+    url = f"{resolved_settings.supabase_url.rstrip('/')}/rest/v1/coaches?coach_id=eq.{coach_id_filter}"
 
     response = _request_json(
         url,
@@ -215,80 +184,3 @@ def update_coach_methodology(
     if isinstance(response, list):
         return response[0] if response else None
     return response
-
-
-def persist_methodology_extraction(
-    coach_id: str,
-    methodology_playbook: dict[str, Any],
-    persona_system_prompt: str,
-    transcript: str,
-    settings: Settings | None = None,
-    *,
-    organization_id: str | None = None,
-) -> dict[str, Any]:
-    resolved_settings = settings or get_settings()
-    if not resolved_settings.supabase_url or not resolved_settings.supabase_service_role_key:
-        raise RuntimeError("Supabase settings are not configured")
-
-    methodology_payload: dict[str, Any] = {
-        "coach_id": coach_id,
-        "transcript": transcript,
-        "methodology_playbook": methodology_playbook,
-        "persona_system_prompt": persona_system_prompt,
-        "source": "voice_memo",
-    }
-    if organization_id:
-        methodology_payload["organization_id"] = organization_id
-
-    methodology_response = _request_json(
-        f"{resolved_settings.supabase_url.rstrip('/')}/rest/v1/methodologies?select=*",
-        "POST",
-        {
-            "apikey": resolved_settings.supabase_service_role_key,
-            "Authorization": f"Bearer {resolved_settings.supabase_service_role_key}",
-            "Content-Type": "application/json",
-            "Prefer": "return=representation",
-        },
-        methodology_payload,
-    )
-
-    if isinstance(methodology_response, list):
-        methodology_row = methodology_response[0] if methodology_response else None
-    else:
-        methodology_row = methodology_response
-
-    if not isinstance(methodology_row, dict):
-        raise RuntimeError("Failed to persist methodology extraction")
-
-    updated_coach_row = update_coach_methodology(
-        coach_id,
-        methodology_playbook,
-        persona_system_prompt,
-        resolved_settings,
-        organization_id=organization_id,
-    )
-
-    return {
-        "methodology_row": methodology_row,
-        "updated_coach_row": updated_coach_row,
-    }
-
-
-__all__ = [
-    "Settings",
-    "settings",
-    "get_settings",
-    "DataScope",
-    "apply_scope_query",
-    "resolve_scope_from_env",
-    "WhatsAppRecipient",
-    "WhatsAppService",
-    "supabase_client",
-    "whatsapp_client",
-    "whatsapp_service",
-    "METHODOLOGY_EXTRACTION_PROMPT",
-    "METHODOLOGY_PROMPT",
-    "extract_methodology_from_transcript",
-    "update_coach_methodology",
-    "persist_methodology_extraction",
-]
