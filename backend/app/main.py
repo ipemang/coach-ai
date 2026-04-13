@@ -18,7 +18,6 @@ from .api.methodology import router as methodology_router
 from .api.v1.router import router as v1_router
 from .api.webhooks import router as webhooks_router
 from .services import DataScope, get_settings
-from .services.whatsapp_client import WhatsAppGraphClient
 from .services.whatsapp_service import WhatsAppService
 
 
