@@ -5,11 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Protocol
-
-from app.services.scope import DataScope, apply_scope_payload, apply_scope_query, require_scope
 from zoneinfo import ZoneInfo
 
 from app.models.checkinsend_log import CheckinSendLog
+from app.services.scope import (
+    DataScope,
+    apply_scope_payload,
+    apply_scope_query,
+    require_scope,
+)
 
 
 class SupabaseClientProtocol(Protocol):

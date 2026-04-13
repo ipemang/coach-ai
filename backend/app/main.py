@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 from uuid import uuid4
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -89,7 +89,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         supabase_client = create_client(settings.supabase_url, settings.supabase_service_role_key)
     app.state.supabase_client = supabase_client
 
-    whatsapp_client = WhatsAppGraphClient(settings.whatsapp_access_token, settings.whatsapp_phone_number_id, graph_api_version=settings.whatsapp_graph_api_version)
+    whatsapp_client = WhatsAppGraphClient(
+        settings.whatsapp_access_token,
+        settings.whatsapp_phone_number_id,
+        graph_api_version=settings.whatsapp_graph_api_version,
+    )
     app.state.whatsapp_client = whatsapp_client
     app.state.whatsapp_service = WhatsAppService(
         whatsapp_client=whatsapp_client,
