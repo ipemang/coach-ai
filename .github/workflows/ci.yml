@@ -6,6 +6,8 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: backend
 
     steps:
       - name: Checkout repository
@@ -16,20 +18,24 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: |
+            **/requirements*.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r backend/requirements.txt
+          python -m pip install ruff
+          find . -name 'requirements*.txt' -type f | sort | while read -r requirements_file; do
+            python -m pip install -r "$requirements_file"
+          done
 
       - name: Run lint
         run: |
-          python -m ruff check backend/app tests
+          python -m ruff check backend/app backend/tests tests
 
       - name: Run tests
         run: |
-          PYTHONPATH=backend python -m pytest
+          python -m pytest backend/tests tests
 
   frontend:
     runs-on: ubuntu-latest
