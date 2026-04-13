@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .scope import DataScope as DataScope, apply_scope_query as apply_scope_query, resolve_scope_from_env as resolve_scope_from_env
+from .scope import DataScope, apply_scope_query, resolve_scope_from_env
 
 
 class Settings(BaseSettings):
@@ -19,6 +19,36 @@ class Settings(BaseSettings):
     supabase_service_role_key: str
     organization_id: str | None = None
     coach_id: str | None = None
+    integration_frontend_base_url: str | None = None
+
+    garmin_oauth_authorize_url: str | None = None
+    garmin_oauth_token_url: str | None = None
+    garmin_oauth_client_id: str | None = None
+    garmin_oauth_client_secret: str | None = None
+    garmin_oauth_redirect_uri: str | None = None
+    garmin_oauth_scopes: str | None = None
+    garmin_oauth_webhook_secret: str | None = None
+
+    strava_oauth_authorize_url: str | None = None
+    strava_oauth_token_url: str | None = None
+    strava_oauth_client_id: str | None = None
+    strava_oauth_client_secret: str | None = None
+    strava_oauth_redirect_uri: str | None = None
+    strava_oauth_scopes: str | None = None
+    strava_oauth_webhook_secret: str | None = None
+
+    oura_oauth_authorize_url: str | None = None
+    oura_oauth_token_url: str | None = None
+    oura_oauth_client_id: str | None = None
+    oura_oauth_client_secret: str | None = None
+    oura_oauth_redirect_uri: str | None = None
+    oura_oauth_scopes: str | None = None
+    oura_oauth_webhook_secret: str | None = None
+
+    whatsapp_webhook_secret: str | None = None
+
+    integration_sync_enabled: bool = False
+    integration_sync_poll_interval_seconds: int = 300
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
