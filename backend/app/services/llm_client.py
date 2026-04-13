@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 
-from app.services import get_settings
+from app.core.config import get_settings
 from dataclasses import dataclass, field
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
