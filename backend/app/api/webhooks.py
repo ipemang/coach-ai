@@ -357,7 +357,8 @@ def _resolve_scope(request: Request) -> DataScope:
     if candidate.is_configured():
         return candidate
 
-    raise HTTPException(status_code=503, detail="Organization or coach scope is not configured")
+    settings = get_settings()
+    return DataScope(organization_id=settings.organization_id or "1", coach_id=settings.coach_id or "1")
 
 async def _resolve_supabase_client(request: Request) -> Any:
     supabase_client = getattr(request.app.state, "supabase_client", None)
@@ -374,7 +375,7 @@ async def _resolve_supabase_client(request: Request) -> Any:
 
 
 async def _resolve_whatsapp_service(request: Request) -> Any:
-    scope = getattr(request.app.state, "scope", None)
+    scope = _resolve_scope(request)
     service = getattr(request.app.state, "whatsapp_service", None)
     if service is not None and hasattr(service, "send_text_message"):
         if getattr(service, "scope", None) is None and scope is not None:

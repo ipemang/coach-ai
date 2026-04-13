@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
+from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from app.services.biometrics import BiometricsService, Provider
+from app.services.biometrics import BiometricsService
 from app.services.integrations import IntegrationConnectionResult, IntegrationService, IntegrationSyncWorker
 from app.services.scope import DataScope
 
 router = APIRouter(prefix="/api/v1/integrations", tags=["integrations"])
 WebhookRouter = APIRouter(prefix="/api/v1/integrations/webhooks", tags=["integrations-webhooks"])
-ProviderName = Literal["garmin", "strava", "oura"]
+ProviderName = str
 
 
 class IntegrationStatusResponse(BaseModel):

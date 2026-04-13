@@ -9,13 +9,13 @@ import json
 import secrets
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from app.services import get_settings
-from app.services.biometrics import AthleteAuthContext, BiometricsService, Provider, ProviderAuthResult
-from app.services.scope import DataScope, apply_scope_payload, apply_scope_query, require_scope
+from app.services.biometrics import AthleteAuthContext, BiometricsService, Provider
+from app.services.scope import DataScope, apply_scope_payload, apply_scope_query
 
 ProviderName = Provider
 
@@ -196,7 +196,6 @@ class IntegrationService:
         self.settings = get_settings()
 
     def oauth_config(self, provider: ProviderName) -> IntegrationOAuthConfig:
-        prefix = provider.upper()
         authorize_url = getattr(self.settings, f"{provider}_oauth_authorize_url", None)
         token_url = getattr(self.settings, f"{provider}_oauth_token_url", None)
         client_id = getattr(self.settings, f"{provider}_oauth_client_id", None)
