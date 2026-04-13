@@ -84,15 +84,20 @@ async def _resolve_whatsapp_service(request: Request) -> WhatsAppService | None:
 @router.get("/triage", response_model=list[CoachTriageResponseItem])
 async def coach_triage(
     request: Request,
-    organization_id: str,
-    coach_id: str,
+    organization_id: str | None = None,
+    coach_id: str | None = None,
 ) -> list[CoachTriageResponseItem]:
     supabase_client = await _resolve_supabase_client(request)
-    workflow = CoachWorkflow(
-        supabase_client=supabase_client,
-        whatsapp_service=await _resolve_whatsapp_service(request),
-        scope=DataScope(organization_id=organization_id, coach_id=coach_id),
-    )
+    scope = getattr(request.app.state, "scope", None)
+    if organization_id or coach_id:
+        scope = DataScope(organization_id=organization_id, coach_id=coach_id)
+    workflow_kwargs = {
+        "supabase_client": supabase_client,
+        "whatsapp_service": await _resolve_whatsapp_service(request),
+    }
+    if scope is not None and scope.is_configured():
+        workflow_kwargs["scope"] = scope
+    workflow = CoachWorkflow(**workflow_kwargs)
     items = await workflow.build_triage()
     return [CoachTriageResponseItem.model_validate(asdict(item)) for item in items]
 

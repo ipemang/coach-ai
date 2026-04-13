@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Literal, Protocol
 
+from app.core.cache import JsonCache, build_cache_key
 from app.services.scope import DataScope, apply_scope_payload, require_scope
 
 Provider = Literal["garmin", "strava", "oura"]
@@ -354,10 +355,16 @@ class BiometricsService:
         supabase_client: SupabaseClientProtocol | None = None,
         provider_adapters: dict[Provider, BiometricsProviderAdapter] | None = None,
         scope: DataScope | None = None,
+        cache_client: Any | None = None,
     ) -> None:
         self.supabase_client = supabase_client
         self.provider_adapters = provider_adapters or {}
         self.scope = scope
+        self.primary_biometrics_cache = JsonCache(
+            cache_client,
+            namespace="coach-ai:biometrics:primary",
+            default_ttl_seconds=300,
+        )
 
     def register_provider_adapter(
         self,
@@ -402,8 +409,15 @@ class BiometricsService:
     ) -> dict[str, Any] | None:
         """Fetch Garmin primary biometrics for the requested day."""
 
+        cache_key = build_cache_key("garmin", athlete_id, day, getattr(auth, "provider_user_id", None) or "primary_biometrics")
+        cached = await self.primary_biometrics_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         adapter = self._get_provider_adapter("garmin")
-        return await adapter.fetch_garmin_primary_biometrics(athlete_id, day, auth)
+        result = await adapter.fetch_garmin_primary_biometrics(athlete_id, day, auth)
+        await self.primary_biometrics_cache.set(cache_key, result)
+        return result
 
     async def fetch_strava_activity_sync(
         self,
