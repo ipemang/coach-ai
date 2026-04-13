@@ -26,11 +26,11 @@ class WhatsAppGraphClient:
         self,
         access_token: str | None,
         phone_number_id: str | None,
-        graph_api_version: Optional[str] = None,
+        graph_api_version: str = "v19.0",
     ) -> None:
         self.access_token = access_token
         self.phone_number_id = phone_number_id
-        self.graph_api_version = graph_api_version or "v19.0"
+        self.graph_api_version = graph_api_version
 
     async def send_message(self, to: str, body: str, **kwargs: Any) -> dict[str, Any]:
         if not self.access_token or not self.phone_number_id:
