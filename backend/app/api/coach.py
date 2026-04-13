@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from ..core.security import AuthenticatedPrincipal, require_roles, resolve_coach_scope
 from ..services.coach_workflow import CoachWorkflow
-from ..services.scope import DataScope
 from ..services.whatsapp_service import WhatsAppService
 
 router = APIRouter(prefix="/api/v1/coach", tags=["coach"])
@@ -86,29 +86,42 @@ async def coach_triage(
     request: Request,
     organization_id: str | None = None,
     coach_id: str | None = None,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach", "admin")),
 ) -> list[CoachTriageResponseItem]:
     supabase_client = await _resolve_supabase_client(request)
-    scope = getattr(request.app.state, "scope", None)
-    if organization_id or coach_id:
-        scope = DataScope(organization_id=organization_id, coach_id=coach_id)
+    scope = resolve_coach_scope(
+        principal,
+        organization_id=organization_id,
+        coach_id=coach_id,
+        fallback_scope=getattr(request.app.state, "scope", None),
+    )
     workflow_kwargs = {
         "supabase_client": supabase_client,
         "whatsapp_service": await _resolve_whatsapp_service(request),
+        "scope": scope,
     }
-    if scope is not None and scope.is_configured():
-        workflow_kwargs["scope"] = scope
     workflow = CoachWorkflow(**workflow_kwargs)
     items = await workflow.build_triage()
     return [CoachTriageResponseItem.model_validate(asdict(item)) for item in items]
 
 
 @router.post("/verify", response_model=CoachVerifyResponse)
-async def coach_verify(request: Request, payload: CoachVerifyRequest) -> CoachVerifyResponse:
+async def coach_verify(
+    request: Request,
+    payload: CoachVerifyRequest,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach", "admin")),
+) -> CoachVerifyResponse:
     supabase_client = await _resolve_supabase_client(request)
+    scope = resolve_coach_scope(
+        principal,
+        organization_id=payload.organization_id,
+        coach_id=payload.coach_id,
+        fallback_scope=getattr(request.app.state, "scope", None),
+    )
     workflow = CoachWorkflow(
         supabase_client=supabase_client,
         whatsapp_service=await _resolve_whatsapp_service(request),
-        scope=DataScope(organization_id=payload.organization_id, coach_id=payload.coach_id),
+        scope=scope,
     )
 
     try:
