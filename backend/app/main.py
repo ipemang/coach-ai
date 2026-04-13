@@ -26,11 +26,10 @@ class WhatsAppGraphClient:
         self,
         access_token: str | None,
         phone_number_id: str | None,
-        graph_api_version: str = "v19.0",
     ) -> None:
         self.access_token = access_token
         self.phone_number_id = phone_number_id
-        self.graph_api_version = graph_api_version
+        self.graph_api_version = "v19.0"
 
     async def send_message(self, to: str, body: str, **kwargs: Any) -> dict[str, Any]:
         if not self.access_token or not self.phone_number_id:
@@ -92,7 +91,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     whatsapp_client = WhatsAppGraphClient(
         settings.whatsapp_access_token,
         settings.whatsapp_phone_number_id,
-        graph_api_version=settings.whatsapp_graph_api_version,
     )
     app.state.whatsapp_client = whatsapp_client
     app.state.whatsapp_service = WhatsAppService(

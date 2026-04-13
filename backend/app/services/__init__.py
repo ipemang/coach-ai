@@ -27,7 +27,6 @@ class Settings(BaseSettings):
     coach_id: str = "1"
     whatsapp_access_token: Optional[str] = None
     whatsapp_phone_number_id: Optional[str] = None
-    whatsapp_graph_api_version: str = "v19.0"
     whatsapp_verify_token: Optional[str] = None
     whatsapp_webhook_secret: Optional[str] = None
 
