@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 import asyncio
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 

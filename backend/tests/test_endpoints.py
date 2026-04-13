@@ -7,6 +7,7 @@ import json
 from app.api import coach as coach_module
 from app.api import webhooks as webhooks_module
 from app.api.v1 import routes as v1_routes
+from app.api.v1 import invites as invites_module
 from app.agents.check_in import CheckInRecommendation
 from app.core import security as security_module
 from app.main import app
@@ -201,9 +202,6 @@ def test_whatsapp_webhook_signature_verification(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "processed"
     assert response.json()["reply_sent"] is True
-
-
-from app.api.v1 import invites as invites_module
 
 
 class _FakeTable:
