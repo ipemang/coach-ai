@@ -13,7 +13,7 @@ from .scope import DataScope, apply_scope_query, resolve_scope_from_env
 
 
 class Settings(BaseSettings):
-    openai_api_key: str
+    openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     supabase_url: str
     supabase_service_role_key: str
@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     oura_oauth_scopes: str | None = None
     oura_oauth_webhook_secret: str | None = None
 
+    whatsapp_verify_token: str | None = None
     whatsapp_webhook_secret: str | None = None
 
     integration_sync_enabled: bool = False
@@ -180,6 +181,9 @@ def extract_methodology_from_transcript(transcript: str, settings: Settings | No
             },
         ],
     }
+
+    if not resolved_settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
 
     response = _request_json(
         "https://api.openai.com/v1/chat/completions",

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from os import getenv
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -14,6 +13,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from app.core.security import verify_whatsapp_signature
+from app.services import get_settings
 from app.services.scope import DataScope, apply_scope_query, resolve_scope_from_env
 from app.services.whatsapp_service import WhatsAppRecipient, WhatsAppService
 
@@ -394,7 +394,8 @@ async def whatsapp_webhook_handshake(
     hub_verify_token: str | None = Query(default=None, alias="hub.verify_token"),
     hub_challenge: str | None = Query(default=None, alias="hub.challenge"),
 ) -> str:
-    expected_token = getenv("WHATSAPP_VERIFY_TOKEN")
+    settings = get_settings()
+    expected_token = settings.whatsapp_verify_token
     if not expected_token:
         raise HTTPException(status_code=503, detail="WhatsApp verify token is not configured")
     if hub_mode not in (None, "subscribe"):

@@ -11,10 +11,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    openai_api_key: str
+    openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     supabase_url: str
     supabase_service_role_key: str
+    whatsapp_verify_token: str | None = None
+    whatsapp_webhook_secret: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -117,6 +119,9 @@ def extract_methodology_from_transcript(transcript: str, settings: Settings | No
             },
         ],
     }
+
+    if not resolved_settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
 
     response = _request_json(
         "https://api.openai.com/v1/chat/completions",

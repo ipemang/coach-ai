@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+
+from app.services import get_settings
 from dataclasses import dataclass, field
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -25,7 +27,8 @@ class LLMConfig:
         if self.provider == "groq":
             return os.getenv("GROQ_API_KEY", os.getenv("LLM_API_KEY", "")).strip()
         if self.provider == "openai":
-            return os.getenv("OPENAI_API_KEY", os.getenv("LLM_API_KEY", "")).strip()
+            settings = get_settings()
+            return (settings.openai_api_key or os.getenv("OPENAI_API_KEY", os.getenv("LLM_API_KEY", ""))).strip()
         return os.getenv("LLM_API_KEY", "").strip()
 
     def resolved_base_url(self) -> str:
