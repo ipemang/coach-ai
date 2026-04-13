@@ -1,0 +1,844 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Coach.AI API",
+    "version": "1.0.0",
+    "description": "OpenAPI specification for the Coach.AI FastAPI backend."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000"
+    }
+  ],
+  "tags": [
+    {
+      "name": "health",
+      "description": "Service health and readiness endpoints."
+    },
+    {
+      "name": "athlete",
+      "description": "Athlete check-in endpoints."
+    },
+    {
+      "name": "methodology",
+      "description": "Methodology extraction endpoints."
+    },
+    {
+      "name": "webhooks",
+      "description": "Inbound webhook endpoints."
+    },
+    {
+      "name": "coach",
+      "description": "Coach triage and verification endpoints."
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health check",
+        "operationId": "health_get",
+        "responses": {
+          "200": {
+            "description": "Service is healthy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/check-in": {
+      "post": {
+        "tags": [
+          "athlete"
+        ],
+        "summary": "Submit an athlete check-in",
+        "operationId": "check_in_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AthleteCheckIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Check-in recommendation returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckInRecommendation"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/extract-methodology": {
+      "post": {
+        "tags": [
+          "methodology"
+        ],
+        "summary": "Extract coach methodology from a transcript",
+        "description": "Extracts a structured methodology playbook from a transcript and returns the generated playbook.",
+        "operationId": "extract_methodology_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranscriptExtractionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Methodology extraction succeeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscriptExtractionOutput"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/api/v1/webhooks/whatsapp": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Receive a WhatsApp webhook",
+        "description": "Accepts JSON or form-encoded webhook payloads and routes inbound WhatsApp messages to the check-in workflow.",
+        "operationId": "whatsapp_webhook_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "examples": {
+                "simple": {
+                  "summary": "Direct sender and message fields",
+                  "value": {
+                    "sender_phone_number": "+15551234567",
+                    "message_text": "Ready for today’s session"
+                  }
+                },
+                "twilio": {
+                  "summary": "Twilio-style form payload",
+                  "value": {
+                    "From": "+15551234567",
+                    "Body": "Ready for today’s session"
+                  }
+                }
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook handled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsAppWebhookResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/v1/coach/triage": {
+      "get": {
+        "tags": [
+          "coach"
+        ],
+        "summary": "List coach triage items",
+        "operationId": "coach_triage_get",
+        "responses": {
+          "200": {
+            "description": "A triage list ordered by urgency.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CoachTriageResponseItem"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/v1/coach/verify": {
+      "post": {
+        "tags": [
+          "coach"
+        ],
+        "summary": "Verify a coach suggestion",
+        "operationId": "coach_verify_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CoachVerifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Suggestion verification result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachVerifyResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "502": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "ErrorResponse": {
+        "description": "Error response.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "ValidationError": {
+        "description": "Validation error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "AthleteCheckIn": {
+        "type": "object",
+        "properties": {
+          "athlete_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "readiness": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "hrv": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "above",
+              "below"
+            ]
+          },
+          "sleep_hours": {
+            "type": "number",
+            "minimum": 0
+          },
+          "sleep_quality": {
+            "type": "string",
+            "minLength": 1
+          },
+          "soreness": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10
+          }
+        },
+        "required": [
+          "athlete_id",
+          "readiness",
+          "hrv",
+          "sleep_hours",
+          "sleep_quality",
+          "soreness"
+        ],
+        "additionalProperties": false
+      },
+      "CheckInRecommendation": {
+        "type": "object",
+        "properties": {
+          "recommended_action": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "recommended_action",
+          "rationale"
+        ],
+        "additionalProperties": false
+      },
+      "TranscriptExtractionInput": {
+        "type": "object",
+        "properties": {
+          "transcript": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Primary transcript text"
+          },
+          "transcripts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Additional transcript segments",
+            "default": []
+          },
+          "athlete_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sport": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "event": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "TranscriptExtractionOutput": {
+        "type": "object",
+        "properties": {
+          "playbook": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "extracted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "missing_context": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          }
+        },
+        "required": [
+          "playbook",
+          "provider",
+          "model",
+          "extracted_at",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "WhatsAppWebhookResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "matched_athlete": {
+            "type": "boolean",
+            "default": false
+          },
+          "athlete_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "phone_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "inbound_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reply_sent": {
+            "type": "boolean",
+            "default": false
+          },
+          "provider_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reply_body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "missing_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "delivery_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "CoachTriageResponseItem": {
+        "type": "object",
+        "properties": {
+          "athlete_id": {
+            "type": "string"
+          },
+          "athlete_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "urgency_score": {
+            "type": "number"
+          },
+          "urgency_label": {
+            "type": "string"
+          },
+          "latest_memory_state_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latest_memory_state_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hrv_flag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "soreness_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "missed_workouts": {
+            "type": "integer",
+            "default": 0
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "memory_state": {
+            "type": "object",
+            "additionalProperties": true,
+            "default": {}
+          }
+        },
+        "required": [
+          "athlete_id",
+          "urgency_score",
+          "urgency_label",
+          "missed_workouts",
+          "reasons",
+          "memory_state"
+        ],
+        "additionalProperties": false
+      },
+      "CoachVerifyRequest": {
+        "type": "object",
+        "properties": {
+          "suggestion_id": {
+            "type": "string",
+            "description": "Suggestion row id"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "Approve",
+              "Edit",
+              "Ignore"
+            ]
+          },
+          "coach_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "edited_adjustment": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "send_confirmation": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "suggestion_id",
+          "decision"
+        ],
+        "additionalProperties": false
+      },
+      "CoachVerifyResponse": {
+        "type": "object",
+        "properties": {
+          "suggestion_id": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "Approve",
+              "Edit",
+              "Ignore"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "athlete_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "athlete_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirmation_sent": {
+            "type": "boolean",
+            "default": false
+          },
+          "confirmation_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirmation_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "suggestion": {
+            "type": "object",
+            "additionalProperties": true,
+            "default": {}
+          }
+        },
+        "required": [
+          "suggestion_id",
+          "decision",
+          "status",
+          "confirmation_sent",
+          "suggestion"
+        ],
+        "additionalProperties": false
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "array",
+                "items": {}
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "additionalProperties": false
+      },
+      "HTTPValidationError": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            }
+          }
+        }
+      },
+      "ValidationError": {
+        "type": "object",
+        "properties": {
+          "loc": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            }
+          },
+          "msg": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ]
+      }
+    }
+  }
+}
