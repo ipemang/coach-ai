@@ -7,6 +7,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+import requests
+
+from app.core.config import Settings
 from .llm_client import LLMClient, LLMClientError
 
 
@@ -184,7 +187,12 @@ class MethodologyExtractor:
         missing_context: list[str],
     ) -> MethodologyExtractionResult:
         return MethodologyExtractionResult(
-            playbook=self._build_fallback_playbook(request, status=status, warnings=warnings, missing_context=missing_context),
+            playbook=self._build_fallback_playbook(
+                request,
+                status=status,
+                warnings=warnings,
+                missing_context=missing_context,
+            ),
             provider=self.llm_client.config.provider,
             model=self.llm_client.config.model,
             extracted_at=extracted_at,
@@ -242,7 +250,9 @@ class MethodologyExtractor:
             },
             "recommended_next_steps": [
                 "Provide the missing context and rerun extraction.",
-                "Wait for the coach response before sending an unverified recommendation." if status == "pending" else "Review the transcript for any missing details before publishing.",
+                "Wait for the coach response before sending an unverified recommendation."
+                if status == "pending"
+                else "Review the transcript for any missing details before publishing.",
             ],
             "follow_up_questions": self._build_follow_up_questions(missing_context),
             "evidence": [],
@@ -253,10 +263,7 @@ class MethodologyExtractor:
     def _build_follow_up_questions(missing_context: list[str]) -> list[str]:
         if not missing_context:
             return []
-        questions: list[str] = []
-        for field_name in missing_context:
-            questions.append(f"What is the athlete's {field_name.replace('_', ' ')}?")
-        return questions
+        return [f"What is the athlete's {field_name.replace('_', ' ')}?" for field_name in missing_context]
 
     @staticmethod
     def _missing_context_warning(missing_context: list[str]) -> list[str]:
@@ -293,9 +300,83 @@ class MethodologyExtractor:
         return parsed
 
 
+def extract_methodology_from_transcript(transcript: str) -> MethodologyExtractionResult:
+    extractor = MethodologyExtractor()
+    return extractor.extract(MethodologyExtractionRequest(transcript=transcript))
+
+
+def persist_methodology_extraction(
+    coach_id: str,
+    playbook: dict[str, Any],
+    persona_system_prompt: str,
+    transcript: str,
+    settings: Settings,
+    organization_id: str | None = None,
+) -> dict[str, Any]:
+    if not settings.supabase_url:
+        raise RuntimeError("Supabase URL is not configured")
+    if not settings.supabase_service_role_key:
+        raise RuntimeError("Supabase service role key is not configured")
+
+    headers = {
+        "apikey": settings.supabase_service_role_key,
+        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+
+    methodology_payload = {
+        "coach_id": coach_id,
+        "organization_id": organization_id,
+        "playbook": playbook,
+        "persona_system_prompt": persona_system_prompt,
+        "source_transcript": transcript,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    methodology_response = requests.post(
+        f"{settings.supabase_url.rstrip('/')}/rest/v1/methodologies",
+        headers=headers,
+        json=methodology_payload,
+        timeout=20,
+    )
+    methodology_response.raise_for_status()
+
+    methodology_rows = methodology_response.json()
+    methodology_row = methodology_rows[0] if isinstance(methodology_rows, list) and methodology_rows else {}
+
+    coach_payload = {
+        "methodology_playbook": playbook,
+        "methodology_updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    coach_response = requests.patch(
+        f"{settings.supabase_url.rstrip('/')}/rest/v1/coaches?id=eq.{coach_id}",
+        headers=headers,
+        json=coach_payload,
+        timeout=20,
+    )
+    coach_response.raise_for_status()
+
+    updated_coach_row = None
+    try:
+        coach_rows = coach_response.json()
+        if isinstance(coach_rows, list) and coach_rows:
+            updated_coach_row = coach_rows[0]
+    except ValueError:
+        updated_coach_row = None
+
+    return {
+        "methodology_row": methodology_row,
+        "updated_coach_row": updated_coach_row,
+    }
+
+
 __all__ = [
     "MethodologyExtractionRequest",
     "MethodologyExtractionResult",
     "MethodologyExtractor",
     "SYSTEM_PROMPT",
+    "extract_methodology_from_transcript",
+    "persist_methodology_extraction",
 ]
