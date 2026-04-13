@@ -29,7 +29,6 @@ def get_settings():
 from .scope import DataScope, apply_scope_query, resolve_scope_from_env
 from .whatsapp_service import WhatsAppRecipient, WhatsAppService
 from .methodology_extractor import (
-    METHODOLOGY_EXTRACTION_PROMPT,
     extract_methodology_from_transcript,
     persist_methodology_extraction
 )
