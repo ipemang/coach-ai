@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -81,6 +82,30 @@ def _phone_variants(phone_number: str) -> list[str]:
         if value and value not in variants:
             variants.append(value)
     return variants
+
+
+def _is_valid_uuid(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    candidate = value.strip()
+    if not candidate or candidate == "1":
+        return False
+    try:
+        uuid.UUID(candidate)
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return True
+
+
+def _sanitize_scope(scope: DataScope | None) -> DataScope | None:
+    if scope is None:
+        return None
+
+    organization_id = scope.organization_id if _is_valid_uuid(scope.organization_id) else None
+    coach_id = scope.coach_id if _is_valid_uuid(scope.coach_id) else None
+    if organization_id is None and coach_id is None:
+        return None
+    return DataScope(organization_id=organization_id, coach_id=coach_id)
 
 
 def _normalize_phone_number(phone_number: str) -> str:
@@ -204,12 +229,14 @@ def _extract_rows(response: Any) -> list[dict[str, Any]]:
 async def _find_athlete_by_phone(supabase_client: Any, phone_number: str, scope: DataScope | None) -> AthleteRecord | None:
     variants = _phone_variants(phone_number)
     table = supabase_client.table("athletes")
+    query_scope = _sanitize_scope(scope)
 
     for value in variants:
         query = table.select("*") if hasattr(table, "select") else table
         if hasattr(query, "eq"):
             query = query.eq("phone_number", value)
-        query = apply_scope_query(query, scope)
+        if query_scope is not None:
+            query = apply_scope_query(query, query_scope)
         rows = await _query_rows(query)
         if rows:
             row = _match_row(rows, _normalize_phone_number(phone_number))
@@ -365,10 +392,10 @@ async def _resolve_supabase_client(request: Request) -> Any:
 
 
 async def _resolve_whatsapp_service(request: Request) -> Any:
-    scope = _resolve_scope(request)
+    scope = _sanitize_scope(_resolve_scope(request))
     service = getattr(request.app.state, "whatsapp_service", None)
     if service is not None and hasattr(service, "send_text_message"):
-        if getattr(service, "scope", None) is None and scope is not None:
+        if getattr(service, "scope", None) != scope:
             service.scope = scope
         return service
 
