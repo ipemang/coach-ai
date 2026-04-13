@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Protocol
+
+from app.services.scope import DataScope, apply_scope_payload, apply_scope_query, require_scope
 from zoneinfo import ZoneInfo
 
 from app.models.checkinsend_log import CheckinSendLog
-
-
-logger = logging.getLogger(__name__)
 
 
 class SupabaseClientProtocol(Protocol):
@@ -50,6 +48,7 @@ class WhatsAppService:
     whatsapp_client: WhatsAppClientProtocol
     supabase_client: SupabaseClientProtocol | None = None
     send_log_table: str = "checkin_send_logs"
+    scope: DataScope | None = None
 
     async def send_text_message(
         self,
@@ -71,21 +70,9 @@ class WhatsAppService:
                     body=body,
                     **kwargs,
                 )
-                logger.info(
-                    "WhatsApp API response status_code=%s body=%s",
-                    self._extract_response_status_code(provider_response),
-                    self._extract_response_body(provider_response),
-                )
                 last_error = None
                 break
             except Exception as exc:  # pragma: no cover - downstream transport failure
-                response = getattr(exc, "response", None)
-                if response is not None:
-                    logger.info(
-                        "WhatsApp API error response status_code=%s body=%s",
-                        self._extract_response_status_code(response),
-                        self._extract_response_body(response),
-                    )
                 last_error = exc
                 if attempt == 0:
                     continue
@@ -180,7 +167,8 @@ class WhatsAppService:
         if self.supabase_client is None:
             return
 
-        table = await self.supabase_client.table(self.send_log_table)
+        scope = require_scope(self.scope, context="WhatsApp send log update")
+        table = self.supabase_client.table(self.send_log_table)
         payload = {
             "status": "sent",
             "sent_at": datetime.now(timezone.utc).isoformat(),
@@ -190,7 +178,7 @@ class WhatsAppService:
         }
 
         if hasattr(table, "update") and hasattr(table, "eq"):
-            updater = table.update(payload).eq("dedupe_key", send_log.dedupe_key)
+            updater = apply_scope_query(table.update(payload).eq("dedupe_key", send_log.dedupe_key), scope)
             if hasattr(updater, "execute"):
                 await updater.execute()
             else:
@@ -198,7 +186,7 @@ class WhatsAppService:
             return
 
         if hasattr(table, "upsert"):
-            await table.upsert({**send_log.to_row(), **payload})
+            await table.upsert(apply_scope_payload({**send_log.to_row(), **payload}, scope))
             return
 
     async def _mark_send_log_failed(
@@ -210,7 +198,8 @@ class WhatsAppService:
         if self.supabase_client is None:
             return
 
-        table = await self.supabase_client.table(self.send_log_table)
+        scope = require_scope(self.scope, context="WhatsApp send log update")
+        table = self.supabase_client.table(self.send_log_table)
         payload = {
             "status": "failed",
             "error_message": error_message,
@@ -218,7 +207,7 @@ class WhatsAppService:
         }
 
         if hasattr(table, "update") and hasattr(table, "eq"):
-            updater = table.update(payload).eq("dedupe_key", send_log.dedupe_key)
+            updater = apply_scope_query(table.update(payload).eq("dedupe_key", send_log.dedupe_key), scope)
             if hasattr(updater, "execute"):
                 await updater.execute()
             else:
@@ -226,7 +215,7 @@ class WhatsAppService:
             return
 
         if hasattr(table, "upsert"):
-            await table.upsert({**send_log.to_row(), **payload})
+            await table.upsert(apply_scope_payload({**send_log.to_row(), **payload}, scope))
             return
 
     @staticmethod
@@ -245,6 +234,11 @@ class WhatsAppService:
             for key in ("id", "message_id", "sid", "provider_message_id"):
                 if response.get(key):
                     return str(response[key])
+            messages = response.get("messages")
+            if isinstance(messages, list):
+                for message in messages:
+                    if isinstance(message, dict) and message.get("id"):
+                        return str(message["id"])
         for key in ("id", "message_id", "sid", "provider_message_id"):
             if hasattr(response, key):
                 value = getattr(response, key)
@@ -258,45 +252,6 @@ class WhatsAppService:
             return {}
         if isinstance(response, dict):
             return response
-        if hasattr(response, "__dict__"):
-            return {k: v for k, v in vars(response).items() if not k.startswith("_")}
-        return {"value": response}
-
-    @staticmethod
-    def _extract_response_status_code(response: Any) -> int | None:
-        if response is None:
-            return None
-        if isinstance(response, dict):
-            status_code = response.get("status_code")
-            return status_code if isinstance(status_code, int) else None
-        status_code = getattr(response, "status_code", None)
-        return status_code if isinstance(status_code, int) else None
-
-    @staticmethod
-    def _extract_response_body(response: Any) -> Any:
-        if response is None:
-            return None
-        if isinstance(response, dict):
-            if "body" in response and isinstance(response["body"], (dict, list)):
-                return response["body"]
-            return response
-
-        json_method = getattr(response, "json", None)
-        if callable(json_method):
-            try:
-                return json_method()
-            except Exception:
-                pass
-
-        text = getattr(response, "text", None)
-        if isinstance(text, str) and text.strip():
-            import json
-
-            try:
-                return json.loads(text)
-            except Exception:
-                return {"text": text}
-
         if hasattr(response, "__dict__"):
             return {k: v for k, v in vars(response).items() if not k.startswith("_")}
         return {"value": response}
