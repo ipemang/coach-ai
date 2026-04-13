@@ -10,9 +10,14 @@ isolated.
 from __future__ import annotations
 
 import inspect
+import logging
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Literal, Protocol
+
+from app.core.cache import JsonCache, build_cache_key
+
+logger = logging.getLogger(__name__)
 
 Provider = Literal["garmin", "strava", "oura"]
 
@@ -351,9 +356,12 @@ class BiometricsService:
         self,
         supabase_client: SupabaseClientProtocol | None = None,
         provider_adapters: dict[Provider, BiometricsProviderAdapter] | None = None,
+        cache_client: Any | None = None,
+        cache_ttl_seconds: int = 300,
     ) -> None:
         self.supabase_client = supabase_client
         self.provider_adapters = provider_adapters or {}
+        self.cache = JsonCache(cache_client, namespace="coach-ai:biometrics", default_ttl_seconds=cache_ttl_seconds)
 
     def register_provider_adapter(
         self,
@@ -387,8 +395,16 @@ class BiometricsService:
     ) -> list[dict[str, Any]]:
         """Fetch Garmin workout summaries for the requested day."""
 
+        cache_key = build_cache_key("garmin", "workout_summaries", athlete_id, day)
+        cached = await self.cache.get(cache_key)
+        if cached is not None:
+            logger.debug("biometric_cache_hit", extra={"provider": "garmin", "lookup": "workout_summaries", "athlete_id": athlete_id, "day": day.isoformat()})
+            return cached if isinstance(cached, list) else []
+
         adapter = self._get_provider_adapter("garmin")
-        return await adapter.fetch_garmin_workout_summaries(athlete_id, day, auth)
+        result = await adapter.fetch_garmin_workout_summaries(athlete_id, day, auth)
+        await self.cache.set(cache_key, result)
+        return result
 
     async def fetch_garmin_primary_biometrics(
         self,
@@ -398,8 +414,16 @@ class BiometricsService:
     ) -> dict[str, Any] | None:
         """Fetch Garmin primary biometrics for the requested day."""
 
+        cache_key = build_cache_key("garmin", "primary_biometrics", athlete_id, day)
+        cached = await self.cache.get(cache_key)
+        if cached is not None:
+            logger.debug("biometric_cache_hit", extra={"provider": "garmin", "lookup": "primary_biometrics", "athlete_id": athlete_id, "day": day.isoformat()})
+            return cached if isinstance(cached, dict) else None
+
         adapter = self._get_provider_adapter("garmin")
-        return await adapter.fetch_garmin_primary_biometrics(athlete_id, day, auth)
+        result = await adapter.fetch_garmin_primary_biometrics(athlete_id, day, auth)
+        await self.cache.set(cache_key, result)
+        return result
 
     async def fetch_strava_activity_sync(
         self,
@@ -409,8 +433,16 @@ class BiometricsService:
     ) -> list[dict[str, Any]]:
         """Fetch Strava activity sync payloads for the requested day."""
 
+        cache_key = build_cache_key("strava", "activity_sync", athlete_id, day)
+        cached = await self.cache.get(cache_key)
+        if cached is not None:
+            logger.debug("biometric_cache_hit", extra={"provider": "strava", "lookup": "activity_sync", "athlete_id": athlete_id, "day": day.isoformat()})
+            return cached if isinstance(cached, list) else []
+
         adapter = self._get_provider_adapter("strava")
-        return await adapter.fetch_strava_activity_sync(athlete_id, day, auth)
+        result = await adapter.fetch_strava_activity_sync(athlete_id, day, auth)
+        await self.cache.set(cache_key, result)
+        return result
 
     async def fetch_strava_segment_data(
         self,
@@ -420,8 +452,16 @@ class BiometricsService:
     ) -> list[dict[str, Any]]:
         """Fetch Strava segment data for the requested day."""
 
+        cache_key = build_cache_key("strava", "segment_data", athlete_id, day)
+        cached = await self.cache.get(cache_key)
+        if cached is not None:
+            logger.debug("biometric_cache_hit", extra={"provider": "strava", "lookup": "segment_data", "athlete_id": athlete_id, "day": day.isoformat()})
+            return cached if isinstance(cached, list) else []
+
         adapter = self._get_provider_adapter("strava")
-        return await adapter.fetch_strava_segment_data(athlete_id, day, auth)
+        result = await adapter.fetch_strava_segment_data(athlete_id, day, auth)
+        await self.cache.set(cache_key, result)
+        return result
 
     async def fetch_oura_readiness(
         self,
@@ -431,8 +471,16 @@ class BiometricsService:
     ) -> dict[str, Any] | None:
         """Fetch Oura readiness payload for the requested day."""
 
+        cache_key = build_cache_key("oura", "readiness", athlete_id, day)
+        cached = await self.cache.get(cache_key)
+        if cached is not None:
+            logger.debug("biometric_cache_hit", extra={"provider": "oura", "lookup": "readiness", "athlete_id": athlete_id, "day": day.isoformat()})
+            return cached if isinstance(cached, dict) else None
+
         adapter = self._get_provider_adapter("oura")
-        return await adapter.fetch_oura_readiness(athlete_id, day, auth)
+        result = await adapter.fetch_oura_readiness(athlete_id, day, auth)
+        await self.cache.set(cache_key, result)
+        return result
 
     async def fetch_oura_hrv(
         self,
@@ -442,8 +490,16 @@ class BiometricsService:
     ) -> dict[str, Any] | None:
         """Fetch Oura HRV payload for the requested day."""
 
+        cache_key = build_cache_key("oura", "hrv", athlete_id, day)
+        cached = await self.cache.get(cache_key)
+        if cached is not None:
+            logger.debug("biometric_cache_hit", extra={"provider": "oura", "lookup": "hrv", "athlete_id": athlete_id, "day": day.isoformat()})
+            return cached if isinstance(cached, dict) else None
+
         adapter = self._get_provider_adapter("oura")
-        return await adapter.fetch_oura_hrv(athlete_id, day, auth)
+        result = await adapter.fetch_oura_hrv(athlete_id, day, auth)
+        await self.cache.set(cache_key, result)
+        return result
 
     async def fetch_oura_sleep_quality(
         self,
@@ -453,8 +509,16 @@ class BiometricsService:
     ) -> dict[str, Any] | None:
         """Fetch Oura sleep quality payload for the requested day."""
 
+        cache_key = build_cache_key("oura", "sleep_quality", athlete_id, day)
+        cached = await self.cache.get(cache_key)
+        if cached is not None:
+            logger.debug("biometric_cache_hit", extra={"provider": "oura", "lookup": "sleep_quality", "athlete_id": athlete_id, "day": day.isoformat()})
+            return cached if isinstance(cached, dict) else None
+
         adapter = self._get_provider_adapter("oura")
-        return await adapter.fetch_oura_sleep_quality(athlete_id, day, auth)
+        result = await adapter.fetch_oura_sleep_quality(athlete_id, day, auth)
+        await self.cache.set(cache_key, result)
+        return result
 
     def normalize_garmin_payload(
         self,
