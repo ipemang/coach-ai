@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field
 
 from app.agents.check_in import AthleteCheckIn, CheckInRecommendation, assess_check_in, persist_check_in_state
 from app.core.security import AuthenticatedPrincipal, require_roles, resolve_coach_scope
-from app.services import extract_methodology_from_transcript, get_settings, persist_methodology_extraction
+from app.core.config import get_settings
+from app.services.methodology_extractor import (extract_methodology_from_transcript, persist_methodology_extraction)
 from app.services.athlete_memory_search import AthleteMemorySearchService
 from app.services.scope import DataScope
 
