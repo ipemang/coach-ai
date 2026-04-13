@@ -1,0 +1,28 @@
+from future import annotations
+from typing import Optional
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    groq_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    openai_model: str = "gpt-4-turbo"
+    stripe_secret_key: Optional[str] = None
+    supabase_url: Optional[str] = None
+    supabase_service_role_key: Optional[str] = None
+    organization_id: str = "1"
+    coach_id: str = "1"
+    whatsapp_access_token: Optional[str] = None
+    whatsapp_phone_number_id: Optional[str] = None
+    whatsapp_verify_token: Optional[str] = None
+    whatsapp_webhook_secret: Optional[str] = None
+
+    model_config = SettingsConfigDict(
+        case_sensitive=False,
+        env_file=".env",
+        extra="ignore",
+    )
+
+settings = Settings()
+
+def get_settings() -> Settings:
+    return settings
