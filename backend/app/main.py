@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 from uuid import uuid4
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -24,8 +24,8 @@ from .services.whatsapp_service import WhatsAppService
 class WhatsAppGraphClient:
     def __init__(
         self,
-        access_token: str | None,
-        phone_number_id: str | None,
+        access_token: Optional[str],
+        phone_number_id: Optional[str],
     ) -> None:
         self.access_token = access_token
         self.phone_number_id = phone_number_id
