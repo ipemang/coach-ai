@@ -1,14 +1,53 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+
 from app.api import coach as coach_module
+from app.api import webhooks as webhooks_module
 from app.api.v1 import routes as v1_routes
 from app.agents.check_in import CheckInRecommendation
+from app.core import security as security_module
 from app.main import app
 from app.services.coach_workflow import CoachTriageItem
+from app.services.scope import DataScope
 from fastapi.testclient import TestClient
 
 
 client = TestClient(app)
+
+
+async def _fake_authenticated_principal(_request):
+    return security_module.AuthenticatedPrincipal(
+        user_id="user-123",
+        email="coach@example.com",
+        roles=frozenset({"authenticated", "athlete", "coach"}),
+        organization_id="org-1",
+        coach_id="coach-123",
+    )
+
+
+async def _fake_coach_principal(_request):
+    return security_module.AuthenticatedPrincipal(
+        user_id="user-123",
+        email="coach@example.com",
+        roles=frozenset({"authenticated", "coach"}),
+        organization_id="org-1",
+        coach_id="coach-123",
+    )
+
+
+class _FakeWhatsAppSendResult:
+    delivered = True
+    provider_message_id = "msg-123"
+    body = "reply text"
+    error_message = None
+
+
+class _FakeWhatsAppService:
+    async def send_text_message(self, *_args, **_kwargs):
+        return _FakeWhatsAppSendResult()
 
 
 def test_health_endpoint() -> None:
@@ -28,10 +67,11 @@ def test_check_in_endpoint(monkeypatch) -> None:
             rationale="Looks good.",
         )
 
-    def fake_persist_check_in_state(payload, recommendation):
-        called["persisted"] = (payload.athlete_id, recommendation.recommended_action)
+    def fake_persist_check_in_state(payload, recommendation, **kwargs):
+        called["persisted"] = (payload.athlete_id, recommendation.recommended_action, kwargs)
         return True
 
+    monkeypatch.setattr(security_module, "authenticate_request", _fake_authenticated_principal)
     monkeypatch.setattr(v1_routes, "assess_check_in", fake_assess_check_in)
     monkeypatch.setattr(v1_routes, "persist_check_in_state", fake_persist_check_in_state)
 
@@ -56,7 +96,10 @@ def test_check_in_endpoint(monkeypatch) -> None:
         "fatigue_expectation": None,
     }
     assert called["athlete_id"] == "athlete-123"
-    assert called["persisted"] == ("athlete-123", "continue planned session")
+    assert called["persisted"][0] == "athlete-123"
+    assert called["persisted"][1] == "continue planned session"
+    assert called["persisted"][2]["organization_id"] == "org-1"
+    assert called["persisted"][2]["coach_id"] == "coach-123"
 
 
 def test_triage_endpoint(monkeypatch) -> None:
@@ -78,13 +121,15 @@ def test_triage_endpoint(monkeypatch) -> None:
     )
 
     class FakeWorkflow:
-        def __init__(self, *, supabase_client, whatsapp_service):
+        def __init__(self, *, supabase_client, whatsapp_service, scope):
             self.supabase_client = supabase_client
             self.whatsapp_service = whatsapp_service
+            self.scope = scope
 
         async def build_triage(self):
             return [expected_item]
 
+    monkeypatch.setattr(security_module, "authenticate_request", _fake_coach_principal)
     monkeypatch.setattr(coach_module, "CoachWorkflow", FakeWorkflow)
 
     response = client.get("/api/v1/coach/triage")
@@ -105,6 +150,58 @@ def test_triage_endpoint(monkeypatch) -> None:
             "memory_state": {"hrv_flag": "low"},
         }
     ]
+
+
+def test_whatsapp_webhook_signature_verification(monkeypatch) -> None:
+    secret = "whatsapp-secret"
+    body = json.dumps({"From": "+15551234567", "Body": "hello"}).encode("utf-8")
+    signature = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+
+    class _FakeSettings:
+        whatsapp_webhook_secret = secret
+
+    async def fake_resolve_supabase_client(_request):
+        return object()
+
+    def fake_resolve_scope(_request):
+        return DataScope(organization_id="org-1", coach_id="coach-123")
+
+    async def fake_find_athlete_by_phone(_supabase_client, _phone_number, _scope):
+        return webhooks_module.AthleteRecord(
+            athlete_id="athlete-123",
+            phone_number="+15551234567",
+            timezone_name="America/New_York",
+            display_name="Sam",
+            organization_id="org-1",
+            coach_id="coach-123",
+        )
+
+    async def fake_route_to_checkin_logic(_request, _athlete, _message_text):
+        return "reply text"
+
+    async def fake_resolve_whatsapp_service(_request):
+        return _FakeWhatsAppService()
+
+    monkeypatch.setattr(webhooks_module, "get_settings", lambda: _FakeSettings())
+    monkeypatch.setattr(webhooks_module, "_resolve_supabase_client", fake_resolve_supabase_client)
+    monkeypatch.setattr(webhooks_module, "_resolve_scope", fake_resolve_scope)
+    monkeypatch.setattr(webhooks_module, "_find_athlete_by_phone", fake_find_athlete_by_phone)
+    monkeypatch.setattr(webhooks_module, "_route_to_checkin_logic", fake_route_to_checkin_logic)
+    monkeypatch.setattr(webhooks_module, "_resolve_whatsapp_service", fake_resolve_whatsapp_service)
+
+    response = client.post(
+        "/api/v1/webhooks/whatsapp",
+        content=body,
+        headers={
+            "content-type": "application/json",
+            "x-hub-signature-256": f"sha256={signature}",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "processed"
+    assert response.json()["reply_sent"] is True
+
 
 from app.api.v1 import invites as invites_module
 
