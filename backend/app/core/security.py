@@ -65,11 +65,16 @@ def _extract_token(request: FastAPIRequest) -> str:
 
 def _build_supabase_user_url() -> str:
     settings = get_settings()
+    if not settings.supabase_url:
+        raise HTTPException(status_code=503, detail="Supabase URL is not configured")
     return f"{settings.supabase_url.rstrip('/')}/auth/v1/user"
 
 
 def _fetch_supabase_user(token: str) -> dict[str, Any]:
     settings = get_settings()
+    if not settings.supabase_service_role_key:
+        raise HTTPException(status_code=503, detail="Supabase service role key is not configured")
+
     request = Request(
         _build_supabase_user_url(),
         method="GET",

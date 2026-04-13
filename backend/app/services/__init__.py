@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     groq_api_key: str | None = None
     stripe_secret_key: str | None = None
     openai_model: str = "gpt-4o-mini"
-    supabase_url: str
-    supabase_service_role_key: str
+    supabase_url: str | None = None
+    supabase_service_role_key: str | None = None
     organization_id: str | None = None
     coach_id: str | None = None
     integration_frontend_base_url: str | None = None
@@ -188,6 +188,8 @@ def extract_methodology_from_transcript(transcript: str, settings: Settings | No
 
     if not resolved_settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured")
+    if not resolved_settings.supabase_url or not resolved_settings.supabase_service_role_key:
+        raise RuntimeError("Supabase settings are not configured")
 
     response = _request_json(
         "https://api.openai.com/v1/chat/completions",
@@ -232,6 +234,8 @@ def update_coach_methodology(
 ) -> dict[str, Any] | None:
     resolved_settings = settings or get_settings()
     resolved_organization_id = _resolve_organization_id(organization_id, resolved_settings)
+    if not resolved_settings.supabase_url or not resolved_settings.supabase_service_role_key:
+        raise RuntimeError("Supabase settings are not configured")
     url = _build_coach_url(resolved_settings, coach_id, resolved_organization_id)
 
     response = _request_json(
@@ -262,6 +266,8 @@ def persist_methodology_extraction(
 ) -> dict[str, Any]:
     resolved_settings = settings or get_settings()
     resolved_organization_id = _resolve_organization_id(organization_id, resolved_settings)
+    if not resolved_settings.supabase_url or not resolved_settings.supabase_service_role_key:
+        raise RuntimeError("Supabase settings are not configured")
 
     methodology_payload: dict[str, Any] = {
         "coach_id": coach_id,

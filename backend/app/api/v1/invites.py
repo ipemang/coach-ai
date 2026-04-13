@@ -109,6 +109,8 @@ def _string_value(value: Any) -> str | None:
 
 def _get_invite_secret() -> str:
     settings = get_settings()
+    if not settings.supabase_service_role_key:
+        raise HTTPException(status_code=503, detail="Supabase service role key is not configured")
     return settings.supabase_service_role_key
 
 
