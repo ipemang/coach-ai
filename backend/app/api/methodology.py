@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from ..core.security import AuthenticatedPrincipal, require_roles, resolve_coach_scope
 from ..services import get_settings, persist_methodology_extraction
 from ..services.methodology_extractor import MethodologyExtractionRequest, MethodologyExtractor
 
@@ -28,7 +29,6 @@ def _build_persona_system_prompt(playbook: dict[str, Any]) -> str:
         parts.append("Execution rules: " + "; ".join(str(item) for item in execution_rules if item))
     parts.append("Plan conservatively, prioritize evidence-supported decisions, and communicate clearly and directly with athletes.")
     return " ".join(parts).strip()
-
 
 
 class TranscriptExtractionInput(BaseModel):
@@ -55,8 +55,13 @@ class TranscriptExtractionOutput(BaseModel):
 
 
 @router.post("/extract-methodology", response_model=TranscriptExtractionOutput, response_model_exclude_none=True)
-def extract_methodology(payload: TranscriptExtractionInput) -> TranscriptExtractionOutput:
-    request = MethodologyExtractionRequest(
+def extract_methodology(
+    request: Request,
+    payload: TranscriptExtractionInput,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach", "admin")),
+) -> TranscriptExtractionOutput:
+    request_scope = getattr(request.app.state, "scope", None)
+    extraction_request = MethodologyExtractionRequest(
         transcript=payload.transcript,
         transcripts=payload.transcripts,
         athlete_name=payload.athlete_name,
@@ -64,20 +69,27 @@ def extract_methodology(payload: TranscriptExtractionInput) -> TranscriptExtract
         event=payload.event,
         notes=payload.notes,
     )
+    methodology_id = None
+    coach_updated = None
+
     try:
-        result = extractor.extract(request)
-        methodology_id = None
-        coach_updated = None
-        combined_transcript = request.combined_transcript()
+        result = extractor.extract(extraction_request)
+        combined_transcript = extraction_request.combined_transcript()
         if payload.coach_id and combined_transcript:
+            scope = resolve_coach_scope(
+                principal,
+                organization_id=payload.organization_id,
+                coach_id=payload.coach_id,
+                fallback_scope=request_scope,
+            )
             settings = get_settings()
             persisted = persist_methodology_extraction(
-                payload.coach_id,
+                scope.coach_id or payload.coach_id,
                 result.playbook,
                 _build_persona_system_prompt(result.playbook),
                 combined_transcript,
                 settings,
-                organization_id=payload.organization_id,
+                organization_id=scope.organization_id,
             )
             methodology_id = persisted["methodology_row"].get("id")
             coach_updated = persisted["updated_coach_row"] is not None
