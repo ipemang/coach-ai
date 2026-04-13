@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 from uuid import uuid4
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -22,15 +22,21 @@ from .services.whatsapp_service import WhatsAppService
 
 
 class WhatsAppGraphClient:
-    def __init__(self, access_token: str | None, phone_number_id: str | None) -> None:
+    def __init__(
+        self,
+        access_token: str | None,
+        phone_number_id: str | None,
+        graph_api_version: Optional[str] = None,
+    ) -> None:
         self.access_token = access_token
         self.phone_number_id = phone_number_id
+        self.graph_api_version = graph_api_version or "v19.0"
 
     async def send_message(self, to: str, body: str, **kwargs: Any) -> dict[str, Any]:
         if not self.access_token or not self.phone_number_id:
             raise RuntimeError("WhatsApp client is not configured")
 
-        url = f"https://graph.facebook.com/v19.0/{self.phone_number_id}/messages"
+        url = f"https://graph.facebook.com/{self.graph_api_version}/{self.phone_number_id}/messages"
         payload: dict[str, Any] = {
             "messaging_product": "whatsapp",
             "to": to,
