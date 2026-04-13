@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .scope import DataScope, apply_scope_query, resolve_scope_from_env
+from .scope import DataScope as DataScope, apply_scope_query as apply_scope_query, resolve_scope_from_env as resolve_scope_from_env
 
 
 class Settings(BaseSettings):
