@@ -202,40 +202,30 @@ def _extract_rows(response: Any) -> list[dict[str, Any]]:
 
 
 async def _find_athlete_by_phone(supabase_client: Any, phone_number: str, scope: DataScope | None) -> AthleteRecord | None:
-    normalized_phone = _normalize_phone_number(phone_number)
     variants = _phone_variants(phone_number)
     table = supabase_client.table("athletes")
 
-    search_fields = ("phone_number", "whatsapp_number", "phone")
-    for field_name in search_fields:
-        for value in variants:
-            query = table.select("*") if hasattr(table, "select") else table
-            if hasattr(query, "eq"):
-                query = query.eq(field_name, value)
-            query = apply_scope_query(query, scope)
-            rows = await _query_rows(query)
-            if rows:
-                row = _match_row(rows, normalized_phone)
-                if row is not None:
-                    return row
-
-    if hasattr(table, "select"):
-        rows = await _query_rows(apply_scope_query(table.select("*"), scope))
-        row = _match_row(rows, normalized_phone)
-        if row is not None:
-            return row
+    for value in variants:
+        query = table.select("*") if hasattr(table, "select") else table
+        if hasattr(query, "eq"):
+            query = query.eq("phone_number", value)
+        query = apply_scope_query(query, scope)
+        rows = await _query_rows(query)
+        if rows:
+            row = _match_row(rows, _normalize_phone_number(phone_number))
+            if row is not None:
+                return row
 
     return None
 
 
 def _match_row(rows: list[dict[str, Any]], normalized_phone: str) -> AthleteRecord | None:
     for row in rows:
-        for key in ("phone_number", "whatsapp_number", "phone"):
-            value = row.get(key)
-            if isinstance(value, str) and _normalize_phone_number(value) == normalized_phone:
-                return _build_athlete_record(row, matched_phone=value)
+        value = row.get("phone_number")
+        if isinstance(value, str) and _normalize_phone_number(value) == normalized_phone:
+            return _build_athlete_record(row, matched_phone=value)
     if rows:
-        return _build_athlete_record(rows[0], matched_phone=str(rows[0].get("phone_number") or rows[0].get("whatsapp_number") or rows[0].get("phone") or ""))
+        return _build_athlete_record(rows[0], matched_phone=str(rows[0].get("phone_number") or ""))
     return None
 
 
@@ -260,7 +250,7 @@ def _coerce_float(value: Any) -> float | None:
 def _build_athlete_record(row: dict[str, Any], *, matched_phone: str) -> AthleteRecord:
     missing_fields: list[str] = []
     athlete_id = str(row.get("id") or row.get("athlete_id") or "")
-    phone_number = str(row.get("phone_number") or row.get("whatsapp_number") or row.get("phone") or matched_phone or "")
+    phone_number = str(row.get("phone_number") or matched_phone or "")
     timezone_name = str(row.get("timezone_name") or row.get("timezone") or "UTC")
     display_name = row.get("display_name") or row.get("name")
     organization_id = row.get("organization_id") or row.get("org_id")
