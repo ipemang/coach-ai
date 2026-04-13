@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+from app.services.predictive_analysis import PredictiveAnalysisService
 from app.services.scope import DataScope, apply_scope_payload, apply_scope_query, require_scope
 from app.services.whatsapp_service import WhatsAppRecipient, WhatsAppService
 
@@ -32,6 +33,8 @@ class CoachTriageItem:
     soreness_score: float | None
     missed_workouts: int
     reasons: list[str] = field(default_factory=list)
+    predicted_state_summary: str | None = None
+    predicted_state_flags: list[Any] = field(default_factory=list)
     memory_state: dict[str, Any] = field(default_factory=dict)
 
 
@@ -60,6 +63,7 @@ class CoachWorkflow:
         suggestions_table: str = "suggestions",
         athletes_table: str = "athletes",
         scope: DataScope | None = None,
+        predictive_analysis_service: PredictiveAnalysisService | None = None,
     ) -> None:
         self.supabase_client = supabase_client
         self.whatsapp_service = whatsapp_service
@@ -67,17 +71,21 @@ class CoachWorkflow:
         self.suggestions_table = suggestions_table
         self.athletes_table = athletes_table
         self.scope = scope
+        self.predictive_analysis_service = predictive_analysis_service
 
     async def build_triage(self) -> list[CoachTriageItem]:
         scope = require_scope(self.scope, context="Coach triage")
         table = await self.supabase_client.table(self.memory_states_table)
         rows = await _query_rows(apply_scope_query(_select_all(table), scope))
         latest_by_athlete: dict[str, dict[str, Any]] = {}
+        athlete_history: dict[str, list[dict[str, Any]]] = {}
 
         for row in rows:
             athlete_id = _string_value(row.get("athlete_id") or row.get("athleteId") or row.get("user_id") or row.get("userId"))
             if not athlete_id:
                 continue
+
+            athlete_history.setdefault(athlete_id, []).append(row)
 
             row_timestamp = _row_datetime(row, ("updated_at", "created_at", "recorded_at", "measured_at", "timestamp", "day"))
             current = latest_by_athlete.get(athlete_id)
@@ -91,7 +99,16 @@ class CoachWorkflow:
 
         triage_items: list[CoachTriageItem] = []
         for athlete_id, row in latest_by_athlete.items():
-            triage_items.append(self._build_triage_item(athlete_id, row))
+            predicted_state = None
+            history_rows = athlete_history.get(athlete_id, [])
+            if self.predictive_analysis_service is not None or history_rows:
+                service = self.predictive_analysis_service or PredictiveAnalysisService(
+                    self.supabase_client,
+                    memory_states_table=self.memory_states_table,
+                    scope=self.scope,
+                )
+                predicted_state = await service.analyze_athlete(athlete_id, history_rows, now=None)
+            triage_items.append(self._build_triage_item(athlete_id, row, predicted_state=predicted_state))
 
         triage_items.sort(key=lambda item: (-item.urgency_score, item.athlete_name or item.athlete_id))
         return triage_items
@@ -258,7 +275,7 @@ class CoachWorkflow:
 
         raise RuntimeError("Supabase table does not support update operations")
 
-    def _build_triage_item(self, athlete_id: str, row: dict[str, Any]) -> CoachTriageItem:
+    def _build_triage_item(self, athlete_id: str, row: dict[str, Any], *, predicted_state: Any | None = None) -> CoachTriageItem:
         athlete_name = _string_value(row.get("athlete_display_name") or row.get("athlete_name") or row.get("display_name") or row.get("name"))
         hrv_flag = _string_value(
             row.get("hrv_flag")
@@ -276,6 +293,15 @@ class CoachWorkflow:
 
         urgency_score = min(100.0, hrv_score + soreness_score + missed_score)
         reasons = [reason for reason in (hrv_reason, soreness_reason, missed_reason) if reason]
+        predicted_state_flags: list[Any] = []
+        predicted_state_summary: str | None = None
+        if predicted_state is not None:
+            predicted_state_flags = [flag for flag in getattr(predicted_state, "flags", [])]
+            predicted_state_summary = getattr(predicted_state, "summary", None)
+            if predicted_state_flags:
+                urgency_score = min(100.0, urgency_score + max(getattr(flag, "score", 0.0) for flag in predicted_state_flags) * 0.3)
+                reasons.extend(_predicted_reasons(predicted_state_flags))
+
         urgency_label = _urgency_label(urgency_score)
         latest_at = _row_datetime(row, ("updated_at", "created_at", "recorded_at", "measured_at", "timestamp", "day"))
 
@@ -290,6 +316,8 @@ class CoachWorkflow:
             soreness_score=_float_or_none(soreness_value),
             missed_workouts=_int_or_zero(missed_workouts_value),
             reasons=reasons,
+            predicted_state_summary=predicted_state_summary,
+            predicted_state_flags=predicted_state_flags,
             memory_state=_clean_row(row),
         )
 
@@ -438,6 +466,18 @@ def _score_soreness(value: Any) -> tuple[float, str | None]:
     if normalized in {"mild", "low"}:
         return 4.0, f"Soreness is {normalized}"
     return 0.0, None
+
+
+def _predicted_reasons(flags: list[Any]) -> list[str]:
+    reasons: list[str] = []
+    for flag in flags:
+        label = getattr(flag, "label", None) or getattr(flag, "code", None)
+        reason = getattr(flag, "reason", None)
+        if label and reason:
+            reasons.append(f"{label}: {reason}")
+        elif label:
+            reasons.append(str(label))
+    return reasons
 
 
 def _score_missed_workouts(value: Any) -> tuple[float, str | None]:

@@ -51,6 +51,9 @@ def test_check_in_endpoint(monkeypatch) -> None:
     assert response.json() == {
         "recommended_action": "continue planned session",
         "rationale": "Looks good.",
+        "baseline_adjustments": [],
+        "recovery_expectation": None,
+        "fatigue_expectation": None,
     }
     assert called["athlete_id"] == "athlete-123"
     assert called["persisted"] == ("athlete-123", "continue planned session")
