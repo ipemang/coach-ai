@@ -6,6 +6,7 @@ from app.agents.check_in import CheckInRecommendation
 from app.main import app
 from app.services.coach_workflow import CoachTriageItem
 from fastapi.testclient import TestClient
+from app.api.v1 import invites as invites_module
 
 
 client = TestClient(app)
@@ -102,3 +103,117 @@ def test_triage_endpoint(monkeypatch) -> None:
             "memory_state": {"hrv_flag": "low"},
         }
     ]
+
+from app.api.v1 import invites as invites_module
+
+
+class _FakeTable:
+    def __init__(self, name: str, db: dict[str, list[dict]]):
+        self.name = name
+        self.db = db
+        self._filters: list[tuple[str, object]] = []
+        self._mode = "select"
+        self._payload: dict[str, object] | None = None
+
+    def select(self, *_args, **_kwargs):
+        return self
+
+    def eq(self, column: str, value: object):
+        self._filters.append((column, value))
+        return self
+
+    def update(self, payload: dict[str, object]):
+        self._mode = "update"
+        self._payload = payload
+        return self
+
+    def upsert(self, payload: dict[str, object]):
+        self._mode = "upsert"
+        self._payload = payload
+        return self
+
+    async def execute(self):
+        rows = self.db.setdefault(self.name, [])
+
+        def matches(row: dict[str, object]) -> bool:
+            return all(str(row.get(column)) == str(value) for column, value in self._filters)
+
+        if self._mode == "select":
+            return {"data": [row.copy() for row in rows if matches(row)]}
+
+        if self._payload is None:
+            return {"data": []}
+
+        updated_rows: list[dict[str, object]] = []
+        for index, row in enumerate(rows):
+            if matches(row):
+                rows[index] = {**row, **self._payload}
+                updated_rows.append(rows[index].copy())
+
+        if self._mode == "upsert" and not updated_rows:
+            new_row = self._payload.copy()
+            rows.append(new_row)
+            updated_rows.append(new_row.copy())
+
+        return {"data": updated_rows}
+
+
+class _FakeSupabaseClient:
+    def __init__(self, db: dict[str, list[dict]]):
+        self.db = db
+
+    async def table(self, name: str):
+        return _FakeTable(name, self.db)
+
+
+class _FakeSettings:
+    supabase_service_role_key = "test-secret"
+
+
+def test_invite_generation_and_resolution(monkeypatch) -> None:
+    db = {
+        "coaches": [
+            {"id": "coach-row-1", "coach_id": "coach-123", "organization_id": "org-1", "name": "Coach One"},
+        ],
+        "athletes": [
+            {"id": "athlete-7", "athlete_id": "athlete-7", "display_name": "Jordan", "coach_id": None, "organization_id": None},
+        ],
+    }
+    app.state.supabase_client = _FakeSupabaseClient(db)
+    monkeypatch.setattr(invites_module, "get_settings", lambda: _FakeSettings())
+
+    first = client.post(
+        "/api/v1/invites",
+        json={"coach_id": "coach-123", "organization_id": "org-1", "expires_in_days": 7},
+    )
+    second = client.post(
+        "/api/v1/invites",
+        json={"coach_id": "coach-123", "organization_id": "org-1", "expires_in_days": 7},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_body = first.json()
+    second_body = second.json()
+    assert first_body["invite_id"] != second_body["invite_id"]
+    assert first_body["invite_token"] != second_body["invite_token"]
+    assert first_body["invite_url"].startswith("http://testserver/api/v1/invites/resolve?token=")
+
+    resolve = client.post(
+        "/api/v1/invites/resolve",
+        json={
+            "invite_token": first_body["invite_token"],
+            "athlete_id": "athlete-7",
+            "athlete_name": "Jordan",
+        },
+    )
+
+    assert resolve.status_code == 200
+    resolve_body = resolve.json()
+    assert resolve_body["roster_updated"] is True
+    assert resolve_body["coach_id"] == "coach-123"
+    assert resolve_body["organization_id"] == "org-1"
+    assert resolve_body["athlete_record"]["coach_id"] == "coach-123"
+    assert resolve_body["athlete_record"]["organization_id"] == "org-1"
+    assert db["athletes"][0]["coach_id"] == "coach-123"
+    assert db["athletes"][0]["organization_id"] == "org-1"
