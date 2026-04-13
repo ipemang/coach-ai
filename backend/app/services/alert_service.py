@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -87,11 +88,13 @@ class AlertService:
         self.config = config or AlertServiceConfig()
 
     async def run(self, now: datetime | None = None) -> AlertScanResult:
-        """Scan stored check-in rows and dispatch alerts for the latest data."""
-
         rows = await self._load_checkin_rows()
         latest_rows = self._latest_rows_by_athlete(rows)
-        findings = [finding for row in latest_rows.values() if (finding := self._build_finding(row, now=now)) is not None]
+        findings = [
+            finding
+            for row in latest_rows.values()
+            if (finding := self._build_finding(row, now=now)) is not None
+        ]
 
         result = AlertScanResult(scanned=len(rows), findings=findings)
         for finding in findings:
@@ -109,8 +112,6 @@ class AlertService:
         *,
         now: datetime | None = None,
     ) -> AlertScanResult:
-        """Evaluate a new check-in payload immediately after submission."""
-
         row = self._submission_to_row(check_in, recommendation=recommendation, now=now)
         finding = self._build_finding(row, now=now)
         if finding is None:
@@ -136,6 +137,7 @@ class AlertService:
                 query = query.in_("state_type", list(self.config.checkin_state_types))
             except Exception:
                 pass
+
         rows = await _query_rows(query)
         if not rows and hasattr(table, "select"):
             rows = await _query_rows(table.select("*"))
@@ -224,10 +226,30 @@ class AlertService:
         if not flags:
             return None
 
-        severity = _severity_for_flags(red_flag_sources, missed_workouts=missed_workouts, soreness=soreness, low_hrv=hrv_text is not None or hrv_ms is not None)
-        summary = _build_summary(athlete_name=athlete_name, flags=flags, recommendation=row.get("recommended_action") or check_in.get("recommended_action"))
-        reasons = _build_reasons(hrv_text=hrv_text, hrv_ms=hrv_ms, soreness=soreness, missed_workouts=missed_workouts, recommendation=row.get("rationale") or check_in.get("rationale"))
-        dedupe_key = _build_dedupe_key(athlete_id=athlete_id, source_state_id=source_state_id, flags=flags, source_timestamp=source_timestamp)
+        severity = _severity_for_flags(
+            red_flag_sources,
+            missed_workouts=missed_workouts,
+            soreness=soreness,
+            low_hrv=hrv_text is not None or hrv_ms is not None,
+        )
+        summary = _build_summary(
+            athlete_name=athlete_name,
+            flags=flags,
+            recommendation=row.get("recommended_action") or check_in.get("recommended_action"),
+        )
+        reasons = _build_reasons(
+            hrv_text=hrv_text,
+            hrv_ms=hrv_ms,
+            soreness=soreness,
+            missed_workouts=missed_workouts,
+            recommendation=row.get("rationale") or check_in.get("rationale"),
+        )
+        dedupe_key = _build_dedupe_key(
+            athlete_id=athlete_id,
+            source_state_id=source_state_id,
+            flags=flags,
+            source_timestamp=source_timestamp,
+        )
 
         return AlertFinding(
             athlete_id=athlete_id,
@@ -256,14 +278,19 @@ class AlertService:
         elif isinstance(check_in, dict):
             payload = dict(check_in)
         else:
-            payload = {key: getattr(check_in, key) for key in dir(check_in) if not key.startswith("_") and not callable(getattr(check_in, key))}
+            payload = {
+                key: getattr(check_in, key)
+                for key in dir(check_in)
+                if not key.startswith("_") and not callable(getattr(check_in, key))
+            }
 
+        stamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
         row = {
             "athlete_id": payload.get("athlete_id") or payload.get("athleteId"),
             "athlete_display_name": payload.get("athlete_display_name") or payload.get("athlete_name") or payload.get("display_name") or payload.get("name"),
             "state_type": "athlete_check_in",
-            "created_at": (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat(),
-            "updated_at": (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat(),
+            "created_at": stamp,
+            "updated_at": stamp,
             "check_in": payload,
         }
 
@@ -284,6 +311,7 @@ class AlertService:
             for coach in coaches:
                 if not coach.enabled or not coach.phone_number:
                     continue
+
                 recipient = WhatsAppRecipient(
                     athlete_id=coach.coach_id,
                     phone_number=coach.phone_number,
@@ -294,6 +322,7 @@ class AlertService:
                 provider_message_id: str | None = None
                 status = "dashboard_only"
                 error_message: str | None = None
+
                 try:
                     send_result = await self.whatsapp_service.send_text_message(
                         recipient,
@@ -312,7 +341,7 @@ class AlertService:
                         error_message = send_result.error_message or "WhatsApp delivery failed"
                         whatsapp_errors.append(error_message)
                         status = "failed"
-                except Exception as exc:  # pragma: no cover - downstream transport failure
+                except Exception as exc:  # pragma: no cover
                     error_message = str(exc)
                     whatsapp_errors.append(error_message)
                     status = "failed"
@@ -358,6 +387,7 @@ class AlertService:
                 enabled = row.get("notifications_enabled")
             if enabled is None:
                 enabled = row.get("enabled", True)
+
             recipients.append(
                 CoachRecipient(
                     coach_id=coach_id,
@@ -396,6 +426,8 @@ class AlertService:
         dedupe_key = f"{finding.dedupe_key}:{coach.coach_id}"
         if not await self._ensure_not_duplicate(table, dedupe_key, dedupe_field="dedupe_key"):
             return False
+
+        stamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
         payload = {
             "dedupe_key": dedupe_key,
             "coach_id": coach.coach_id,
@@ -406,8 +438,8 @@ class AlertService:
             "status": status,
             "provider_message_id": provider_message_id,
             "error_message": error_message,
-            "created_at": (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat(),
-            "updated_at": (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat(),
+            "created_at": stamp,
+            "updated_at": stamp,
         }
         return await _write_row(table, payload)
 
@@ -423,7 +455,7 @@ class AlertService:
 
     @staticmethod
     def _dashboard_payload(finding: AlertFinding, *, now: datetime | None = None) -> dict[str, Any]:
-        ts = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
+        stamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
         return {
             "dedupe_key": finding.dedupe_key,
             "athlete_id": finding.athlete_id,
@@ -438,8 +470,8 @@ class AlertService:
             "check_in": finding.check_in,
             "source_row": finding.source_row,
             "status": "open",
-            "created_at": ts,
-            "updated_at": ts,
+            "created_at": stamp,
+            "updated_at": stamp,
         }
 
     @staticmethod
@@ -461,7 +493,14 @@ def _build_summary(*, athlete_name: str | None, flags: list[str], recommendation
     return summary
 
 
-def _build_reasons(*, hrv_text: str | None, hrv_ms: float | None, soreness: float | None, missed_workouts: int, recommendation: str | None = None) -> list[str]:
+def _build_reasons(
+    *,
+    hrv_text: str | None,
+    hrv_ms: float | None,
+    soreness: float | None,
+    missed_workouts: int,
+    recommendation: str | None = None,
+) -> list[str]:
     reasons: list[str] = []
     if hrv_text is not None:
         reasons.append(f"HRV marked {hrv_text}")
@@ -513,8 +552,6 @@ def _is_low_hrv(hrv_text: str | None, hrv_ms: float | None, *, threshold: float)
 
 
 def _build_dedupe_key(*, athlete_id: str, source_state_id: str | None, flags: list[str], source_timestamp: str | None) -> str:
-    import hashlib
-
     payload = f"{athlete_id}:{source_state_id or ''}:{source_timestamp or ''}:{'|'.join(flags)}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
