@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from fastapi import HTTPException, Request as FastAPIRequest
 from starlette.concurrency import run_in_threadpool
 
-from app.services import get_settings
+from app.core.config import get_settings
 from app.services.scope import DataScope
 
 
