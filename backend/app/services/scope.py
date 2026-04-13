@@ -5,7 +5,7 @@ from os import getenv
 from typing import Any
 
 
-@dataclass(slots=True)
+@dataclass
 class DataScope:
     organization_id: str | None = None
     coach_id: str | None = None
