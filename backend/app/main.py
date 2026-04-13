@@ -3,30 +3,22 @@
 from __future__ import annotations
 
 import json
-from contextlib import asynccontextmanager
-from uuid import uuid4
-from typing import Any, AsyncIterator
+from typing import Any, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from fastapi import FastAPI, Request as FastAPIRequest
-from fastapi.responses import JSONResponse
-from supabase import create_client
+from fastapi import FastAPI
+
+from .services import get_settings
 
 from .api.coach import router as coach_router
 from .api.methodology import router as methodology_router
 from .api.v1.router import router as v1_router
 from .api.webhooks import router as webhooks_router
-from .services import DataScope, get_settings
-from .services.whatsapp_service import WhatsAppService
 
 
 class WhatsAppGraphClient:
-    def __init__(
-        self,
-        access_token: str | None,
-        phone_number_id: str | None,
-    ) -> None:
+    def __init__(self, access_token: Optional[str], phone_number_id: Optional[str]) -> None:
         self.access_token = access_token
         self.phone_number_id = phone_number_id
         self.graph_api_version = "v19.0"
@@ -38,11 +30,15 @@ class WhatsAppGraphClient:
         url = f"https://graph.facebook.com/{self.graph_api_version}/{self.phone_number_id}/messages"
         payload: dict[str, Any] = {
             "messaging_product": "whatsapp",
+            "recipient_type": "individual",
             "to": to,
             "type": "text",
-            "text": {"body": body},
+            "text": {
+                "body": body,
+                "preview_url": False,
+            },
         }
-        payload.update(kwargs)
+        _ = kwargs
         request = Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
@@ -75,59 +71,17 @@ class WhatsAppGraphClient:
             raise RuntimeError("WhatsApp send failed") from exc
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+app = FastAPI(title="Coach.AI API")
+
+try:
     settings = get_settings()
-    scope = DataScope(organization_id=settings.organization_id, coach_id=settings.coach_id)
-    app.state.scope = scope
-    app.state.organization_id = settings.organization_id
-    app.state.coach_id = settings.coach_id
-
-    supabase_client = None
-    if settings.supabase_url and settings.supabase_service_role_key:
-        supabase_client = create_client(settings.supabase_url, settings.supabase_service_role_key)
-    app.state.supabase_client = supabase_client
-
     whatsapp_client = WhatsAppGraphClient(
         settings.whatsapp_access_token,
-        settings.whatsapp_phone_number_id,
+        settings.whatsapp_phone_number_id
     )
     app.state.whatsapp_client = whatsapp_client
-    app.state.whatsapp_service = WhatsAppService(
-        whatsapp_client=whatsapp_client,
-        supabase_client=supabase_client,
-    )
-    app.state.whatsapp_service.scope = scope
-
-    yield
-
-
-app = FastAPI(title="Coach.AI API", lifespan=lifespan)
-
-
-@app.middleware("http")
-async def request_context_and_rate_limit(request: FastAPIRequest, call_next):
-    request_id = uuid4().hex
-    request.state.request_id = request_id
-
-    rate_limiter = getattr(request.app.state, "rate_limiter", None)
-    if rate_limiter is not None and hasattr(rate_limiter, "check"):
-        client = request.client.host if request.client and request.client.host else "anonymous"
-        try:
-            result = await rate_limiter.check(client, bucket=request.url.path)
-        except Exception:
-            result = None
-        if result is not None and not result.allowed:
-            response = JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
-            response.headers["retry-after"] = str(result.reset_after_seconds)
-            response.headers["x-request-id"] = request_id
-            return response
-
-    response = await call_next(request)
-    response.headers.setdefault("x-request-id", request_id)
-    return response
-
-
+except Exception:
+    pass
 app.include_router(v1_router)
 app.include_router(methodology_router)
 app.include_router(webhooks_router)
