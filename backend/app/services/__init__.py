@@ -1,3 +1,2 @@
-from future import annotations
-
+from __future__ import annotations
 all: list[str] = []
