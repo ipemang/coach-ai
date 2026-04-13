@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.models.checkinsend_log import CheckinSendLog
+from app.services.scope import DataScope, apply_scope_payload, apply_scope_query, require_scope
 
 
 class SupabaseClientProtocol(Protocol):
@@ -39,6 +40,8 @@ class CheckinSchedulerConfig:
     default_trigger_window_minutes: int = 30
     task_name: str = "send_checkin_whatsapp"
     checkin_link: str | None = None
+    organization_id: str | None = None
+    coach_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -69,10 +72,12 @@ class CheckinScheduler:
         supabase_client: SupabaseClientProtocol,
         task_queue: TaskQueueProtocol,
         config: CheckinSchedulerConfig | None = None,
+        scope: DataScope | None = None,
     ) -> None:
         self.supabase_client = supabase_client
         self.task_queue = task_queue
         self.config = config or CheckinSchedulerConfig()
+        self.scope = scope or DataScope(organization_id=self.config.organization_id, coach_id=self.config.coach_id)
 
     async def run(self, now: datetime | None = None) -> CheckinSchedulerResult:
         now_utc = self._ensure_utc(now or datetime.now(timezone.utc))
@@ -132,8 +137,10 @@ class CheckinScheduler:
     async def list_candidate_athletes(self) -> list[CheckinAthlete]:
         """Load athlete scheduling rows from Supabase and normalize them."""
 
+        scope = require_scope(self.scope, context="Check-in scheduler")
         table = await self.supabase_client.table(self.config.athletes_table)
         query = table.select("*") if hasattr(table, "select") else table
+        query = apply_scope_query(query, scope)
         if hasattr(query, "eq"):
             query = query.eq("checkins_enabled", True)
         if hasattr(query, "execute"):
@@ -177,10 +184,11 @@ class CheckinScheduler:
     async def _reserve_send_slot(self, send_log: CheckinSendLog) -> bool:
         """Create or reuse a queued log row to prevent duplicate sends."""
 
+        scope = require_scope(self.scope, context="Check-in scheduler send log")
         table = await self.supabase_client.table(self.config.send_log_table)
         existing = None
         if hasattr(table, "select") and hasattr(table, "eq"):
-            query = table.select("*").eq("dedupe_key", send_log.dedupe_key)
+            query = apply_scope_query(table.select("*").eq("dedupe_key", send_log.dedupe_key), scope)
             if hasattr(query, "execute"):
                 response = await query.execute()
             else:
@@ -192,7 +200,7 @@ class CheckinScheduler:
             status = str(existing.get("status", "queued"))
             return status not in {"queued", "sent"}
 
-        payload = send_log.to_row()
+        payload = apply_scope_payload(send_log.to_row(), scope)
         if hasattr(table, "insert"):
             insert_result = table.insert(payload)
             if hasattr(insert_result, "execute"):

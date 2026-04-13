@@ -7,6 +7,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from supabase import Client, create_client
 
+from app.services.scope import apply_scope_payload, resolve_scope_from_env
+
 
 class AthleteCheckIn(BaseModel):
     athlete_id: str = Field(min_length=1)
@@ -67,6 +69,9 @@ def assess_check_in(
 def persist_check_in_state(
     check_in: AthleteCheckIn,
     recommendation: CheckInRecommendation,
+    *,
+    organization_id: str | None = None,
+    coach_id: str | None = None,
 ) -> bool:
     supabase_url = getenv("SUPABASE_URL")
     supabase_key = (
@@ -79,14 +84,25 @@ def persist_check_in_state(
         return False
 
     client: Client = create_client(supabase_url, supabase_key)
+    scope = resolve_scope_from_env()
+    if organization_id is not None:
+        scope.organization_id = organization_id
+    if coach_id is not None:
+        scope.coach_id = coach_id
+    if not scope.is_configured():
+        return False
+
     client.table("memory_states").insert(
-        {
-            "athlete_id": check_in.athlete_id,
-            "state_type": "athlete_check_in",
-            "check_in": check_in.model_dump(),
-            "recommended_action": recommendation.recommended_action,
-            "rationale": recommendation.rationale,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        apply_scope_payload(
+            {
+                "athlete_id": check_in.athlete_id,
+                "state_type": "athlete_check_in",
+                "check_in": check_in.model_dump(),
+                "recommended_action": recommendation.recommended_action,
+                "rationale": recommendation.rationale,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+            scope,
+        )
     ).execute()
     return True

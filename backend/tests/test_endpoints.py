@@ -6,7 +6,6 @@ from app.agents.check_in import CheckInRecommendation
 from app.main import app
 from app.services.coach_workflow import CoachTriageItem
 from fastapi.testclient import TestClient
-from app.api.v1 import invites as invites_module
 
 
 client = TestClient(app)

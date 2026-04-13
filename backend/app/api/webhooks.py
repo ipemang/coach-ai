@@ -11,6 +11,7 @@ from urllib.parse import parse_qs
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.services.scope import DataScope, apply_scope_query, resolve_scope_from_env
 from app.services.whatsapp_service import WhatsAppRecipient, WhatsAppService
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
@@ -22,6 +23,8 @@ class AthleteRecord:
     phone_number: str
     timezone_name: str
     display_name: str | None = None
+    organization_id: str | None = None
+    coach_id: str | None = None
     missing_fields: list[str] = field(default_factory=list)
 
 
@@ -192,7 +195,7 @@ def _extract_rows(response: Any) -> list[dict[str, Any]]:
     return []
 
 
-async def _find_athlete_by_phone(supabase_client: Any, phone_number: str) -> AthleteRecord | None:
+async def _find_athlete_by_phone(supabase_client: Any, phone_number: str, scope: DataScope | None) -> AthleteRecord | None:
     normalized_phone = _normalize_phone_number(phone_number)
     variants = _phone_variants(phone_number)
     table = await supabase_client.table("athletes")
@@ -203,6 +206,7 @@ async def _find_athlete_by_phone(supabase_client: Any, phone_number: str) -> Ath
             query = table.select("*") if hasattr(table, "select") else table
             if hasattr(query, "eq"):
                 query = query.eq(field_name, value)
+            query = apply_scope_query(query, scope)
             rows = await _query_rows(query)
             if rows:
                 row = _match_row(rows, normalized_phone)
@@ -210,7 +214,7 @@ async def _find_athlete_by_phone(supabase_client: Any, phone_number: str) -> Ath
                     return row
 
     if hasattr(table, "select"):
-        rows = await _query_rows(table.select("*"))
+        rows = await _query_rows(apply_scope_query(table.select("*"), scope))
         row = _match_row(rows, normalized_phone)
         if row is not None:
             return row
@@ -235,6 +239,8 @@ def _build_athlete_record(row: dict[str, Any], *, matched_phone: str) -> Athlete
     phone_number = str(row.get("phone_number") or row.get("whatsapp_number") or row.get("phone") or matched_phone or "")
     timezone_name = str(row.get("timezone_name") or row.get("timezone") or "UTC")
     display_name = row.get("display_name") or row.get("name")
+    organization_id = row.get("organization_id") or row.get("org_id")
+    coach_id = row.get("coach_id")
 
     if not athlete_id:
         missing_fields.append("athlete_id")
@@ -244,12 +250,18 @@ def _build_athlete_record(row: dict[str, Any], *, matched_phone: str) -> Athlete
         missing_fields.append("timezone_name")
     if not display_name:
         missing_fields.append("display_name")
+    if not organization_id:
+        missing_fields.append("organization_id")
+    if not coach_id:
+        missing_fields.append("coach_id")
 
     return AthleteRecord(
         athlete_id=athlete_id,
         phone_number=phone_number,
         timezone_name=timezone_name,
         display_name=display_name,
+        organization_id=str(organization_id) if organization_id is not None else None,
+        coach_id=str(coach_id) if coach_id is not None else None,
         missing_fields=missing_fields,
     )
 
@@ -296,6 +308,25 @@ async def _route_to_checkin_logic(request: Request, athlete: AthleteRecord, mess
     )
 
 
+
+
+def _resolve_scope(request: Request) -> DataScope:
+    scope = getattr(request.app.state, "scope", None)
+    if isinstance(scope, DataScope) and scope.is_configured():
+        return scope
+
+    organization_id = getattr(request.app.state, "organization_id", None)
+    coach_id = getattr(request.app.state, "coach_id", None)
+    candidate = DataScope(organization_id=organization_id, coach_id=coach_id)
+    if candidate.is_configured():
+        return candidate
+
+    candidate = resolve_scope_from_env()
+    if candidate.is_configured():
+        return candidate
+
+    raise HTTPException(status_code=503, detail="Organization or coach scope is not configured")
+
 async def _resolve_supabase_client(request: Request) -> Any:
     supabase_client = getattr(request.app.state, "supabase_client", None)
     if supabase_client is not None:
@@ -311,15 +342,18 @@ async def _resolve_supabase_client(request: Request) -> Any:
 
 
 async def _resolve_whatsapp_service(request: Request) -> Any:
+    scope = getattr(request.app.state, "scope", None)
     service = getattr(request.app.state, "whatsapp_service", None)
     if service is not None and hasattr(service, "send_text_message"):
+        if getattr(service, "scope", None) is None and scope is not None:
+            service.scope = scope
         return service
 
     whatsapp_client = getattr(request.app.state, "whatsapp_client", None)
     if whatsapp_client is None:
         raise HTTPException(status_code=503, detail="WhatsApp service is not configured")
 
-    return WhatsAppService(whatsapp_client=whatsapp_client, supabase_client=getattr(request.app.state, "supabase_client", None))
+    return WhatsAppService(whatsapp_client=whatsapp_client, supabase_client=getattr(request.app.state, "supabase_client", None), scope=scope)
 
 
 @router.post("/whatsapp", response_model=WhatsAppWebhookResponse)
@@ -336,7 +370,8 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
         raise HTTPException(status_code=400, detail="Unable to extract message text")
 
     supabase_client = await _resolve_supabase_client(request)
-    athlete = await _find_athlete_by_phone(supabase_client, inbound.sender_phone_number)
+    scope = _resolve_scope(request)
+    athlete = await _find_athlete_by_phone(supabase_client, inbound.sender_phone_number, scope)
     if athlete is None:
         return WhatsAppWebhookResponse(
             status="ignored",

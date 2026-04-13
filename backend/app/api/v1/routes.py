@@ -7,25 +7,30 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.agents.check_in import AthleteCheckIn, CheckInRecommendation, assess_check_in, persist_check_in_state
-from app.services import extract_methodology_from_transcript, get_settings, update_coach_methodology
-from app.services.alert_service import AlertService
+from app.services import extract_methodology_from_transcript, get_settings, persist_methodology_extraction
 from app.services.athlete_memory_search import AthleteMemorySearchService
+from app.services.scope import DataScope
 
 router = APIRouter()
 
 
 class ExtractMethodologyRequest(BaseModel):
     coach_id: str = Field(..., min_length=1, description="Supabase coach_id for the coach record")
+    organization_id: str = Field(..., min_length=1, description="Organization scope for the coach record")
     transcript: str = Field(..., min_length=1, description="Voice memo transcript to extract methodology from")
 
 
 class MethodologyExtractionResponse(BaseModel):
     methodology_playbook: dict[str, Any]
+    methodology_id: str | None = None
+    coach_updated: bool = False
 
 
 class AthleteMemorySearchRequest(BaseModel):
     query: str = Field(..., min_length=1, description="Natural-language memory search query")
-    athlete_id: str | None = Field(default=None, description="Optional athlete_id filter")
+    organization_id: str = Field(..., min_length=1, description="Organization scope for the search")
+    coach_id: str = Field(..., min_length=1, description="Coach scope for the search")
+    athlete_id: str | None = None
     state_types: list[str] = Field(default_factory=list, description="Optional list of memory state types to restrict to")
     limit: int = Field(default=5, ge=1, le=25)
 
@@ -58,23 +63,9 @@ def health() -> dict[str, str]:
 
 
 @router.post("/check-in", tags=["athlete"], response_model=CheckInRecommendation)
-async def check_in(request: Request, payload: AthleteCheckIn) -> CheckInRecommendation:
+def check_in(payload: AthleteCheckIn) -> CheckInRecommendation:
     recommendation = assess_check_in(payload)
     persist_check_in_state(payload, recommendation)
-
-    alert_service = getattr(request.app.state, "alert_service", None)
-    if alert_service is None:
-        supabase_client = getattr(request.app.state, "supabase_client", None)
-        whatsapp_service = getattr(request.app.state, "whatsapp_service", None)
-        if supabase_client is not None or whatsapp_service is not None:
-            alert_service = AlertService(supabase_client=supabase_client, whatsapp_service=whatsapp_service)
-
-    if alert_service is not None and hasattr(alert_service, "process_check_in_submission"):
-        try:
-            await alert_service.process_check_in_submission(payload, recommendation)
-        except Exception:
-            pass
-
     return recommendation
 
 
@@ -84,19 +75,22 @@ def extract_methodology(payload: ExtractMethodologyRequest) -> MethodologyExtrac
 
     try:
         extraction = extract_methodology_from_transcript(payload.transcript, settings)
-        updated_row = update_coach_methodology(
+        persisted = persist_methodology_extraction(
             payload.coach_id,
             extraction["methodology_playbook"],
             extraction["persona_system_prompt"],
+            payload.transcript,
             settings,
+            organization_id=payload.organization_id,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    if updated_row is None:
-        raise HTTPException(status_code=404, detail=f"Coach {payload.coach_id} not found")
-
-    return MethodologyExtractionResponse(methodology_playbook=extraction["methodology_playbook"])
+    return MethodologyExtractionResponse(
+        methodology_playbook=extraction["methodology_playbook"],
+        methodology_id=persisted["methodology_row"].get("id"),
+        coach_updated=persisted["updated_coach_row"] is not None,
+    )
 
 
 async def _resolve_supabase_client(request: Request) -> Any:
@@ -116,7 +110,10 @@ async def _resolve_supabase_client(request: Request) -> Any:
 @router.post("/athlete-memory/search", tags=["athlete-memory"], response_model=AthleteMemorySearchResponse)
 async def search_athlete_memory(request: Request, payload: AthleteMemorySearchRequest) -> AthleteMemorySearchResponse:
     supabase_client = await _resolve_supabase_client(request)
-    service = AthleteMemorySearchService(supabase_client=supabase_client)
+    service = AthleteMemorySearchService(
+        supabase_client=supabase_client,
+        scope=DataScope(organization_id=payload.organization_id, coach_id=payload.coach_id),
+    )
     results, context = await service.build_context(
         payload.query,
         athlete_id=payload.athlete_id,

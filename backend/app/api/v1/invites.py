@@ -217,14 +217,15 @@ async def _update_athlete_roster_membership(supabase_client: Any, athlete_id: st
         if rows:
             return rows[0]
 
-        updater = table.update(payload).eq("athlete_id", athlete_id)
-        if hasattr(updater, "execute"):
-            response = await updater.execute()
-        else:
-            response = await updater
-        rows = _extract_rows(response)
-        if rows:
-            return rows[0]
+        if "athlete_id" in payload:
+            updater = table.update(payload).eq("athlete_id", athlete_id)
+            if hasattr(updater, "execute"):
+                response = await updater.execute()
+            else:
+                response = await updater
+            rows = _extract_rows(response)
+            if rows:
+                return rows[0]
 
     if hasattr(table, "upsert"):
         response = await table.upsert({"id": athlete_id, **payload})

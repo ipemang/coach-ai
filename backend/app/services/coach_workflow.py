@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+from app.services.scope import DataScope, apply_scope_payload, apply_scope_query, require_scope
 from app.services.whatsapp_service import WhatsAppRecipient, WhatsAppService
 
 CoachDecision = Literal["Approve", "Edit", "Ignore"]
@@ -58,16 +59,19 @@ class CoachWorkflow:
         memory_states_table: str = "memory_states",
         suggestions_table: str = "suggestions",
         athletes_table: str = "athletes",
+        scope: DataScope | None = None,
     ) -> None:
         self.supabase_client = supabase_client
         self.whatsapp_service = whatsapp_service
         self.memory_states_table = memory_states_table
         self.suggestions_table = suggestions_table
         self.athletes_table = athletes_table
+        self.scope = scope
 
     async def build_triage(self) -> list[CoachTriageItem]:
+        scope = require_scope(self.scope, context="Coach triage")
         table = await self.supabase_client.table(self.memory_states_table)
-        rows = await _query_rows(_select_all(table))
+        rows = await _query_rows(apply_scope_query(_select_all(table), scope))
         latest_by_athlete: dict[str, dict[str, Any]] = {}
 
         for row in rows:
@@ -101,8 +105,9 @@ class CoachWorkflow:
         edited_adjustment: dict[str, Any] | str | None = None,
         send_confirmation: bool = True,
     ) -> CoachVerifyResult:
+        scope = require_scope(self.scope, context="Coach verification")
         suggestions_table = await self.supabase_client.table(self.suggestions_table)
-        suggestion = await self._fetch_by_id(suggestions_table, suggestion_id)
+        suggestion = await self._fetch_by_id(suggestions_table, suggestion_id, scope=scope)
         if suggestion is None:
             raise LookupError(f"Suggestion {suggestion_id} was not found")
 
@@ -129,7 +134,7 @@ class CoachWorkflow:
             elif edited_adjustment is not None:
                 update_payload["coach_edited_payload"] = {"edited_adjustment": edited_adjustment}
 
-        await self._update_by_id(suggestions_table, suggestion_id, update_payload)
+        await self._update_by_id(suggestions_table, suggestion_id, update_payload, scope=scope)
         suggestion.update(update_payload)
 
         result = CoachVerifyResult(
@@ -142,7 +147,7 @@ class CoachWorkflow:
         )
 
         if decision == "Approve" and send_confirmation:
-            contact = await self._resolve_athlete_contact(athlete_id=athlete_id, suggestion=suggestion)
+            contact = await self._resolve_athlete_contact(athlete_id=athlete_id, suggestion=suggestion, scope=scope)
             if contact is not None and contact.phone_number and self.whatsapp_service is not None:
                 recipient = WhatsAppRecipient(
                     athlete_id=contact.athlete_id,
@@ -164,7 +169,7 @@ class CoachWorkflow:
                         "confirmation_message_id": send_result.provider_message_id,
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
-                    await self._update_by_id(suggestions_table, suggestion_id, confirmation_update)
+                    await self._update_by_id(suggestions_table, suggestion_id, confirmation_update, scope=scope)
                     suggestion.update(confirmation_update)
                     result.confirmation_sent = True
                     result.confirmation_message_id = send_result.provider_message_id
@@ -173,14 +178,14 @@ class CoachWorkflow:
                         "confirmation_error": str(exc),
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
-                    await self._update_by_id(suggestions_table, suggestion_id, error_update)
+                    await self._update_by_id(suggestions_table, suggestion_id, error_update, scope=scope)
                     suggestion.update(error_update)
                     result.confirmation_error = str(exc)
 
         result.suggestion = suggestion
         return result
 
-    async def _resolve_athlete_contact(self, *, athlete_id: str | None, suggestion: dict[str, Any]) -> CoachContact | None:
+    async def _resolve_athlete_contact(self, *, athlete_id: str | None, suggestion: dict[str, Any], scope: DataScope | None) -> CoachContact | None:
         suggested_phone = _string_value(
             suggestion.get("athlete_phone_number")
             or suggestion.get("phone_number")
@@ -202,9 +207,9 @@ class CoachWorkflow:
             return None
 
         table = await self.supabase_client.table(self.athletes_table)
-        rows = await _query_rows(_select_all(table).eq("id", athlete_id) if hasattr(_select_all(table), "eq") else _select_all(table))
+        rows = await _query_rows(apply_scope_query(_select_all(table).eq("id", athlete_id) if hasattr(_select_all(table), "eq") else _select_all(table), scope))
         if not rows and hasattr(table, "select"):
-            rows = await _query_rows(table.select("*"))
+            rows = await _query_rows(apply_scope_query(table.select("*"), scope))
 
         for row in rows:
             row_athlete_id = _string_value(row.get("id") or row.get("athlete_id") or row.get("athleteId"))
@@ -221,21 +226,26 @@ class CoachWorkflow:
 
         return None
 
-    async def _fetch_by_id(self, table: Any, row_id: str) -> dict[str, Any] | None:
-        if hasattr(table, "select") and hasattr(table, "eq"):
-            query = table.select("*").eq("id", row_id)
-            rows = await _query_rows(query)
-            if rows:
-                return rows[0]
-        rows = await _query_rows(table)
-        for row in rows:
-            if _string_value(row.get("id")) == row_id:
-                return row
+    async def _fetch_by_id(self, table: Any, row_id: str, *, scope: DataScope | None) -> dict[str, Any] | None:
+        scoped_table = apply_scope_query(table.select("*").eq("id", row_id) if hasattr(table, "select") and hasattr(table, "eq") else table, scope)
+        rows = await _query_rows(scoped_table)
+        if rows:
+            for row in rows:
+                if _string_value(row.get("id")) == row_id:
+                    return row
+        if hasattr(table, "select"):
+            rows = await _query_rows(apply_scope_query(table.select("*"), scope))
+            for row in rows:
+                if _string_value(row.get("id")) == row_id:
+                    return row
         return None
 
-    async def _update_by_id(self, table: Any, row_id: str, payload: dict[str, Any]) -> None:
+    async def _update_by_id(self, table: Any, row_id: str, payload: dict[str, Any], *, scope: DataScope | None) -> None:
+        scoped_payload = apply_scope_payload({"id": row_id, **payload}, scope)
         if hasattr(table, "update") and hasattr(table, "eq"):
-            updater = table.update(payload).eq("id", row_id)
+            updater = table.update(scoped_payload).eq("id", row_id)
+            if scope is not None:
+                updater = apply_scope_query(updater, scope)
             if hasattr(updater, "execute"):
                 await updater.execute()
             else:
@@ -243,7 +253,7 @@ class CoachWorkflow:
             return
 
         if hasattr(table, "upsert"):
-            await table.upsert({"id": row_id, **payload})
+            await table.upsert(scoped_payload)
             return
 
         raise RuntimeError("Supabase table does not support update operations")

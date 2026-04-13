@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Protocol
+
+from app.services.scope import DataScope, apply_scope_payload, apply_scope_query, require_scope
 from zoneinfo import ZoneInfo
 
 from app.models.checkinsend_log import CheckinSendLog
@@ -46,6 +48,7 @@ class WhatsAppService:
     whatsapp_client: WhatsAppClientProtocol
     supabase_client: SupabaseClientProtocol | None = None
     send_log_table: str = "checkin_send_logs"
+    scope: DataScope | None = None
 
     async def send_text_message(
         self,
@@ -164,6 +167,7 @@ class WhatsAppService:
         if self.supabase_client is None:
             return
 
+        scope = require_scope(self.scope, context="WhatsApp send log update")
         table = await self.supabase_client.table(self.send_log_table)
         payload = {
             "status": "sent",
@@ -174,7 +178,7 @@ class WhatsAppService:
         }
 
         if hasattr(table, "update") and hasattr(table, "eq"):
-            updater = table.update(payload).eq("dedupe_key", send_log.dedupe_key)
+            updater = apply_scope_query(table.update(payload).eq("dedupe_key", send_log.dedupe_key), scope)
             if hasattr(updater, "execute"):
                 await updater.execute()
             else:
@@ -182,7 +186,7 @@ class WhatsAppService:
             return
 
         if hasattr(table, "upsert"):
-            await table.upsert({**send_log.to_row(), **payload})
+            await table.upsert(apply_scope_payload({**send_log.to_row(), **payload}, scope))
             return
 
     async def _mark_send_log_failed(
@@ -194,6 +198,7 @@ class WhatsAppService:
         if self.supabase_client is None:
             return
 
+        scope = require_scope(self.scope, context="WhatsApp send log update")
         table = await self.supabase_client.table(self.send_log_table)
         payload = {
             "status": "failed",
@@ -202,7 +207,7 @@ class WhatsAppService:
         }
 
         if hasattr(table, "update") and hasattr(table, "eq"):
-            updater = table.update(payload).eq("dedupe_key", send_log.dedupe_key)
+            updater = apply_scope_query(table.update(payload).eq("dedupe_key", send_log.dedupe_key), scope)
             if hasattr(updater, "execute"):
                 await updater.execute()
             else:
@@ -210,7 +215,7 @@ class WhatsAppService:
             return
 
         if hasattr(table, "upsert"):
-            await table.upsert({**send_log.to_row(), **payload})
+            await table.upsert(apply_scope_payload({**send_log.to_row(), **payload}, scope))
             return
 
     @staticmethod

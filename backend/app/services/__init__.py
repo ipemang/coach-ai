@@ -9,12 +9,16 @@ from urllib.request import Request, urlopen
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .scope import DataScope, apply_scope_query, resolve_scope_from_env
+
 
 class Settings(BaseSettings):
     openai_api_key: str
     openai_model: str = "gpt-4o-mini"
     supabase_url: str
     supabase_service_role_key: str
+    organization_id: str | None = None
+    coach_id: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -103,6 +107,35 @@ def _request_json(url: str, method: str, headers: dict[str, str], payload: Any |
         raise RuntimeError(f"{method} {url} failed: {detail}") from exc
 
 
+def _resolve_organization_id(organization_id: str | None, settings: Settings) -> str | None:
+    if organization_id:
+        return organization_id
+    if settings.organization_id:
+        return settings.organization_id
+    return None
+
+
+def _build_coach_url(resolved_settings: Settings, coach_id: str, organization_id: str | None = None) -> str:
+    coach_id_filter = quote(coach_id, safe="")
+    url = f"{resolved_settings.supabase_url.rstrip('/')}/rest/v1/coaches?coach_id=eq.{coach_id_filter}"
+    if organization_id:
+        organization_filter = quote(organization_id, safe="")
+        url += f"&organization_id=eq.{organization_filter}"
+    return url
+
+
+def _build_methodologies_url(resolved_settings: Settings) -> str:
+    return f"{resolved_settings.supabase_url.rstrip('/')}/rest/v1/methodologies?select=*"
+
+
+def _extract_single_row(response: Any) -> dict[str, Any] | None:
+    if isinstance(response, list):
+        return response[0] if response else None
+    if isinstance(response, dict):
+        return response
+    return None
+
+
 def extract_methodology_from_transcript(transcript: str, settings: Settings | None = None) -> dict[str, Any]:
     resolved_settings = settings or get_settings()
     payload = {
@@ -157,10 +190,11 @@ def update_coach_methodology(
     methodology_playbook: dict[str, Any],
     persona_system_prompt: str,
     settings: Settings | None = None,
+    organization_id: str | None = None,
 ) -> dict[str, Any] | None:
     resolved_settings = settings or get_settings()
-    coach_id_filter = quote(coach_id, safe="")
-    url = f"{resolved_settings.supabase_url.rstrip('/')}/rest/v1/coaches?coach_id=eq.{coach_id_filter}"
+    resolved_organization_id = _resolve_organization_id(organization_id, resolved_settings)
+    url = _build_coach_url(resolved_settings, coach_id, resolved_organization_id)
 
     response = _request_json(
         url,
@@ -177,6 +211,53 @@ def update_coach_methodology(
         },
     )
 
-    if isinstance(response, list):
-        return response[0] if response else None
-    return response
+    return _extract_single_row(response)
+
+
+def persist_methodology_extraction(
+    coach_id: str,
+    methodology_playbook: dict[str, Any],
+    persona_system_prompt: str,
+    transcript: str,
+    settings: Settings | None = None,
+    organization_id: str | None = None,
+) -> dict[str, Any]:
+    resolved_settings = settings or get_settings()
+    resolved_organization_id = _resolve_organization_id(organization_id, resolved_settings)
+
+    methodology_payload: dict[str, Any] = {
+        "coach_id": coach_id,
+        "methodology_playbook": methodology_playbook,
+        "persona_system_prompt": persona_system_prompt,
+        "transcript": transcript,
+    }
+    if resolved_organization_id:
+        methodology_payload["organization_id"] = resolved_organization_id
+
+    methodology_response = _request_json(
+        _build_methodologies_url(resolved_settings),
+        "POST",
+        {
+            "apikey": resolved_settings.supabase_service_role_key,
+            "Authorization": f"Bearer {resolved_settings.supabase_service_role_key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation",
+        },
+        methodology_payload,
+    )
+    methodology_row = _extract_single_row(methodology_response)
+    if methodology_row is None:
+        raise RuntimeError("Methodology insert did not return a persisted row")
+
+    updated_coach_row = update_coach_methodology(
+        coach_id,
+        methodology_playbook,
+        persona_system_prompt,
+        resolved_settings,
+        organization_id=resolved_organization_id,
+    )
+
+    return {
+        "methodology_row": methodology_row,
+        "updated_coach_row": updated_coach_row,
+    }

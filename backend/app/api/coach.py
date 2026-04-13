@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..services.coach_workflow import CoachWorkflow
+from ..services.scope import DataScope
 from ..services.whatsapp_service import WhatsAppService
 
 router = APIRouter(prefix="/api/v1/coach", tags=["coach"])
@@ -29,6 +30,8 @@ class CoachTriageResponseItem(BaseModel):
 
 
 class CoachVerifyRequest(BaseModel):
+    organization_id: str = Field(..., min_length=1)
+    coach_id: str = Field(..., min_length=1)
     suggestion_id: str = Field(..., description="Suggestion row id")
     decision: Literal["Approve", "Edit", "Ignore"]
     coach_notes: str | None = None
@@ -63,8 +66,11 @@ async def _resolve_supabase_client(request: Request) -> Any:
 
 
 async def _resolve_whatsapp_service(request: Request) -> WhatsAppService | None:
+    scope = getattr(request.app.state, "scope", None)
     service = getattr(request.app.state, "whatsapp_service", None)
     if service is not None and hasattr(service, "send_text_message"):
+        if getattr(service, "scope", None) is None and scope is not None:
+            service.scope = scope
         return service
 
     whatsapp_client = getattr(request.app.state, "whatsapp_client", None)
@@ -72,15 +78,20 @@ async def _resolve_whatsapp_service(request: Request) -> WhatsAppService | None:
         return None
 
     supabase_client = getattr(request.app.state, "supabase_client", None)
-    return WhatsAppService(whatsapp_client=whatsapp_client, supabase_client=supabase_client)
+    return WhatsAppService(whatsapp_client=whatsapp_client, supabase_client=supabase_client, scope=scope)
 
 
 @router.get("/triage", response_model=list[CoachTriageResponseItem])
-async def coach_triage(request: Request) -> list[CoachTriageResponseItem]:
+async def coach_triage(
+    request: Request,
+    organization_id: str,
+    coach_id: str,
+) -> list[CoachTriageResponseItem]:
     supabase_client = await _resolve_supabase_client(request)
     workflow = CoachWorkflow(
         supabase_client=supabase_client,
         whatsapp_service=await _resolve_whatsapp_service(request),
+        scope=DataScope(organization_id=organization_id, coach_id=coach_id),
     )
     items = await workflow.build_triage()
     return [CoachTriageResponseItem.model_validate(asdict(item)) for item in items]
@@ -92,6 +103,7 @@ async def coach_verify(request: Request, payload: CoachVerifyRequest) -> CoachVe
     workflow = CoachWorkflow(
         supabase_client=supabase_client,
         whatsapp_service=await _resolve_whatsapp_service(request),
+        scope=DataScope(organization_id=payload.organization_id, coach_id=payload.coach_id),
     )
 
     try:
