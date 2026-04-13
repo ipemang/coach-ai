@@ -14,12 +14,19 @@ from .scope import DataScope, apply_scope_query, resolve_scope_from_env
 
 class Settings(BaseSettings):
     openai_api_key: str | None = None
+    groq_api_key: str | None = None
+    stripe_secret_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     supabase_url: str
     supabase_service_role_key: str
     organization_id: str | None = None
     coach_id: str | None = None
     integration_frontend_base_url: str | None = None
+
+    whatsapp_access_token: str | None = None
+    whatsapp_phone_number_id: str | None = None
+    whatsapp_verify_token: str | None = None
+    whatsapp_webhook_secret: str | None = None
 
     garmin_oauth_authorize_url: str | None = None
     garmin_oauth_token_url: str | None = None
@@ -44,9 +51,6 @@ class Settings(BaseSettings):
     oura_oauth_redirect_uri: str | None = None
     oura_oauth_scopes: str | None = None
     oura_oauth_webhook_secret: str | None = None
-
-    whatsapp_verify_token: str | None = None
-    whatsapp_webhook_secret: str | None = None
 
     integration_sync_enabled: bool = False
     integration_sync_poll_interval_seconds: int = 300

@@ -25,7 +25,8 @@ class LLMConfig:
         if self.api_key:
             return self.api_key
         if self.provider == "groq":
-            return os.getenv("GROQ_API_KEY", os.getenv("LLM_API_KEY", "")).strip()
+            settings = get_settings()
+            return (settings.groq_api_key or os.getenv("GROQ_API_KEY", os.getenv("LLM_API_KEY", ""))).strip()
         if self.provider == "openai":
             settings = get_settings()
             return (settings.openai_api_key or os.getenv("OPENAI_API_KEY", os.getenv("LLM_API_KEY", ""))).strip()
