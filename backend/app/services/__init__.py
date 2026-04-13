@@ -8,6 +8,9 @@ from urllib.request import Request, urlopen
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .scope import DataScope, apply_scope_query, resolve_scope_from_env
+from .whatsapp_service import WhatsAppRecipient, WhatsAppService
+
 supabase_client: Any | None = None
 whatsapp_client: Any | None = None
 whatsapp_service: Any | None = None
@@ -104,6 +107,8 @@ Return JSON only with exactly these top-level keys:
 The persona_system_prompt should be concise, written as a durable system prompt, and describe how this coach should plan, prioritize, and communicate with athletes.
 
 Focus on endurance coaching concepts aligned with Joe Friel: assessment, goals, constraints, periodization, intensity balance, testing, recovery, race preparation, and athlete communication."""
+
+METHODOLOGY_PROMPT = METHODOLOGY_EXTRACTION_PROMPT
 
 
 def _request_json(url: str, method: str, headers: dict[str, str], payload: Any | None = None, timeout: int = 90) -> Any:
@@ -272,10 +277,16 @@ __all__ = [
     "Settings",
     "settings",
     "get_settings",
+    "DataScope",
+    "apply_scope_query",
+    "resolve_scope_from_env",
+    "WhatsAppRecipient",
+    "WhatsAppService",
     "supabase_client",
     "whatsapp_client",
     "whatsapp_service",
     "METHODOLOGY_EXTRACTION_PROMPT",
+    "METHODOLOGY_PROMPT",
     "extract_methodology_from_transcript",
     "update_coach_methodology",
     "persist_methodology_extraction",
