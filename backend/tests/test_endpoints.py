@@ -249,7 +249,7 @@ class _FakeSupabaseClient:
     def __init__(self, db: dict[str, list[dict]]):
         self.db = db
 
-    async def table(self, name: str):
+    def table(self, name: str):
         return _FakeTable(name, self.db)
 
 
