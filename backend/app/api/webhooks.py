@@ -274,9 +274,15 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     if coach_wa:
         athlete_name = athlete.display_name or "Unknown Athlete"
         coach_notification = (
-            f"New check-in from {athlete_name}:\n"
-            f"\"{text}\"\n\n"
-            f"AI draft reply:\n{suggestion_text}\n\n"
+            f"New check-in from {athlete_name}:
+"
+            f"\"{text}\"
+
+"
+            f"AI draft reply:
+{suggestion_text}
+
+"
             f"Reply APPROVE to send, or reply with your own message to override."
         )
         await _send_whatsapp_message(request, coach_wa, coach_notification)
@@ -293,3 +299,76 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
         coach_id=athlete.coach_id,
         message_id=wa_msg_id,
     )
+
+
+@router.post("/coach-triage")
+async def coach_triage_webhook(request: Request):
+    """Handle messages FROM the coach (e.g. 'APPROVE' or custom reply)."""
+    payload = await _read_payload(request)
+    sender = None
+    text = None
+    
+    if "entry" in payload:
+        for entry in payload["entry"]:
+            for change in entry.get("changes", []):
+                val = change.get("value", {})
+                if "messages" in val:
+                    msg = val["messages"][0]
+                    sender = msg.get("from")
+                    if msg.get("type") == "text":
+                        text = msg.get("text", {}).get("body")
+                    break
+
+    if not sender or not text:
+        return {"status": "ignored"}
+
+    supabase = request.app.state.supabase_client
+    
+    # Check if this sender is a coach
+    coach_rows = await _query_rows(
+        supabase.table("coaches").select("*").eq("whatsapp_number", sender)
+    )
+    if not coach_rows:
+        # Also check athletes table for coach_whatsapp_number
+        athlete_rows = await _query_rows(
+            supabase.table("athletes").select("*").eq("coach_whatsapp_number", sender)
+        )
+        if not athlete_rows:
+            return {"status": "ignored"}
+        coach_id = athlete_rows[0].get("coach_id")
+    else:
+        coach_id = coach_rows[0].get("id")
+
+    # Find the most recent pending suggestion for this coach
+    sugg_rows = await _query_rows(
+        supabase.table("suggestions")
+        .select("*")
+        .eq("coach_id", coach_id)
+        .eq("status", "pending")
+        .order("created_at", descending=True)
+        .limit(1)
+    )
+    
+    if not sugg_rows:
+        return {"status": "no_pending_suggestion"}
+
+    suggestion = sugg_rows[0]
+    athlete_phone = suggestion.get("athlete_phone_number")
+    
+    if text.strip().upper() == "APPROVE":
+        reply_body = suggestion.get("suggestion_text")
+    else:
+        reply_body = text
+
+    # Send the message to the athlete
+    await _send_whatsapp_message(request, athlete_phone, reply_body)
+    
+    # Update suggestion status
+    await supabase.table("suggestions").update({
+        "status": "completed",
+        "coach_reply": reply_body,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }).eq("id", suggestion.get("id")).execute()
+
+    return {"status": "sent", "to": athlete_phone}
