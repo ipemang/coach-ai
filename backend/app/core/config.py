@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     coach_whatsapp_number: Optional[str] = None
     # COA-24: dashboard access secret
     dashboard_secret: Optional[str] = None
+    # COA-30: Strava OAuth2
+    strava_client_id: Optional[str] = None
+    strava_client_secret: Optional[str] = None
+    strava_redirect_uri: Optional[str] = None
 
     model_config = SettingsConfigDict(
         case_sensitive=False,
