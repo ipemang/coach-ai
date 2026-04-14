@@ -19,7 +19,6 @@ from app.services.scope import DataScope, apply_scope_query, resolve_scope_from_
 from app.services.whatsapp_service import WhatsAppRecipient, WhatsAppService
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
 
 
@@ -106,8 +105,6 @@ async def _generate_suggestion(supabase: Any, athlete: AthleteRecord, text: str)
     groq_api_key = getattr(settings, "groq_api_key", None)
     if not groq_api_key:
         return "Coach, the athlete shared an update. Please review their check-in."
-
-    # In a real app, you'd fetch athlete history/memory here
     system_prompt = (
         "You are an AI assistant helping a professional sports coach. "
         f"Analyze the following check-in from athlete {athlete.display_name}. "
@@ -115,7 +112,6 @@ async def _generate_suggestion(supabase: Any, athlete: AthleteRecord, text: str)
         "Keep it under 3 sentences."
     )
     user_prompt = f"Athlete check-in: '{text}'"
-
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -152,7 +148,6 @@ async def whatsapp_webhook_handshake(
 async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     raw_body = await request.body()
     logger.info("[webhook] Received athlete POST /whatsapp, body size=%d bytes", len(raw_body))
-
     settings = get_settings()
     if getattr(settings, "whatsapp_webhook_secret", None):
         try:
@@ -160,13 +155,12 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
         except HTTPException as exc:
             logger.error("[webhook] Signature verification failed: %s", exc.detail)
             raise
-    
+
     payload = await _read_payload(request)
     sender = None
     text = None
     wa_msg_id = None
 
-    # Handle WhatsApp Graph API payload
     if "entry" in payload:
         for entry in payload["entry"]:
             for change in entry.get("changes", []):
@@ -178,21 +172,20 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
                     if msg.get("type") == "text":
                         text = msg.get("text", {}).get("body")
                     elif msg.get("type") in ("audio", "voice"):
-                        text = "[Audio Message]" # Placeholder for transcription flow
+                        text = "[Audio Message]"
                     break
-    
+
     if not sender or not text:
         logger.info("[webhook] No message content found in payload")
         return WhatsAppWebhookResponse(status="ignored")
 
     supabase = request.app.state.supabase_client
     athlete = await _find_athlete_by_phone(supabase, sender)
-    
+
     if not athlete:
         logger.warning("[webhook] Sender %s not recognized as athlete", sender)
-        return WhatsAppWebhookResponse(status="ignored", phone_number=sender)
+        return WhatsAppWebhookResponse(status="ignored")
 
-    # 1. Log the check-in
     checkin_payload = {
         "athlete_id": athlete.athlete_id,
         "coach_id": athlete.coach_id,
@@ -204,13 +197,11 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     checkin_res = await supabase.table("athlete_checkins").insert(checkin_payload).execute()
     checkin_id = checkin_res.data[0].get("id") if checkin_res.data else None
 
-    # 2. Generate AI suggestion for coach review
     suggestion_text = await _generate_suggestion(supabase, athlete, text)
 
-    # 3. Create suggestion entry
     suggestion_payload = {
         "athlete_id": athlete.athlete_id,
-Rebuild: athlete check-in flow with AI suggestions for coach review        "athlete_display_name": athlete.display_name,
+        "athlete_display_name": athlete.display_name,
         "athlete_phone_number": sender,
         "suggestion": {"reply": suggestion_text},
         "suggestion_text": suggestion_text,
@@ -220,7 +211,6 @@ Rebuild: athlete check-in flow with AI suggestions for coach review        "athl
     suggestion_res = await supabase.table("suggestions").insert(suggestion_payload).execute()
     suggestion_id = suggestion_res.data[0].get("id") if suggestion_res.data else None
 
-    # 4. Link checkin to suggestion
     if checkin_id and suggestion_id:
         await supabase.table("athlete_checkins").update({
             "suggestion_id": suggestion_id,
@@ -229,7 +219,7 @@ Rebuild: athlete check-in flow with AI suggestions for coach review        "athl
         }).eq("id", checkin_id).execute()
 
     logger.info("[webhook] Athlete check-in processed: id=%s suggestion_id=%s", checkin_id, suggestion_id)
-    
+
     return WhatsAppWebhookResponse(
         status="processed",
         athlete_id=athlete.athlete_id,
