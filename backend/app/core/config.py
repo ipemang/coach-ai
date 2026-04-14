@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     whatsapp_verify_token: Optional[str] = None
     whatsapp_webhook_secret: Optional[str] = None
     coach_whatsapp_number: Optional[str] = None
+    # COA-24: dashboard access secret
+    dashboard_secret: Optional[str] = None
 
     model_config = SettingsConfigDict(
         case_sensitive=False,
