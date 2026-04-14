@@ -207,6 +207,7 @@ async def dashboard_home(request: Request, secret: str | None = Query(default=No
                 <a href="/dashboard/athletes/{a['id']}/history{_qs(secret)}" class="btn btn-secondary btn-sm">History</a>
                 <a href="/dashboard/athletes/{a['id']}/edit{_qs(secret)}" class="btn btn-secondary btn-sm">Edit Profile</a>
                 <a href="/dashboard/athletes/{a['id']}/state{_qs(secret)}" class="btn btn-primary btn-sm">Update State</a>
+                <a href="/dashboard/athletes/{a['id']}/onboard_link{_qs(secret)}" class="btn btn-secondary btn-sm" title="Generate web onboarding link">📋 Onboard</a>
               </div>
             </div>""")
         athlete_html = '<div class="athlete-list">' + "".join(items) + "</div>"
@@ -967,6 +968,70 @@ async def athlete_history(
       {timeline}
     </div>"""
     return HTMLResponse(_base_html(f"History — {_e(athlete_name)}", body, secret))
+
+
+# ---------------------------------------------------------------------------
+# COA-40: Generate web onboarding link for an athlete
+# ---------------------------------------------------------------------------
+
+@router.get("/athletes/{athlete_id}/onboard_link", response_class=HTMLResponse)
+async def athlete_onboard_link(
+    request: Request,
+    athlete_id: str,
+    secret: str | None = Query(default=None),
+):
+    """Generate (or regenerate) a web onboarding link for this athlete."""
+    import secrets as _secrets
+    from datetime import datetime, timedelta, timezone
+    _auth(secret)
+    supabase = await _get_supabase(request)
+
+    # Expire any previous unused onboard_web tokens for this athlete
+    supabase.table("athlete_connect_tokens").update({
+        "used_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("athlete_id", athlete_id).eq("purpose", "onboard_web").is_("used_at", "null").execute()
+
+    # Generate new token
+    token = _secrets.token_urlsafe(32)
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    supabase.table("athlete_connect_tokens").insert({
+        "athlete_id": athlete_id,
+        "token": token,
+        "purpose": "onboard_web",
+        "expires_at": expires_at,
+    }).execute()
+
+    base_url = "https://coach-ai-production-a5aa.up.railway.app"
+    link = f"{base_url}/onboard?token={token}"
+
+    # Get athlete name for display
+    athlete_rows = supabase.table("athletes").select("full_name").eq("id", athlete_id).execute()
+    athlete_name = ""
+    if athlete_rows.data:
+        athlete_name = athlete_rows.data[0].get("full_name") or ""
+
+    body = f"""
+    <h1>Onboarding Link — {_e(athlete_name)}</h1>
+    <div class="card">
+      <p style="font-size:14px;color:#6b7280;margin-bottom:16px;">
+        Share this link with the athlete. It expires in <strong>7 days</strong> and can only be used once.
+      </p>
+      <div style="display:flex;gap:12px;align-items:center;background:#f9fafb;
+                  border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;">
+        <code style="flex:1;font-size:13px;word-break:break-all;color:#1a1a1a;">{_e(link)}</code>
+        <button onclick="navigator.clipboard.writeText('{_e(link)}');this.textContent='Copied!'"
+          style="padding:8px 16px;background:#1a1a1a;color:white;border:none;border-radius:6px;
+                 font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">Copy</button>
+      </div>
+      <p style="font-size:12px;color:#9ca3af;margin-top:12px;">
+        The athlete will complete a multi-step profile intake covering their training background,
+        HR zones, injury history, and device connections (Oura + Strava).
+      </p>
+      <div style="margin-top:20px;">
+        <a href="/dashboard{_qs(secret)}" class="btn btn-secondary">← Back to Athletes</a>
+      </div>
+    </div>"""
+    return HTMLResponse(_base_html(f"Onboard — {_e(athlete_name)}", body, secret))
 
 
 # ---------------------------------------------------------------------------
