@@ -18,6 +18,16 @@ from app.core.config import get_settings
 from app.core.security import verify_whatsapp_signature
 
 logger = logging.getLogger(__name__)
+
+
+def _mask_phone(phone: str) -> str:
+    """Mask a phone number for safe logging: +1***...3086"""
+    s = str(phone)
+    if len(s) <= 4:
+        return "****"
+    return s[:2] + "***" + s[-4:]
+
+
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
 
 
@@ -89,7 +99,7 @@ async def _query_rows(query: Any) -> list[dict[str, Any]]:
 
 async def _find_athlete_by_phone(supabase_client: Any, phone_number: str) -> AthleteRecord | None:
     variants = _phone_variants(phone_number)
-    logger.info("[webhook] Looking up athlete by phone variants: %s", variants)
+    logger.info("[webhook] Looking up athlete by phone variants: %s", [_mask_phone(v) for v in variants])
     for value in variants:
         rows = await _query_rows(
             supabase_client.table("athletes").select("*").eq("phone_number", value)
@@ -117,14 +127,14 @@ async def _find_athlete_by_phone(supabase_client: Any, phone_number: str) -> Ath
                 stable_profile=row.get("stable_profile") or {},
                 current_state=row.get("current_state") or {},
             )
-    logger.warning("[webhook] No athlete found for phone variants: %s", variants)
+    logger.warning("[webhook] No athlete found for phone variants: %s", [_mask_phone(v) for v in variants])
     return None
 
 
 async def _find_coach_by_phone(supabase_client: Any, phone_number: str) -> dict | None:
     """Return the coach row if sender is a registered coach, else None."""
     variants = _phone_variants(phone_number)
-    logger.info("[webhook] Looking up coach by phone variants: %s", variants)
+    logger.info("[webhook] Looking up coach by phone variants: %s", [_mask_phone(v) for v in variants])
     for value in variants:
         rows = await _query_rows(
             supabase_client.table("coaches").select("*").eq("whatsapp_number", value)
@@ -138,13 +148,13 @@ async def _find_coach_by_phone(supabase_client: Any, phone_number: str) -> dict 
 async def _send_whatsapp_message(request: Request, to: str, body: str) -> None:
     whatsapp_client = getattr(request.app.state, "whatsapp_client", None)
     if whatsapp_client is None:
-        logger.warning("[webhook] whatsapp_client not available — cannot send to %s", to)
+        logger.warning("[webhook] whatsapp_client not available — cannot send to %s", _mask_phone(to))
         return
     try:
         await whatsapp_client.send_message(to, body)
-        logger.info("[webhook] Sent WhatsApp message to %s", to)
+        logger.info("[webhook] Sent WhatsApp message to %s", _mask_phone(to))
     except Exception as exc:
-        logger.error("[webhook] Failed to send WhatsApp message to %s: %s", to, exc)
+        logger.error("[webhook] Failed to send WhatsApp message to %s: %s", _mask_phone(to), exc)
 
 
 async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
@@ -340,12 +350,11 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     logger.info("[webhook] Received POST /whatsapp, body size=%d bytes", len(raw_body))
 
     settings = get_settings()
-    if getattr(settings, "whatsapp_webhook_secret", None):
-        try:
-            verify_whatsapp_signature(request, raw_body)
-        except HTTPException as exc:
-            logger.error("[webhook] Signature verification failed: %s", exc.detail)
-            raise
+    try:
+        verify_whatsapp_signature(request, raw_body)
+    except HTTPException as exc:
+        logger.error("[webhook] Signature verification failed: %s", exc.detail)
+        raise
 
     content_type = (request.headers.get("content-type") or "").lower()
     payload = _parse_payload(raw_body, content_type)
@@ -361,13 +370,13 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     # FIX 3: Single endpoint routing — check if sender is a coach first
     coach = await _find_coach_by_phone(supabase, sender)
     if coach:
-        logger.info("[webhook] Sender %s identified as coach — routing to triage", sender)
+        logger.info("[webhook] Sender %s identified as coach — routing to triage", _mask_phone(sender))
         return await _handle_coach_message(request, supabase, coach, sender, text)
 
     # Otherwise treat as athlete
     athlete = await _find_athlete_by_phone(supabase, sender)
     if not athlete:
-        logger.warning("[webhook] Sender %s not recognized as athlete or coach — ignoring", sender)
+        logger.warning("[webhook] Sender %s not recognized as athlete or coach — ignoring", _mask_phone(sender))
         return WhatsAppWebhookResponse(status="ignored")
 
     return await _handle_athlete_message(request, supabase, athlete, sender, text, wa_msg_id)
@@ -450,7 +459,7 @@ async def _handle_athlete_message(
             f"Reply APPROVE to send this, or reply with your own message to override."
         )
         await _send_whatsapp_message(request, coach_wa, coach_notification)
-        logger.info("[webhook] Notified coach at %s", coach_wa)
+        logger.info("[webhook] Notified coach at %s", _mask_phone(coach_wa))
     else:
         logger.warning("[webhook] No coach WhatsApp number found — skipping coach notification")
 
@@ -524,5 +533,5 @@ async def _handle_coach_message(
     except Exception as exc:
         logger.error("[webhook] Failed to update suggestion status: %s", exc)
 
-    logger.info("[webhook] Coach reply sent to athlete at %s", athlete_phone)
+    logger.info("[webhook] Coach reply sent to athlete at %s", _mask_phone(athlete_phone))
     return WhatsAppWebhookResponse(status="sent", coach_id=str(coach_id))

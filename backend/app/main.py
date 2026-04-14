@@ -9,6 +9,7 @@ from typing import Any, AsyncIterator, Optional
 
 import httpx
 from fastapi import FastAPI, Request as FastAPIRequest
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from supabase import create_client
 
@@ -107,6 +108,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Coach.AI API", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://coach-ai-production-a5aa.up.railway.app"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type", "X-Hub-Signature-256"],
+)
 
 
 @app.middleware("http")

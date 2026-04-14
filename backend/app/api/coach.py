@@ -1,7 +1,10 @@
 """Coach triage and verification API routes."""
 from __future__ import annotations
+import logging
 from typing import Any, Literal, List
 from fastapi import APIRouter, Depends, HTTPException, Request
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel, Field
 from app.core.security import AuthenticatedPrincipal, require_roles, resolve_coach_scope
 from app.services.coach_workflow import CoachWorkflow, CoachDecision
@@ -47,7 +50,8 @@ async def get_triage_queue(
     try:
         items = await workflow.build_triage()
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("Triage build failed")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
     return [
         CoachTriageResponseItem(
             athlete_id=item.athlete_id,
@@ -81,7 +85,8 @@ async def verify_suggestion(
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("Suggestion verification failed")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
     return {
         "suggestion_id": result.suggestion_id,
         "decision": result.decision,
@@ -111,5 +116,6 @@ async def list_checkins(
         response = await query.execute()
         rows = response.data if hasattr(response, "data") else []
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("Failed to list checkins")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
     return {"checkins": rows, "count": len(rows)}

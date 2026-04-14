@@ -5,6 +5,8 @@ Protected by DASHBOARD_SECRET env var passed as ?secret= query param.
 """
 from __future__ import annotations
 
+import hmac
+import html
 import json
 import logging
 from typing import Any
@@ -31,10 +33,16 @@ _PHASES = ["base", "build", "peak", "taper", "recovery", "off_season"]
 
 
 def _auth(secret: str | None) -> None:
-    settings = get_settings()
-    expected = getattr(settings, "dashboard_secret", None)
-    if expected and secret != expected:
-        raise HTTPException(status_code=401, detail="Invalid dashboard secret")
+    expected = getattr(get_settings(), "dashboard_secret", None)
+    if not expected:
+        raise HTTPException(status_code=503, detail="Dashboard not configured")
+    if not secret or not hmac.compare_digest(secret.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _e(val) -> str:
+    """HTML-escape a value for safe interpolation into HTML templates."""
+    return html.escape(str(val)) if val is not None else ""
 
 
 def _qs(secret: str | None) -> str:
@@ -122,7 +130,7 @@ def _base_html(title: str, body: str, secret: str | None = None) -> str:
 
 def _phase_badge(phase: str) -> str:
     cls = f"badge-{phase}" if phase in ("base", "build", "peak", "taper") else "badge-default"
-    return f'<span class="badge {cls}">{phase}</span>' if phase else ""
+    return f'<span class="badge {cls}">{_e(phase)}</span>' if phase else ""
 
 
 async def _get_supabase(request: Request) -> Any:
@@ -155,16 +163,16 @@ async def dashboard_home(request: Request, secret: str | None = Query(default=No
             badge = _phase_badge(phase)
             meta_parts = []
             if a.get("phone_number"):
-                meta_parts.append(a["phone_number"])
+                meta_parts.append(_e(a["phone_number"]))
             if race:
-                meta_parts.append(race)
+                meta_parts.append(_e(race))
             if cs.get("training_week"):
-                meta_parts.append(f"Week {cs['training_week']}")
+                meta_parts.append(f"Week {_e(cs['training_week'])}")
             meta = " · ".join(meta_parts)
             items.append(f"""
             <div class="athlete-item">
               <div>
-                <div class="athlete-name">{a.get('full_name', 'Unnamed')} {badge}</div>
+                <div class="athlete-name">{_e(a.get('full_name', 'Unnamed'))} {badge}</div>
                 <div class="athlete-meta">{meta}</div>
               </div>
               <div class="actions">
@@ -405,18 +413,18 @@ async def edit_athlete_form(
     )
 
     body = f"""
-    <h1>Edit Athlete: {a.get('full_name', '')}</h1>
+    <h1>Edit Athlete: {_e(a.get('full_name', ''))}</h1>
     <div class="card">
       <form method="POST" action="/dashboard/athletes/{athlete_id}{_qs(secret)}">
         <p class="section-title">Identity</p>
         <div class="form-row">
           <div class="form-group">
             <label>Full Name *</label>
-            <input type="text" name="full_name" required value="{a.get('full_name', '')}">
+            <input type="text" name="full_name" required value="{_e(a.get('full_name', ''))}">
           </div>
           <div class="form-group">
             <label>WhatsApp Phone *</label>
-            <input type="text" name="phone_number" required value="{a.get('phone_number', '')}">
+            <input type="text" name="phone_number" required value="{_e(a.get('phone_number', ''))}">
           </div>
         </div>
         <div class="form-row">
@@ -426,7 +434,7 @@ async def edit_athlete_form(
           </div>
           <div class="form-group">
             <label>Email</label>
-            <input type="email" name="email" value="{a.get('email', '')}">
+            <input type="email" name="email" value="{_e(a.get('email', ''))}">
           </div>
         </div>
 
@@ -434,51 +442,51 @@ async def edit_athlete_form(
         <div class="form-row">
           <div class="form-group">
             <label>Target Race</label>
-            <input type="text" name="target_race" value="{sp.get('target_race', '')}">
+            <input type="text" name="target_race" value="{_e(sp.get('target_race', ''))}">
           </div>
           <div class="form-group">
             <label>Race Date</label>
-            <input type="date" name="race_date" value="{sp.get('race_date', '')}">
+            <input type="date" name="race_date" value="{_e(sp.get('race_date', ''))}">
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
             <label>Max Weekly Hours</label>
-            <input type="number" name="max_weekly_hours" value="{sp.get('max_weekly_hours', '')}" step="0.5">
+            <input type="number" name="max_weekly_hours" value="{_e(sp.get('max_weekly_hours', ''))}" step="0.5">
           </div>
           <div class="form-group">
             <label>Swim CSS Pace</label>
-            <input type="text" name="swim_css" value="{sp.get('swim_css', '')}">
+            <input type="text" name="swim_css" value="{_e(sp.get('swim_css', ''))}">
           </div>
         </div>
 
         <p class="section-title" style="margin-top:16px;">Run HR Zones</p>
         <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;">
-          <div class="form-group"><label>Z1</label><input type="text" name="zone_run_z1" value="{zones.get('z1', '')}"></div>
-          <div class="form-group"><label>Z2</label><input type="text" name="zone_run_z2" value="{zones.get('z2', '')}"></div>
-          <div class="form-group"><label>Z3</label><input type="text" name="zone_run_z3" value="{zones.get('z3', '')}"></div>
-          <div class="form-group"><label>Z4</label><input type="text" name="zone_run_z4" value="{zones.get('z4', '')}"></div>
-          <div class="form-group"><label>Z5</label><input type="text" name="zone_run_z5" value="{zones.get('z5', '')}"></div>
+          <div class="form-group"><label>Z1</label><input type="text" name="zone_run_z1" value="{_e(zones.get('z1', ''))}"></div>
+          <div class="form-group"><label>Z2</label><input type="text" name="zone_run_z2" value="{_e(zones.get('z2', ''))}"></div>
+          <div class="form-group"><label>Z3</label><input type="text" name="zone_run_z3" value="{_e(zones.get('z3', ''))}"></div>
+          <div class="form-group"><label>Z4</label><input type="text" name="zone_run_z4" value="{_e(zones.get('z4', ''))}"></div>
+          <div class="form-group"><label>Z5</label><input type="text" name="zone_run_z5" value="{_e(zones.get('z5', ''))}"></div>
         </div>
 
         <p class="section-title" style="margin-top:16px;">Background</p>
         <div class="form-row">
           <div class="form-group">
             <label>Wearable Devices</label>
-            <input type="text" name="wearables" value="{wearables_str}">
+            <input type="text" name="wearables" value="{_e(wearables_str)}">
           </div>
           <div class="form-group">
             <label>Years of Experience</label>
-            <input type="number" name="years_experience" value="{sp.get('years_experience', '')}">
+            <input type="number" name="years_experience" value="{_e(sp.get('years_experience', ''))}">
           </div>
         </div>
         <div class="form-group">
           <label>Injury History</label>
-          <textarea name="injury_history">{sp.get('injury_history', '')}</textarea>
+          <textarea name="injury_history">{_e(sp.get('injury_history', ''))}</textarea>
         </div>
         <div class="form-group">
           <label>Coach Notes</label>
-          <textarea name="notes">{sp.get('notes', '')}</textarea>
+          <textarea name="notes">{_e(sp.get('notes', ''))}</textarea>
         </div>
 
         <div style="display:flex;gap:12px;margin-top:8px;">
@@ -487,7 +495,7 @@ async def edit_athlete_form(
         </div>
       </form>
     </div>"""
-    return HTMLResponse(_base_html(f"Edit {a.get('full_name', '')}", body, secret))
+    return HTMLResponse(_base_html(f"Edit {_e(a.get('full_name', ''))}", body, secret))
 
 
 @router.post("/athletes/{athlete_id}", response_class=HTMLResponse)
@@ -559,7 +567,7 @@ async def update_state_form(
 
     # Check for existing Oura token
     oura_rows = supabase.table("oura_tokens").select("access_token").eq("athlete_id", athlete_id).execute()
-    oura_token_val = oura_rows.data[0]["access_token"] if oura_rows.data else ""
+    oura_token_stored = bool(oura_rows.data and oura_rows.data[0].get("access_token"))
 
     phase_options = "".join(
         f'<option value="{p}" {"selected" if p == cs.get("training_phase") else ""}>{p.capitalize()}</option>'
@@ -567,7 +575,7 @@ async def update_state_form(
     )
 
     body = f"""
-    <h1>Update State: {a.get('full_name', '')}</h1>
+    <h1>Update State: {_e(a.get('full_name', ''))}</h1>
     <div class="card">
       <form method="POST" action="/dashboard/athletes/{athlete_id}/state{_qs(secret)}">
         <p class="section-title">Training Status</p>
@@ -581,7 +589,7 @@ async def update_state_form(
           </div>
           <div class="form-group">
             <label>Training Week #</label>
-            <input type="number" name="training_week" value="{cs.get('training_week', '')}" min="1">
+            <input type="number" name="training_week" value="{_e(cs.get('training_week', ''))}" min="1">
           </div>
         </div>
 
@@ -589,36 +597,36 @@ async def update_state_form(
         <div class="form-row">
           <div class="form-group">
             <label>Last Readiness Score (0–100)</label>
-            <input type="number" name="last_readiness_score" value="{cs.get('last_readiness_score', '')}" min="0" max="100">
+            <input type="number" name="last_readiness_score" value="{_e(cs.get('last_readiness_score', ''))}" min="0" max="100">
           </div>
           <div class="form-group">
             <label>Last HRV (ms)</label>
-            <input type="number" name="last_hrv" value="{cs.get('last_hrv', '')}" min="0">
+            <input type="number" name="last_hrv" value="{_e(cs.get('last_hrv', ''))}" min="0">
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
             <label>Last Sleep Score (0–100)</label>
-            <input type="number" name="last_sleep_score" value="{cs.get('last_sleep_score', '')}" min="0" max="100">
+            <input type="number" name="last_sleep_score" value="{_e(cs.get('last_sleep_score', ''))}" min="0" max="100">
           </div>
           <div class="form-group">
             <label>Missed Workouts This Week</label>
-            <input type="number" name="missed_workouts" value="{cs.get('missed_workouts_this_week', '')}" min="0">
+            <input type="number" name="missed_workouts" value="{_e(cs.get('missed_workouts_this_week', ''))}" min="0">
           </div>
         </div>
         <div class="form-group">
           <label>Soreness Notes</label>
-          <input type="text" name="soreness" value="{cs.get('soreness', '')}" placeholder="Moderate left calf">
+          <input type="text" name="soreness" value="{_e(cs.get('soreness', ''))}" placeholder="Moderate left calf">
         </div>
         <div class="form-group">
           <label>Coach Notes</label>
-          <textarea name="coach_notes">{cs.get('coach_notes', '')}</textarea>
+          <textarea name="coach_notes">{_e(cs.get('coach_notes', ''))}</textarea>
         </div>
 
         <p class="section-title" style="margin-top:16px;">Oura Integration</p>
         <div class="form-group">
           <label>Oura Personal Access Token</label>
-          <input type="text" name="oura_token" value="{oura_token_val}" placeholder="Paste from cloud.ouraring.com/personal-access-tokens">
+          <input type="password" name="oura_token" value="" placeholder="{'Token saved — enter new token to replace' if oura_token_stored else 'Paste from cloud.ouraring.com/personal-access-tokens'}">
           <span class="hint">Stored securely. Used for automatic daily readiness sync (COA-26).</span>
         </div>
 
@@ -628,7 +636,7 @@ async def update_state_form(
         </div>
       </form>
     </div>"""
-    return HTMLResponse(_base_html(f"State — {a.get('full_name', '')}", body, secret))
+    return HTMLResponse(_base_html(f"State — {_e(a.get('full_name', ''))}", body, secret))
 
 
 @router.post("/athletes/{athlete_id}/state", response_class=HTMLResponse)
@@ -700,14 +708,14 @@ async def coach_settings_form(
         <p class="section-title">Methodology Playbook</p>
         <div class="form-group">
           <label>Playbook (JSON)</label>
-          <textarea name="methodology_playbook" style="min-height:200px;font-family:monospace;font-size:13px;">{playbook_json}</textarea>
+          <textarea name="methodology_playbook" style="min-height:200px;font-family:monospace;font-size:13px;">{_e(playbook_json)}</textarea>
           <span class="hint">Define periodization rules, zones, intensity system, and coaching rules as JSON.</span>
         </div>
 
         <p class="section-title" style="margin-top:16px;">AI Persona Prompt</p>
         <div class="form-group">
           <label>System Prompt</label>
-          <textarea name="persona_system_prompt" style="min-height:120px;">{persona}</textarea>
+          <textarea name="persona_system_prompt" style="min-height:120px;">{_e(persona)}</textarea>
           <span class="hint">How the AI should speak as your coaching voice. Tone, style, what to emphasize.</span>
         </div>
 

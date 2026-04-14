@@ -135,7 +135,11 @@ async def _resolve_supabase_client(request: Request) -> Any:
 
 
 @router.post("/athlete-memory/search", tags=["athlete-memory"], response_model=AthleteMemorySearchResponse)
-async def search_athlete_memory(request: Request, payload: AthleteMemorySearchRequest) -> AthleteMemorySearchResponse:
+async def search_athlete_memory(
+    request: Request,
+    payload: AthleteMemorySearchRequest,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach", "admin")),
+) -> AthleteMemorySearchResponse:
     supabase_client = await _resolve_supabase_client(request)
     service = AthleteMemorySearchService(
         supabase_client=supabase_client,
