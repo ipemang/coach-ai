@@ -16,6 +16,7 @@ from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.core.config import get_settings
+from app.api.webhooks import _query_rows
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -177,6 +178,7 @@ async def dashboard_home(request: Request, secret: str | None = Query(default=No
                 <div class="athlete-meta">{meta}</div>
               </div>
               <div class="actions">
+                <a href="/dashboard/athletes/{a['id']}/history{_qs(secret)}" class="btn btn-secondary btn-sm">History</a>
                 <a href="/dashboard/athletes/{a['id']}/edit{_qs(secret)}" class="btn btn-secondary btn-sm">Edit Profile</a>
                 <a href="/dashboard/athletes/{a['id']}/state{_qs(secret)}" class="btn btn-primary btn-sm">Update State</a>
               </div>
@@ -701,6 +703,113 @@ async def save_athlete_state(
 
     logger.info("[dashboard] Updated current_state for athlete %s", athlete_id)
     return RedirectResponse(f"/dashboard{_qs(secret)}&saved=1", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Conversation history (COA-36)
+# ---------------------------------------------------------------------------
+
+@router.get("/athletes/{athlete_id}/history", response_class=HTMLResponse)
+async def athlete_history(
+    athlete_id: str,
+    request: Request,
+    secret: str | None = Query(default=None),
+):
+    _auth(secret)
+    supabase = await _get_supabase(request)
+
+    # Fetch athlete name
+    athlete_rows = supabase.table("athletes").select("full_name").eq("id", athlete_id).execute()
+    if not athlete_rows.data:
+        raise HTTPException(status_code=404, detail="Athlete not found")
+    athlete_name = athlete_rows.data[0].get("full_name") or "Unnamed"
+
+    # Fetch last 20 suggestions
+    suggestion_rows = await _query_rows(
+        supabase.table("suggestions")
+        .select("id, suggestion_text, coach_reply, status, sent_at, created_at")
+        .eq("athlete_id", athlete_id)
+        .order("created_at", desc=True)
+        .limit(20)
+    )
+
+    # Build timeline entries
+    entries_html = []
+    for row in suggestion_rows:
+        suggestion_id = row.get("id")
+        dt_raw = row.get("created_at") or ""
+        dt = _e(dt_raw[:16].replace("T", " ")) if dt_raw else "Unknown"
+        status = row.get("status") or ""
+
+        # Fetch linked check-in
+        checkin_rows = await _query_rows(
+            supabase.table("athlete_checkins")
+            .select("message_text, message_type")
+            .eq("suggestion_id", suggestion_id)
+            .limit(1)
+        )
+        athlete_msg = ""
+        if checkin_rows:
+            athlete_msg = checkin_rows[0].get("message_text") or ""
+
+        suggestion_text = row.get("suggestion_text") or ""
+        coach_reply = row.get("coach_reply") or ""
+
+        # Determine what the coach sent
+        if status == "approved" and not coach_reply:
+            coach_display = "[Approved AI suggestion]"
+        elif status == "pending":
+            coach_display = "[Pending coach review]"
+        elif coach_reply:
+            coach_display = coach_reply
+        else:
+            coach_display = ""
+
+        # Build entry HTML
+        entry = f'<div class="timeline-entry"><div class="timeline-date">{dt}</div>'
+        if athlete_msg:
+            entry += (
+                f'<div class="timeline-bubble athlete-bubble">'
+                f'<span class="bubble-label">Athlete</span>{_e(athlete_msg)}</div>'
+            )
+        if suggestion_text:
+            entry += (
+                f'<div class="timeline-bubble ai-bubble">'
+                f'<span class="bubble-label">AI Suggested</span>{_e(suggestion_text)}</div>'
+            )
+        if coach_display:
+            approved_cls = " approved" if status == "approved" else ""
+            entry += (
+                f'<div class="timeline-bubble coach-bubble{approved_cls}">'
+                f'<span class="bubble-label">Coach Sent</span>{_e(coach_display)}</div>'
+            )
+        entry += "</div>"
+        entries_html.append(entry)
+
+    if not entries_html:
+        timeline = '<p style="color:#6b7280">No check-ins yet for this athlete.</p>'
+    else:
+        timeline = "".join(entries_html)
+
+    body = f"""
+    <style>
+    .timeline-entry {{ border-left: 3px solid #e5e7eb; padding-left: 16px; margin-bottom: 24px; }}
+    .timeline-date {{ font-size: 12px; color: #6b7280; font-weight: 600; margin-bottom: 8px; }}
+    .timeline-bubble {{ background: white; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }}
+    .bubble-label {{ font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; display: block; margin-bottom: 4px; }}
+    .athlete-bubble {{ border-left: 3px solid #2563eb; }}
+    .ai-bubble {{ border-left: 3px solid #7c3aed; }}
+    .coach-bubble {{ border-left: 3px solid #059669; }}
+    .coach-bubble.approved {{ background: #f0fdf4; }}
+    </style>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+      <h1>History: {_e(athlete_name)}</h1>
+      <a href="/dashboard{_qs(secret)}" class="btn btn-secondary">Back to Athletes</a>
+    </div>
+    <div class="card">
+      {timeline}
+    </div>"""
+    return HTMLResponse(_base_html(f"History — {_e(athlete_name)}", body, secret))
 
 
 # ---------------------------------------------------------------------------
