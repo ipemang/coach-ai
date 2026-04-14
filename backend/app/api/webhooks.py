@@ -272,27 +272,42 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
     if state_parts:
         prompt_parts.append("\n\nCurrent athlete state:\n" + "\n".join(f"- {p}" for p in state_parts))
 
-    # COA-27: Recent check-in history (last 5, excluding the current message)
-    checkin_history_parts: list[str] = []
+    # COA-36: Paired conversation thread
+    conversation_parts: list[str] = []
     try:
-        checkin_rows = await _query_rows(
-            supabase.table("athlete_checkins")
-            .select("message_text, created_at")
+        suggestion_rows = await _query_rows(
+            supabase.table("suggestions")
+            .select("id, suggestion_text, coach_reply, status, created_at")
             .eq("athlete_id", athlete.athlete_id)
             .order("created_at", desc=True)
-            .limit(5)
+            .limit(10)
         )
         total_len = 0
-        for row in checkin_rows:
-            msg = (row.get("message_text") or "")[:120]
-            dt = (row.get("created_at") or "")[:10]  # YYYY-MM-DD
-            entry = f'- [{dt}] "{msg}"'
-            if total_len + len(entry) > 500:
+        for row in suggestion_rows:
+            dt = (row.get("created_at") or "")[:10]
+            checkin_rows = await _query_rows(
+                supabase.table("athlete_checkins")
+                .select("message_text")
+                .eq("suggestion_id", row["id"])
+                .limit(1)
+            )
+            athlete_msg = (checkin_rows[0].get("message_text") or "")[:150] if checkin_rows else ""
+            coach_sent = row.get("coach_reply") or ""
+            if not coach_sent and row.get("status") == "approved":
+                coach_sent = f"[Approved AI: {(row.get('suggestion_text') or '')[:100]}]"
+            elif not coach_sent:
+                coach_sent = "[Pending]"
+            entry_parts = [f"[{dt}]"]
+            if athlete_msg:
+                entry_parts.append(f'Athlete: "{athlete_msg}"')
+            entry_parts.append(f'Coach: "{coach_sent}"')
+            entry = " | ".join(entry_parts)
+            if total_len + len(entry) > 1500:
                 break
-            checkin_history_parts.append(entry)
+            conversation_parts.append(entry)
             total_len += len(entry)
     except Exception as exc:
-        logger.warning("[webhook] Could not fetch check-in history: %s", exc)
+        logger.warning("[webhook] Could not fetch conversation thread: %s", exc)
 
     # COA-27: Memory state (latest note for this athlete)
     memory_note = ""
@@ -315,8 +330,8 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
     except Exception as exc:
         logger.warning("[webhook] Could not fetch memory state: %s", exc)
 
-    if checkin_history_parts:
-        prompt_parts.append("\n\nRecent check-in history:\n" + "\n".join(checkin_history_parts))
+    if conversation_parts:
+        prompt_parts.append("\n\nRecent conversation history (athlete → coach):\n" + "\n".join(conversation_parts))
     if memory_note:
         prompt_parts.append(f"\n\nCoach memory note:\n{memory_note}")
 
