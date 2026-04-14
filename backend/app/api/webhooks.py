@@ -256,6 +256,16 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
     if strava_parts:
         state_parts.append("Strava — " + " | ".join(strava_parts))
 
+    # COA-38: Predictive risk flags
+    predictive_flags = cs.get("predictive_flags") or []
+    if predictive_flags:
+        high_flags = [f["label"] for f in predictive_flags if f.get("priority") == "high"]
+        all_flags = [f["label"] for f in predictive_flags]
+        if high_flags:
+            state_parts.append(f"HIGH RISK FLAGS: {', '.join(high_flags)}")
+        elif all_flags:
+            state_parts.append(f"Predictive flags: {', '.join(all_flags)}")
+
     base = coach_persona or (
         "You are an expert endurance sports coach assistant. "
         "Draft a concise, supportive, professional reply FROM the coach TO the athlete. "

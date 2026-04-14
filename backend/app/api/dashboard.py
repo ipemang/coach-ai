@@ -130,6 +130,31 @@ def _base_html(title: str, body: str, secret: str | None = None) -> str:
 </html>"""
 
 
+def _risk_flags_html(cs: dict) -> str:
+    """COA-38: Render predictive risk flags as colored badges."""
+    flags = cs.get("predictive_flags") or []
+    if not flags:
+        return ""
+    priority_colors = {"high": "#fee2e2", "medium": "#fef3c7", "low": "#f3f4f6"}
+    priority_text = {"high": "#991b1b", "medium": "#92400e", "low": "#374151"}
+    parts = [
+        '<p class="section-title" style="margin-top:16px;">Risk Flags</p>'
+        '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">'
+    ]
+    for flag in flags:
+        pri = flag.get("priority", "low")
+        bg = priority_colors.get(pri, "#f3f4f6")
+        tc = priority_text.get(pri, "#374151")
+        parts.append(
+            f'<div style="background:{bg};color:{tc};border-radius:6px;'
+            f'padding:6px 12px;font-size:13px;" '
+            f'title="{_e(flag.get("reason", ""))}">'
+            f'{_e(flag.get("label", ""))}</div>'
+        )
+    parts.append("</div>")
+    return "".join(parts)
+
+
 def _phase_badge(phase: str) -> str:
     cls = f"badge-{phase}" if phase in ("base", "build", "peak", "taper") else "badge-default"
     return f'<span class="badge {cls}">{_e(phase)}</span>' if phase else ""
@@ -647,6 +672,8 @@ async def update_state_form(
            '<a href="/dashboard/athletes/' + _e(athlete_id) + '/strava/connect' + _qs(secret) + '" class="btn btn-primary btn-sm">Connect Strava</a>'
            + '<span class="hint" style="margin-top:6px;display:block;">Links your athlete\'s Strava account for automatic activity sync.</span>'}
         </div>
+
+        {_risk_flags_html(cs)}
 
         <div style="display:flex;gap:12px;margin-top:8px;">
           <button type="submit" class="btn btn-primary">Save State</button>
