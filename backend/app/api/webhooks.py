@@ -431,6 +431,166 @@ async def _extract_message(payload: dict) -> tuple[str | None, str | None, str |
 
 
 # ---------------------------------------------------------------------------
+# Onboarding flow (COA-33)
+# ---------------------------------------------------------------------------
+
+async def _find_onboarding_session(supabase: Any, phone_number: str) -> dict | None:
+    """Look up an in-progress onboarding session by phone number."""
+    variants = _phone_variants(phone_number)
+    for value in variants:
+        rows = await _query_rows(
+            supabase.table("onboarding_sessions").select("*").eq("phone_number", value)
+        )
+        if rows:
+            return rows[0]
+    return None
+
+
+async def _start_onboarding(request: Request, supabase: Any, sender: str) -> WhatsAppWebhookResponse:
+    """Create a new onboarding session and ask for the athlete's name."""
+    supabase.table("onboarding_sessions").insert({
+        "phone_number": sender,
+        "step": "ask_name",
+        "collected": {},
+    }).execute()
+
+    await _send_whatsapp_message(
+        request, sender,
+        "Welcome to Coach.AI! \U0001f3cb\ufe0f\n"
+        "I don't have you in the system yet. Let's get you set up in just a few steps.\n\n"
+        "What's your full name?"
+    )
+    logger.info("[onboarding] Started onboarding for %s", _mask_phone(sender))
+    return WhatsAppWebhookResponse(status="onboarding_started")
+
+
+async def _handle_onboarding_step(
+    request: Request,
+    supabase: Any,
+    sender: str,
+    text: str,
+    session: dict,
+) -> WhatsAppWebhookResponse:
+    """State-machine handler for multi-step onboarding."""
+    step = session.get("step", "ask_name")
+    collected = session.get("collected") or {}
+
+    if step == "ask_name":
+        collected["name"] = text.strip()
+        new_step = "ask_race"
+        name = collected["name"]
+        await _send_whatsapp_message(
+            request, sender,
+            f"Nice to meet you, {name}! \U0001f44b\n\n"
+            "What's your target race or event?\n"
+            "(e.g. Ironman 70.3, Boston Marathon \u2014 or type 'skip')"
+        )
+
+    elif step == "ask_race":
+        collected["race"] = "" if text.strip().lower() == "skip" else text.strip()
+        new_step = "ask_race_date"
+        await _send_whatsapp_message(
+            request, sender,
+            "Got it! When is the race?\n"
+            "(e.g. November 2 2025 \u2014 or type 'skip')"
+        )
+
+    elif step == "ask_race_date":
+        collected["race_date"] = "" if text.strip().lower() == "skip" else text.strip()
+        new_step = "ask_timezone"
+        await _send_whatsapp_message(
+            request, sender,
+            "Almost done! What timezone are you in?\n"
+            "(e.g. America/New_York, America/Sao_Paulo, Europe/London \u2014 or type 'skip')"
+        )
+
+    elif step == "ask_timezone":
+        collected["timezone"] = "UTC" if text.strip().lower() == "skip" else text.strip()
+        return await _complete_onboarding(request, supabase, sender, collected)
+
+    else:
+        logger.warning("[onboarding] Unknown step %s for %s — restarting", step, _mask_phone(sender))
+        return await _start_onboarding(request, supabase, sender)
+
+    # Persist step transition
+    supabase.table("onboarding_sessions").update({
+        "step": new_step,
+        "collected": collected,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("phone_number", sender).execute()
+
+    logger.info("[onboarding] %s advanced to step=%s", _mask_phone(sender), new_step)
+    return WhatsAppWebhookResponse(status="onboarding_step")
+
+
+async def _complete_onboarding(
+    request: Request,
+    supabase: Any,
+    sender: str,
+    collected: dict,
+) -> WhatsAppWebhookResponse:
+    """Finalize onboarding: create athlete, notify coach, clean up session."""
+    # Resolve coach
+    coach_id = None
+    coach_whatsapp = None
+    try:
+        coach_rows = await _query_rows(
+            supabase.table("coaches").select("id, whatsapp_number").limit(1)
+        )
+        if coach_rows:
+            coach_id = coach_rows[0].get("id")
+            coach_whatsapp = coach_rows[0].get("whatsapp_number")
+    except Exception as exc:
+        logger.warning("[onboarding] Could not fetch coach row: %s", exc)
+
+    if not coach_id:
+        coach_id = get_settings().coach_id
+    if not coach_whatsapp:
+        coach_whatsapp = getattr(get_settings(), "coach_whatsapp_number", None)
+
+    # Build stable_profile
+    stable_profile: dict[str, Any] = {}
+    if collected.get("race"):
+        stable_profile["target_race"] = collected["race"]
+    if collected.get("race_date"):
+        stable_profile["race_date"] = collected["race_date"]
+
+    # Create athlete
+    name = collected.get("name", "New Athlete")
+    supabase.table("athletes").insert({
+        "full_name": name,
+        "phone_number": sender,
+        "coach_id": coach_id,
+        "timezone_name": collected.get("timezone") or "UTC",
+        "stable_profile": stable_profile,
+        "current_state": {},
+    }).execute()
+
+    # Delete onboarding session
+    supabase.table("onboarding_sessions").delete().eq("phone_number", sender).execute()
+
+    # Confirm to athlete
+    await _send_whatsapp_message(
+        request, sender,
+        f"\u2705 You're all set, {name}!\n\n"
+        "Your coach has been notified and will be in touch soon. "
+        "Feel free to start sending your daily check-ins here anytime."
+    )
+
+    # Notify coach
+    if coach_whatsapp:
+        masked = _mask_phone(sender)
+        await _send_whatsapp_message(
+            request, coach_whatsapp,
+            f"\U0001f195 New athlete onboarded via WhatsApp: {name} ({masked})\n"
+            "Check the dashboard to review their profile."
+        )
+
+    logger.info("[onboarding] Completed onboarding for %s name=%s", _mask_phone(sender), name)
+    return WhatsAppWebhookResponse(status="onboarding_complete")
+
+
+# ---------------------------------------------------------------------------
 # Handshake
 # ---------------------------------------------------------------------------
 
@@ -481,11 +641,18 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
 
     # Otherwise treat as athlete
     athlete = await _find_athlete_by_phone(supabase, sender)
-    if not athlete:
-        logger.warning("[webhook] Sender %s not recognized as athlete or coach — ignoring", _mask_phone(sender))
-        return WhatsAppWebhookResponse(status="ignored")
+    if athlete:
+        return await _handle_athlete_message(request, supabase, athlete, sender, text, wa_msg_id)
 
-    return await _handle_athlete_message(request, supabase, athlete, sender, text, wa_msg_id)
+    # Check if in progress onboarding
+    onboarding = await _find_onboarding_session(supabase, sender)
+    if onboarding:
+        logger.info("[webhook] Sender %s is in onboarding step=%s", _mask_phone(sender), onboarding.get('step'))
+        return await _handle_onboarding_step(request, supabase, sender, text, onboarding)
+
+    # Unknown number — start onboarding
+    logger.info("[webhook] Unknown sender %s — starting onboarding", _mask_phone(sender))
+    return await _start_onboarding(request, supabase, sender)
 
 
 # ---------------------------------------------------------------------------
