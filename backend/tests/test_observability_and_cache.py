@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.agents.check_in import CheckInRecommendation
 from app.api.v1 import routes as v1_routes
+from app.core import security as security_module
 from app.core.rate_limit import RateLimiter
 from app.main import app
 from app.services.biometrics import BiometricsService, ProviderAuthResult
@@ -69,14 +70,23 @@ class DummyAuth:
 
 def test_rate_limiter_enforces_request_limit(monkeypatch) -> None:
     app.state.rate_limiter = RateLimiter(None, limit=1, window_seconds=60)
-
     monkeypatch.setattr(
         v1_routes,
         "assess_check_in",
         lambda payload: CheckInRecommendation(recommended_action="continue planned session", rationale="Looks good."),
     )
     monkeypatch.setattr(v1_routes, "persist_check_in_state", lambda payload, recommendation: True)
-
+    monkeypatch.setattr(
+        security_module,
+        "authenticate_request",
+        lambda _request: security_module.AuthenticatedPrincipal(
+            user_id="user-123",
+            email="coach@example.com",
+            roles=frozenset({"authenticated", "athlete", "coach"}),
+            organization_id="org-1",
+            coach_id="coach-123",
+        ),
+    )
     client = TestClient(app)
     first = client.post(
         "/check-in",
@@ -100,7 +110,6 @@ def test_rate_limiter_enforces_request_limit(monkeypatch) -> None:
             "soreness": 2,
         },
     )
-
     assert first.status_code == 200
     assert first.headers.get("x-request-id")
     assert second.status_code == 429
@@ -116,11 +125,8 @@ def test_biometric_lookup_uses_cache() -> None:
         cache_client=cache_client,
     )
     auth = ProviderAuthResult(provider="garmin", athlete_id="athlete-1", access_token="token")
-
     import asyncio
-
     first = asyncio.run(service.fetch_garmin_primary_biometrics("athlete-1", date(2026, 4, 13), auth))
     second = asyncio.run(service.fetch_garmin_primary_biometrics("athlete-1", date(2026, 4, 13), auth))
-
     assert first == second
     assert adapter.primary_biometrics_calls == 1
