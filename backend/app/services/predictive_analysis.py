@@ -308,7 +308,7 @@ class PredictiveAnalysisService:
         signals: list[_ActivitySignal],
         memory_context: str,
         memory_results: list[Any],
-        _now: datetime,
+        now: datetime,
     ) -> list[PredictedStateFlag]:
         flags: list[PredictedStateFlag] = []
         if not signals:
