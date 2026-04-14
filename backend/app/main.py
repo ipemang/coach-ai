@@ -1,14 +1,13 @@
 """Coach.AI backend application entrypoint."""
-
 from __future__ import annotations
 
 import json
+import logging
 from contextlib import asynccontextmanager
 from uuid import uuid4
 from typing import Any, AsyncIterator, Optional
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
+import httpx
 from fastapi import FastAPI, Request as FastAPIRequest
 from fastapi.responses import JSONResponse, HTMLResponse
 from supabase import create_client
@@ -19,6 +18,8 @@ from .api.v1.router import router as v1_router
 from .api.webhooks import router as webhooks_router
 from .services import DataScope, get_settings
 from .services.whatsapp_service import WhatsAppService
+
+logger = logging.getLogger(__name__)
 
 
 class WhatsAppGraphClient:
@@ -43,35 +44,41 @@ class WhatsAppGraphClient:
             "text": {"body": body},
         }
         payload.update(kwargs)
-        request = Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.access_token}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
 
+        logger.info("[whatsapp] Sending message to %s via %s", to, url)
         try:
-            with urlopen(request, timeout=30) as response:
-                raw = response.read().decode("utf-8")
-                return json.loads(raw) if raw else {}
-        except HTTPError as exc:
-            detail = "WhatsApp send failed"
-            if exc.fp is not None:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    url,
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.access_token}",
+                        "Content-Type": "application/json",
+                    },
+                )
+            logger.info("[whatsapp] Graph API response: status=%d", response.status_code)
+            if response.status_code >= 400:
+                error_text = response.text
+                logger.error("[whatsapp] Graph API error: %s", error_text)
                 try:
-                    error_payload = json.loads(exc.read().decode("utf-8"))
-                    if isinstance(error_payload, dict):
-                        error = error_payload.get("error")
-                        if isinstance(error, dict):
-                            detail = str(error.get("message") or error.get("error_user_msg") or detail)
-                        else:
-                            detail = str(error_payload.get("message") or error_payload.get("error") or detail)
+                    error_payload = response.json()
+                    error = error_payload.get("error", {})
+                    detail = str(
+                        error.get("message")
+                        or error.get("error_user_msg")
+                        or error_text
+                        or "WhatsApp send failed"
+                    )
                 except Exception:
-                    pass
-            raise RuntimeError(detail) from exc
-        except (URLError, TimeoutError) as exc:
+                    detail = error_text or "WhatsApp send failed"
+                raise RuntimeError(detail)
+            raw = response.text
+            return response.json() if raw else {}
+        except httpx.TimeoutException as exc:
+            logger.error("[whatsapp] Request timed out: %s", exc)
+            raise RuntimeError("WhatsApp send failed: timeout") from exc
+        except httpx.RequestError as exc:
+            logger.error("[whatsapp] Request error: %s", exc)
             raise RuntimeError("WhatsApp send failed") from exc
 
 
@@ -95,7 +102,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         supabase_client=supabase_client,
     )
     app.state.whatsapp_service.scope = scope
-
     yield
 
 
@@ -106,7 +112,6 @@ app = FastAPI(title="Coach.AI API", lifespan=lifespan)
 async def request_context_and_rate_limit(request: FastAPIRequest, call_next):
     request_id = uuid4().hex
     request.state.request_id = request_id
-
     rate_limiter = getattr(request.app.state, "rate_limiter", None)
     if rate_limiter is not None and hasattr(rate_limiter, "check"):
         client = request.client.host if request.client and request.client.host else "anonymous"
@@ -119,7 +124,6 @@ async def request_context_and_rate_limit(request: FastAPIRequest, call_next):
             response.headers["retry-after"] = str(result.reset_after_seconds)
             response.headers["x-request-id"] = request_id
             return response
-
     response = await call_next(request)
     response.headers.setdefault("x-request-id", request_id)
     return response
@@ -134,7 +138,6 @@ app.include_router(coach_router)
 @app.get("/privacy", response_class=HTMLResponse)
 async def privacy_policy():
     return """
-    <!DOCTYPE html>
     <html><head><title>Coach.AI Privacy Policy</title>
     <style>body{font-family:sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6;color:#333}</style>
     </head><body>
@@ -158,7 +161,6 @@ async def privacy_policy():
 @app.get("/terms", response_class=HTMLResponse)
 async def terms_of_service():
     return """
-    <!DOCTYPE html>
     <html><head><title>Coach.AI Terms of Service</title>
     <style>body{font-family:sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6;color:#333}</style>
     </head><body>
