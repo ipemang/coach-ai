@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -108,7 +107,6 @@ async def test_process_check_in_submission_persists_dashboard_alert_and_whatsapp
         supabase_client=FakeSupabaseClient(tables),
         whatsapp_service=FakeWhatsAppService(),
     )
-
     check_in = AthleteCheckIn(
         athlete_id="athlete-123",
         readiness=41,
@@ -121,11 +119,7 @@ async def test_process_check_in_submission_persists_dashboard_alert_and_whatsapp
         recommended_action="recovery",
         rationale="HRV is below baseline and soreness is high.",
     )
-
-
-
     result = await service.process_check_in_submission(check_in, recommendation)
-
     assert result.scanned == 1
     assert len(result.findings) == 1
     assert result.dashboard_written == 1
@@ -169,16 +163,11 @@ async def test_run_scans_latest_check_in_row_per_athlete() -> None:
         "coach_alert_notifications": FakeTable([]),
     }
     service = AlertService(supabase_client=FakeSupabaseClient(tables), whatsapp_service=None)
-
-
-
-    result = await service.run(now=datetime(2026, 4, 13, tzinfo=timezone.
-
+    result = await service.run(now=datetime(2026, 4, 13, tzinfo=timezone.utc))
     assert result.scanned == 3
     assert len(result.findings) == 1
     assert result.findings[0].athlete_id == "athlete-456"
     assert tables["coach_alerts"].inserted[0]["athlete_id"] == "athlete-456"
-
 
 
 async def test_assess_check_in_uses_biological_baseline_for_recovery_expectations() -> None:
@@ -202,16 +191,10 @@ async def test_assess_check_in_uses_biological_baseline_for_recovery_expectation
             },
         },
     )
-
-
-
-    recommendation = await 
-        assess_check_in(
-            check_in,
-            observed_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
-        )
+    recommendation = assess_check_in(
+        check_in,
+        observed_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
     )
-
     assert recommendation.recommended_action == "recovery"
     assert recommendation.baseline_adjustments
     assert recommendation.recovery_expectation is not None
