@@ -234,6 +234,26 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
     if cs.get("coach_notes"):
         state_parts.append(f"Coach notes: {cs['coach_notes']}")
 
+    # COA-30: Strava activity data
+    strava_parts = []
+    if cs.get("strava_last_activity_type"):
+        activity_line = (
+            f"Last activity: {cs['strava_last_activity_type']} "
+            f"on {cs.get('strava_last_activity_date', '?')} — "
+            f"{cs.get('strava_last_distance_km', '?')}km "
+            f"in {cs.get('strava_last_duration_min', '?')} min"
+        )
+        if cs.get("strava_last_avg_hr"):
+            activity_line += f", avg HR {cs['strava_last_avg_hr']}bpm"
+        strava_parts.append(activity_line)
+    if cs.get("strava_weekly_activities") is not None:
+        strava_parts.append(
+            f"This week: {cs['strava_weekly_activities']} activities, "
+            f"{cs.get('strava_weekly_distance_km', 0)}km total"
+        )
+    if strava_parts:
+        state_parts.append("Strava — " + " | ".join(strava_parts))
+
     base = coach_persona or (
         "You are an expert endurance sports coach assistant. "
         "Draft a concise, supportive, professional reply FROM the coach TO the athlete. "
