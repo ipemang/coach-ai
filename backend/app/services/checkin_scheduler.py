@@ -287,10 +287,56 @@ class CheckinScheduler:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+class WhatsAppTaskAdapter:
+    """Concrete TaskQueueProtocol that sends check-in messages via WhatsApp."""
+
+    def __init__(self, whatsapp_client: Any, supabase_client: Any) -> None:
+        self.whatsapp_client = whatsapp_client
+        self.supabase_client = supabase_client
+
+    async def enqueue(self, task_name: str, payload: dict[str, Any]) -> Any:
+        if task_name != "send_checkin_whatsapp":
+            return None
+
+        athlete_id = payload.get("athlete_id")
+        phone = payload.get("phone_number")
+        display_name = payload.get("display_name") or "there"
+        dedupe_key = payload.get("dedupe_key")
+
+        msg = (
+            f"Hey {display_name}! Quick check-in \U0001f4cb "
+            "How are you feeling today? Any notes on training, sleep, or recovery?"
+        )
+
+        import logging as _logging
+        _logger = _logging.getLogger(__name__)
+
+        try:
+            await self.whatsapp_client.send_message(to=phone, body=msg)
+            if dedupe_key:
+                self.supabase_client.table("checkin_send_logs").update({
+                    "status": "sent",
+                    "sent_at": datetime.now(timezone.utc).isoformat(),
+                }).eq("dedupe_key", dedupe_key).execute()
+            return {"status": "sent", "athlete_id": athlete_id}
+        except Exception as exc:
+            _logger.error("Failed to send check-in to %s: %s", athlete_id, exc)
+            if dedupe_key:
+                try:
+                    self.supabase_client.table("checkin_send_logs").update({
+                        "status": "failed",
+                        "error_message": str(exc)[:500],
+                    }).eq("dedupe_key", dedupe_key).execute()
+                except Exception:
+                    pass
+            return {"status": "failed", "athlete_id": athlete_id, "error": str(exc)}
+
+
 __all__ = [
     "CheckinAthlete",
     "CheckinScheduler",
     "CheckinSchedulerConfig",
     "CheckinSchedulerResult",
     "EnqueuedCheckinTask",
+    "WhatsAppTaskAdapter",
 ]
