@@ -58,13 +58,26 @@ async def _read_payload(request: Request) -> dict[str, Any]:
     parsed = parse_qs(raw_body.decode("utf-8"), keep_blank_values=True)
     return {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
 
-def _normalize_phone_number(phone_number: str) -> str:
-    digits = "".join(ch for ch in phone_number if ch.isdigit())
-    return f"+{digits}" if phone_number.strip().startswith("+") else digits
-
 def _phone_variants(phone_number: str) -> list[str]:
-    normalized = _normalize_phone_number(phone_number)
-    return list(set([phone_number.strip(), normalized, normalized.lstrip("+")]))
+    """Generate all plausible formats for a phone number to match DB entries."""
+    raw = phone_number.strip()
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    variants = set()
+    # Add the raw value as-is
+    variants.add(raw)
+    # Add pure digits
+    variants.add(digits)
+    # Add with + prefix
+    variants.add(f"+{digits}")
+    # If digits look like a US/CA number (11 digits starting with 1), also try 10-digit
+    if len(digits) == 11 and digits.startswith("1"):
+        variants.add(digits[1:])           # 10-digit without country code
+        variants.add(f"+1{digits[1:]}")    # +1XXXXXXXXXX
+    # If digits are 10 digits (no country code), also try with +1
+    if len(digits) == 10:
+        variants.add(f"1{digits}")         # 11-digit with leading 1
+        variants.add(f"+1{digits}")        # +1XXXXXXXXXX
+    return list(variants)
 
 async def _query_rows(query: Any) -> list[dict[str, Any]]:
     if hasattr(query, "execute"):
@@ -130,7 +143,6 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     raw_body = await request.body()
     logger.info("[webhook] Received POST /whatsapp, body size=%d bytes", len(raw_body))
 
-    # Signature verification - skip if secret not set (dev mode)
     settings = get_settings()
     if getattr(settings, "whatsapp_webhook_secret", None):
         try:
@@ -144,7 +156,6 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     payload = await _read_payload(request)
     logger.info("[webhook] Payload keys: %s", list(payload.keys()))
 
-    # Extract sender phone and message text
     sender = None
     text = None
     if "entry" in payload:
@@ -161,7 +172,6 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
                 break
 
     if not sender or not text:
-        # Fallback for other formats (Twilio, etc)
         sender = payload.get("From") or payload.get("sender_phone_number")
         text = payload.get("Body") or payload.get("message_text")
 
