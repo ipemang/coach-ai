@@ -10,7 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from fastapi import FastAPI, Request as FastAPIRequest
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from supabase import create_client
 
 from .api.coach import router as coach_router
@@ -129,3 +129,51 @@ app.include_router(v1_router)
 app.include_router(methodology_router)
 app.include_router(webhooks_router)
 app.include_router(coach_router)
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_policy():
+    return """
+    <!DOCTYPE html>
+    <html><head><title>Coach.AI Privacy Policy</title>
+    <style>body{font-family:sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6;color:#333}</style>
+    </head><body>
+    <h1>Coach.AI Privacy Policy</h1>
+    <p><strong>Last updated: April 14, 2026</strong></p>
+    <p>Coach.AI ("we", "us") provides AI-powered coaching via WhatsApp.</p>
+    <h2>Data We Collect</h2>
+    <p>Your WhatsApp phone number, messages you send us, and workout/coaching data you provide.</p>
+    <h2>How We Use It</h2>
+    <p>To deliver personalized coaching responses and track your progress over time.</p>
+    <h2>Data Storage</h2>
+    <p>Your data is stored securely in our database. We do not sell or share your personal data with third parties.</p>
+    <h2>Data Deletion</h2>
+    <p>You can request deletion of your data at any time by messaging us DELETE MY DATA or emailing felipeddeidan@gmail.com.</p>
+    <h2>Contact</h2>
+    <p>felipeddeidan@gmail.com</p>
+    </body></html>
+    """
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def terms_of_service():
+    return """
+    <!DOCTYPE html>
+    <html><head><title>Coach.AI Terms of Service</title>
+    <style>body{font-family:sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6;color:#333}</style>
+    </head><body>
+    <h1>Coach.AI Terms of Service</h1>
+    <p><strong>Last updated: April 14, 2026</strong></p>
+    <p>By using Coach.AI via WhatsApp, you agree to these terms.</p>
+    <h2>Service</h2>
+    <p>Coach.AI provides AI-generated coaching advice for fitness and lifestyle purposes. It is not a substitute for professional medical or fitness advice.</p>
+    <h2>Eligibility</h2>
+    <p>You must be 13 or older to use this service.</p>
+    <h2>Acceptable Use</h2>
+    <p>Do not misuse the service, attempt to reverse-engineer it, or use it for unlawful purposes.</p>
+    <h2>Disclaimer</h2>
+    <p>Coaching content is AI-generated and for informational purposes only. We are not liable for outcomes resulting from following AI advice.</p>
+    <h2>Contact</h2>
+    <p>felipeddeidan@gmail.com</p>
+    </body></html>
+    """
