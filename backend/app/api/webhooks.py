@@ -205,12 +205,18 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
         if cs.get("training_week"):
             phase_str += f" (week {cs['training_week']})"
         state_parts.append(f"Training phase: {phase_str}")
-    if cs.get("last_readiness_score") is not None:
-        state_parts.append(f"Today's readiness score: {cs['last_readiness_score']}/100")
-    if cs.get("last_hrv") is not None:
-        state_parts.append(f"Last HRV: {cs['last_hrv']}ms")
-    if cs.get("last_sleep_score") is not None:
-        state_parts.append(f"Last sleep score: {cs['last_sleep_score']}/100")
+    # Oura-synced values (oura_ prefix) take priority; fall back to manually entered coach values
+    readiness = cs.get("oura_readiness_score") if cs.get("oura_readiness_score") is not None else cs.get("last_readiness_score")
+    hrv = cs.get("oura_avg_hrv") if cs.get("oura_avg_hrv") is not None else cs.get("last_hrv")
+    sleep_score = cs.get("oura_sleep_score") if cs.get("oura_sleep_score") is not None else cs.get("last_sleep_score")
+    oura_date = cs.get("oura_sync_date")  # e.g. "2026-04-13"
+    oura_suffix = f" (Oura, {oura_date})" if oura_date else ""
+    if readiness is not None:
+        state_parts.append(f"Today's readiness score: {readiness}/100{oura_suffix}")
+    if hrv is not None:
+        state_parts.append(f"Last HRV: {hrv}ms{oura_suffix}")
+    if sleep_score is not None:
+        state_parts.append(f"Last sleep score: {sleep_score}/100{oura_suffix}")
     if cs.get("soreness"):
         state_parts.append(f"Current soreness: {cs['soreness']}")
     if cs.get("missed_workouts_this_week"):
