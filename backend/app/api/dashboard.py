@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.core.config import get_settings
 from app.api.webhooks import _query_rows
+from app.services.race_day_simulation import list_course_profiles
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -592,6 +593,7 @@ async def update_state_form(
         raise HTTPException(status_code=404, detail="Athlete not found")
     a = rows.data[0]
     cs = a.get("current_state") or {}
+    sp = a.get("stable_profile") or {}
 
     # Check for existing Oura token
     oura_rows = supabase.table("oura_tokens").select("access_token").eq("athlete_id", athlete_id).execute()
@@ -681,6 +683,134 @@ async def update_state_form(
         </div>
       </form>
     </div>"""
+
+    # --- Race Day Simulation card (COA-37) ---
+    courses = list_course_profiles()
+    target_race = (sp.get("target_race") or "").lower()
+    course_options = []
+    for c in courses:
+        selected = "selected" if target_race and target_race in c["name"].lower() else ""
+        course_options.append(
+            f'<option value="{_e(c["slug"])}" {selected}>{_e(c["name"])} — {_e(c["venue"])}</option>'
+        )
+    course_options_html = "".join(course_options)
+
+    # Pre-fill fitness metrics from current_state
+    readiness = cs.get("oura_readiness_score") or cs.get("last_readiness_score") or 70
+    hrv = cs.get("oura_avg_hrv") or cs.get("last_hrv") or 55
+    sleep_score = cs.get("oura_sleep_score") or cs.get("last_sleep_score") or 75
+    fitness_score = readiness  # use readiness as proxy for current_fitness_score
+
+    # Parse swim CSS from stable_profile (format "M:SS" -> seconds per 100m)
+    swim_css_raw = sp.get("swim_css") or ""
+    swim_css_seconds = None
+    if swim_css_raw:
+        try:
+            parts = swim_css_raw.split(":")
+            swim_css_seconds = int(parts[0]) * 60 + int(parts[1]) if len(parts) == 2 else None
+        except (ValueError, IndexError):
+            swim_css_seconds = None
+
+    body += f"""
+    <div class="card">
+      <p class="section-title">Race Day Simulation</p>
+      <div style="display:grid;gap:16px;">
+        <div class="form-group">
+          <label>Course</label>
+          <select id="course-slug">{course_options_html}</select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Air Temp (&deg;C)</label>
+            <input type="number" id="air-temp" value="20" step="1">
+          </div>
+          <div class="form-group">
+            <label>Water Temp (&deg;C)</label>
+            <input type="number" id="water-temp" value="22" step="1">
+          </div>
+        </div>
+        <div class="form-group" style="max-width:50%;">
+          <label>Wind Speed (km/h)</label>
+          <input type="number" id="wind-speed" value="10" step="1">
+        </div>
+        <div>
+          <button type="button" id="sim-btn" class="btn btn-primary" onclick="runSimulation()">Run Simulation</button>
+        </div>
+        <div id="sim-results"></div>
+      </div>
+    </div>
+    <style>
+      .sim-results {{ background: #f8fafc; border-radius: 8px; padding: 16px; margin-top: 12px; }}
+      .sim-finish {{ font-size: 20px; font-weight: 700; color: #1a1a1a; margin-bottom: 12px; }}
+      .sim-risks ul, .sim-segments ul {{ margin: 8px 0 0 16px; font-size: 13px; color: #374151; }}
+      .sim-risks {{ color: #991b1b; }}
+      .sim-notes ul {{ margin: 8px 0 0 16px; font-size: 13px; color: #6b7280; }}
+    </style>
+    <script>
+    async function runSimulation() {{
+        var btn = document.getElementById('sim-btn');
+        btn.textContent = 'Simulating\u2026';
+        btn.disabled = true;
+        var payload = {{
+            course_slug: document.getElementById('course-slug').value,
+            athlete_metrics: {{
+                swim_css_seconds_per_100m: {json.dumps(swim_css_seconds)},
+                bike_ftp_watts: null,
+                body_mass_kg: null,
+                run_threshold_pace_seconds_per_km: null,
+                historical_aerobic_efficiency: null,
+                current_fitness_score: {json.dumps(fitness_score)}
+            }},
+            weather_forecast: {{
+                air_temp_c: parseFloat(document.getElementById('air-temp').value) || 20,
+                water_temp_c: parseFloat(document.getElementById('water-temp').value) || 22,
+                wind_speed_kph: parseFloat(document.getElementById('wind-speed').value) || 10
+            }}
+        }};
+        try {{
+            var resp = await fetch('/api/v1/race-day/simulate', {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json'}},
+                body: JSON.stringify(payload)
+            }});
+            var data = await resp.json();
+            if (!resp.ok) {{
+                throw new Error(data.detail || 'Simulation request failed');
+            }}
+            var html = '<div class="sim-results">';
+            if (data.total_predicted_seconds) {{
+                var secs = data.total_predicted_seconds;
+                var h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60), s = Math.floor(secs%60);
+                html += '<div class="sim-finish">Projected Finish: ' + h + 'h ' + m + 'm ' + s + 's</div>';
+            }}
+            if (data.total_time) {{
+                html += '<div style="font-size:13px;color:#6b7280;margin-bottom:12px;">Total: ' + data.total_time + ' (confidence ' + Math.round((data.confidence||0)*100) + '%)</div>';
+            }}
+            if (data.splits && data.splits.length) {{
+                html += '<div class="sim-segments"><strong>Splits:</strong><ul>';
+                data.splits.forEach(function(seg) {{
+                    html += '<li>' + seg.discipline.charAt(0).toUpperCase() + seg.discipline.slice(1) + ': ' + seg.predicted_time;
+                    if (seg.adjustment_factors && seg.adjustment_factors.length) {{
+                        html += ' <span style="color:#9ca3af;font-size:12px;">(' + seg.adjustment_factors[0] + ')</span>';
+                    }}
+                    html += '</li>';
+                }});
+                html += '</ul></div>';
+            }}
+            if (data.notes && data.notes.length) {{
+                html += '<div class="sim-notes"><strong>Notes:</strong><ul>';
+                data.notes.forEach(function(n) {{ html += '<li>' + n + '</li>'; }});
+                html += '</ul></div>';
+            }}
+            html += '</div>';
+            document.getElementById('sim-results').innerHTML = html;
+        }} catch(e) {{
+            document.getElementById('sim-results').innerHTML = '<p style="color:#991b1b;font-size:14px;">Simulation failed: ' + e.message + '</p>';
+        }}
+        btn.textContent = 'Run Simulation';
+        btn.disabled = false;
+    }}
+    </script>"""
     return HTMLResponse(_base_html(f"State — {_e(a.get('full_name', ''))}", body, secret))
 
 
