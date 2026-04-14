@@ -1,5 +1,6 @@
 """Webhook routes for coach-driven flow."""
 from __future__ import annotations
+import asyncio
 import inspect
 import json
 import logging
@@ -15,10 +16,12 @@ from app.core.config import get_settings
 from app.core.security import verify_whatsapp_signature
 from app.services.scope import DataScope, apply_scope_query, resolve_scope_from_env
 from app.services.whatsapp_service import WhatsAppRecipient, WhatsAppService
+from app.services.llm_client import LLMClient, LLMClientError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
+
 
 @dataclass(slots=True)
 class AthleteRecord:
@@ -33,6 +36,7 @@ class AthleteRecord:
     biological_baseline: dict[str, Any] = field(default_factory=dict)
     missing_fields: list[str] = field(default_factory=list)
 
+
 class WhatsAppWebhookResponse(BaseModel):
     status: str
     matched_coach: bool = False
@@ -43,6 +47,7 @@ class WhatsAppWebhookResponse(BaseModel):
     provider_message_id: str | None = None
     reply_body: str | None = None
     delivery_error: str | None = None
+
 
 async def _read_payload(request: Request) -> dict[str, Any]:
     content_type = (request.headers.get("content-type") or "").lower()
@@ -58,26 +63,23 @@ async def _read_payload(request: Request) -> dict[str, Any]:
     parsed = parse_qs(raw_body.decode("utf-8"), keep_blank_values=True)
     return {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
 
+
 def _phone_variants(phone_number: str) -> list[str]:
     """Generate all plausible formats for a phone number to match DB entries."""
     raw = phone_number.strip()
     digits = "".join(ch for ch in raw if ch.isdigit())
     variants = set()
-    # Add the raw value as-is
     variants.add(raw)
-    # Add pure digits
     variants.add(digits)
-    # Add with + prefix
     variants.add(f"+{digits}")
-    # If digits look like a US/CA number (11 digits starting with 1), also try 10-digit
     if len(digits) == 11 and digits.startswith("1"):
-        variants.add(digits[1:])           # 10-digit without country code
-        variants.add(f"+1{digits[1:]}")    # +1XXXXXXXXXX
-    # If digits are 10 digits (no country code), also try with +1
+        variants.add(digits[1:])
+        variants.add(f"+1{digits[1:]}")
     if len(digits) == 10:
-        variants.add(f"1{digits}")         # 11-digit with leading 1
-        variants.add(f"+1{digits}")        # +1XXXXXXXXXX
+        variants.add(f"1{digits}")
+        variants.add(f"+1{digits}")
     return list(variants)
+
 
 async def _query_rows(query: Any) -> list[dict[str, Any]]:
     if hasattr(query, "execute"):
@@ -94,6 +96,7 @@ async def _query_rows(query: Any) -> list[dict[str, Any]]:
         return [data]
     return []
 
+
 async def _find_coach_by_phone(supabase_client: Any, phone_number: str) -> dict[str, Any] | None:
     variants = _phone_variants(phone_number)
     logger.info("[webhook] Looking up coach by phone variants: %s", variants)
@@ -104,6 +107,7 @@ async def _find_coach_by_phone(supabase_client: Any, phone_number: str) -> dict[
             return rows[0]
     logger.warning("[webhook] No coach found for phone %s (tried variants: %s)", phone_number, variants)
     return None
+
 
 async def _find_first_athlete(supabase_client: Any, coach_id: str) -> AthleteRecord | None:
     rows = await _query_rows(supabase_client.table("athletes").select("*").eq("coach_id", coach_id).limit(1))
@@ -120,13 +124,38 @@ async def _find_first_athlete(supabase_client: Any, coach_id: str) -> AthleteRec
         coach_id=str(row.get("coach_id") or ""),
     )
 
+
 async def _get_ai_reply(request: Request, coach: dict[str, Any], athlete: AthleteRecord, text: str) -> str:
+    # First try checkin_service if available
     checkin_service = getattr(request.app.state, "checkin_service", None)
     if checkin_service and hasattr(checkin_service, "handle_inbound_message"):
         reply = await checkin_service.handle_inbound_message(athlete=athlete, message_text=text)
-        if isinstance(reply, str):
+        if isinstance(reply, str) and reply.strip():
             return reply
-    return f"Coach {coach.get('full_name')}, I received your message for athlete {athlete.display_name}: '{text}'. I'll process this with the AI."
+
+    # Fall back to direct LLM call
+    coach_name = coach.get("full_name") or coach.get("name") or "Coach"
+    athlete_name = athlete.display_name or "your athlete"
+    system_prompt = (
+        f"You are an AI assistant helping {coach_name}, a professional sports coach. "
+        f"You are responding on behalf of the coach to their athlete {athlete_name}. "
+        "Be supportive, concise, and professional. Keep replies under 3 sentences."
+    )
+    user_prompt = f"The athlete sent this message: '{text}'\n\nWrite a helpful reply from the coach."
+
+    try:
+        llm = LLMClient()
+        loop = asyncio.get_event_loop()
+        reply = await loop.run_in_executor(None, lambda: llm.chat_completions(system=system_prompt, user=user_prompt))
+        logger.info("[webhook] LLM reply generated successfully")
+        return reply
+    except LLMClientError as exc:
+        logger.error("[webhook] LLM call failed: %s", exc)
+        return f"Hi {athlete_name}, thanks for your message. Your coach will get back to you soon!"
+    except Exception as exc:
+        logger.error("[webhook] Unexpected error in LLM call: %s", exc)
+        return f"Hi {athlete_name}, thanks for your message. Your coach will get back to you soon!"
+
 
 @router.get("/whatsapp", response_class=PlainTextResponse)
 async def whatsapp_webhook_handshake(
@@ -137,6 +166,7 @@ async def whatsapp_webhook_handshake(
     if hub_verify_token == get_settings().whatsapp_verify_token:
         return hub_challenge or ""
     raise HTTPException(status_code=403)
+
 
 @router.post("/whatsapp", response_model=WhatsAppWebhookResponse)
 async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
@@ -158,10 +188,14 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
 
     sender = None
     text = None
+
     if "entry" in payload:
         for entry in payload["entry"]:
             for change in entry.get("changes", []):
                 val = change.get("value", {})
+                if "statuses" in val and "messages" not in val:
+                    logger.info("[webhook] Received status update, ignoring")
+                    return WhatsAppWebhookResponse(status="status_update")
                 if "messages" in val:
                     msg = val["messages"][0]
                     sender = msg.get("from")
@@ -181,7 +215,6 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
 
     supabase = request.app.state.supabase_client
     coach = await _find_coach_by_phone(supabase, sender)
-
     if not coach:
         logger.warning("[webhook] No coach matched for sender=%s - returning ignored", sender)
         return WhatsAppWebhookResponse(status="ignored", phone_number=sender, inbound_text=text)
