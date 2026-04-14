@@ -435,10 +435,13 @@ async def whatsapp_webhook_handshake(
     return hub_challenge
 
 
+def _verify_signature(request: Request, raw_body: bytes) -> None:
+    verify_whatsapp_signature(request, raw_body)
+
 @router.post("/whatsapp", response_model=WhatsAppWebhookResponse)
 async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     raw_body = await request.body()
-    verify_whatsapp_signature(request, raw_body)
+    _verify_signature(request, raw_body)
     payload = await _read_payload(request)
 
     inbound = WhatsAppWebhookPayload(
