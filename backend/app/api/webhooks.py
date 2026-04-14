@@ -29,6 +29,7 @@ class AthleteRecord:
     phone_number: str
     timezone_name: str
     display_name: str | None = None
+    coach_whatsapp_number: str | None = None
 
 
 class WhatsAppWebhookResponse(BaseModel):
@@ -86,18 +87,46 @@ async def _find_athlete_by_phone(supabase_client: Any, phone_number: str) -> Ath
     variants = _phone_variants(phone_number)
     logger.info("[webhook] Looking up athlete by phone variants: %s", variants)
     for value in variants:
-        rows = await _query_rows(supabase_client.table("athletes").select("*").eq("phone_number", value))
+        rows = await _query_rows(
+            supabase_client.table("athletes").select("*").eq("phone_number", value)
+        )
         if rows:
             row = rows[0]
             logger.info("[webhook] Found athlete: id=%s coach_id=%s", row.get("id"), row.get("coach_id"))
+            # Also look up coach's whatsapp_number
+            coach_wa = row.get("coach_whatsapp_number")
+            if not coach_wa:
+                coach_rows = await _query_rows(
+                    supabase_client.table("coaches").select("whatsapp_number").eq("id", row.get("coach_id"))
+                )
+                if coach_rows:
+                    coach_wa = coach_rows[0].get("whatsapp_number")
+            # Fall back to env var
+            if not coach_wa:
+                settings = get_settings()
+                coach_wa = getattr(settings, "coach_whatsapp_number", None)
             return AthleteRecord(
                 athlete_id=str(row.get("id") or ""),
                 coach_id=str(row.get("coach_id") or ""),
                 phone_number=str(row.get("phone_number") or ""),
                 timezone_name=str(row.get("timezone_name") or "UTC"),
                 display_name=row.get("full_name") or row.get("display_name"),
+                coach_whatsapp_number=coach_wa,
             )
     return None
+
+
+async def _send_whatsapp_message(request: Request, to: str, body: str) -> None:
+    """Send a WhatsApp text message via the app.state whatsapp_client."""
+    whatsapp_client = getattr(request.app.state, "whatsapp_client", None)
+    if whatsapp_client is None:
+        logger.warning("[webhook] whatsapp_client not available — cannot send to %s", to)
+        return
+    try:
+        await whatsapp_client.send_message(to, body)
+        logger.info("[webhook] Sent WhatsApp message to %s", to)
+    except Exception as exc:
+        logger.error("[webhook] Failed to send WhatsApp message to %s: %s", to, exc)
 
 
 async def _generate_suggestion(supabase: Any, athlete: AthleteRecord, text: str) -> str:
@@ -147,7 +176,8 @@ async def whatsapp_webhook_handshake(
 @router.post("/whatsapp", response_model=WhatsAppWebhookResponse)
 async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     raw_body = await request.body()
-    logger.info("[webhook] Received athlete POST /whatsapp, body size=%d bytes", len(raw_body))
+    logger.info("[webhook] Received POST /whatsapp, body size=%d bytes", len(raw_body))
+
     settings = get_settings()
     if getattr(settings, "whatsapp_webhook_secret", None):
         try:
@@ -157,6 +187,7 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
             raise
 
     payload = await _read_payload(request)
+
     sender = None
     text = None
     wa_msg_id = None
@@ -186,6 +217,11 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
         logger.warning("[webhook] Sender %s not recognized as athlete", sender)
         return WhatsAppWebhookResponse(status="ignored")
 
+    # --- 1. Acknowledge athlete immediately ---
+    ack_msg = f"Got your check-in, {athlete.display_name or 'Athlete'}! Your coach will review it shortly."
+    await _send_whatsapp_message(request, sender, ack_msg)
+
+    # --- 2. Store the check-in ---
     checkin_payload = {
         "athlete_id": athlete.athlete_id,
         "coach_id": athlete.coach_id,
@@ -194,13 +230,20 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
         "whatsapp_message_id": wa_msg_id,
         "message_type": "text" if text != "[Audio Message]" else "voice",
     }
-    checkin_res = await supabase.table("athlete_checkins").insert(checkin_payload).execute()
-    checkin_id = checkin_res.data[0].get("id") if checkin_res.data else None
+    try:
+        checkin_res = await supabase.table("athlete_checkins").insert(checkin_payload).execute()
+        checkin_id = checkin_res.data[0].get("id") if checkin_res.data else None
+    except Exception as exc:
+        logger.error("[webhook] Failed to store check-in: %s", exc)
+        checkin_id = None
 
+    # --- 3. Generate AI suggestion ---
     suggestion_text = await _generate_suggestion(supabase, athlete, text)
 
+    # --- 4. Store suggestion ---
     suggestion_payload = {
         "athlete_id": athlete.athlete_id,
+        "coach_id": athlete.coach_id,
         "athlete_display_name": athlete.display_name,
         "athlete_phone_number": sender,
         "suggestion": {"reply": suggestion_text},
@@ -208,21 +251,45 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
         "status": "pending",
         "source": "whatsapp_checkin",
     }
-    suggestion_res = await supabase.table("suggestions").insert(suggestion_payload).execute()
-    suggestion_id = suggestion_res.data[0].get("id") if suggestion_res.data else None
+    try:
+        suggestion_res = await supabase.table("suggestions").insert(suggestion_payload).execute()
+        suggestion_id = suggestion_res.data[0].get("id") if suggestion_res.data else None
+    except Exception as exc:
+        logger.error("[webhook] Failed to store suggestion: %s", exc)
+        suggestion_id = None
 
+    # --- 5. Link check-in to suggestion ---
     if checkin_id and suggestion_id:
-        await supabase.table("athlete_checkins").update({
-            "suggestion_id": suggestion_id,
-            "processed": True,
-            "processed_at": datetime.now(timezone.utc).isoformat()
-        }).eq("id", checkin_id).execute()
+        try:
+            await supabase.table("athlete_checkins").update({
+                "suggestion_id": suggestion_id,
+                "processed": True,
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", checkin_id).execute()
+        except Exception as exc:
+            logger.error("[webhook] Failed to link check-in to suggestion: %s", exc)
 
-    logger.info("[webhook] Athlete check-in processed: id=%s suggestion_id=%s", checkin_id, suggestion_id)
+    # --- 6. Notify coach via WhatsApp ---
+    coach_wa = athlete.coach_whatsapp_number
+    if coach_wa:
+        athlete_name = athlete.display_name or "Unknown Athlete"
+        coach_notification = (
+            f"New check-in from {athlete_name}:\n"
+            f"\"{text}\"\n\n"
+            f"AI draft reply:\n{suggestion_text}\n\n"
+            f"Reply APPROVE to send, or reply with your own message to override."
+        )
+        await _send_whatsapp_message(request, coach_wa, coach_notification)
+    else:
+        logger.warning("[webhook] No coach WhatsApp number found — skipping coach notification")
 
+    logger.info(
+        "[webhook] Check-in processed: athlete=%s checkin_id=%s suggestion_id=%s",
+        athlete.athlete_id, checkin_id, suggestion_id,
+    )
     return WhatsAppWebhookResponse(
         status="processed",
         athlete_id=athlete.athlete_id,
         coach_id=athlete.coach_id,
-        message_id=wa_msg_id
+        message_id=wa_msg_id,
     )
