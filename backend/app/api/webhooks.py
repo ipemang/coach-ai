@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qs
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
@@ -16,7 +17,6 @@ from app.core.config import get_settings
 from app.core.security import verify_whatsapp_signature
 from app.services.scope import DataScope, apply_scope_query, resolve_scope_from_env
 from app.services.whatsapp_service import WhatsAppRecipient, WhatsAppService
-from app.services.llm_client import LLMClient, LLMClientError
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,14 @@ async def _get_ai_reply(request: Request, coach: dict[str, Any], athlete: Athlet
         if isinstance(reply, str) and reply.strip():
             return reply
 
-    # Fall back to direct LLM call
+    # Fall back to direct Groq API call via httpx
+    settings = get_settings()
+    groq_api_key = getattr(settings, "groq_api_key", None)
+    if not groq_api_key:
+        logger.warning("[webhook] No GROQ_API_KEY found, using fallback message")
+        athlete_name = athlete.display_name or "there"
+        return f"Hi {athlete_name}, thanks for your message. Your coach will get back to you soon!"
+
     coach_name = coach.get("full_name") or coach.get("name") or "Coach"
     athlete_name = athlete.display_name or "your athlete"
     system_prompt = (
@@ -144,16 +151,34 @@ async def _get_ai_reply(request: Request, coach: dict[str, Any], athlete: Athlet
     user_prompt = f"The athlete sent this message: '{text}'\n\nWrite a helpful reply from the coach."
 
     try:
-        llm = LLMClient()
-        loop = asyncio.get_event_loop()
-        reply = await loop.run_in_executor(None, lambda: llm.chat_completions(system=system_prompt, user=user_prompt))
-        logger.info("[webhook] LLM reply generated successfully")
-        return reply
-    except LLMClientError as exc:
-        logger.error("[webhook] LLM call failed: %s", exc)
-        return f"Hi {athlete_name}, thanks for your message. Your coach will get back to you soon!"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {groq_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "llama-3.1-70b-versatile",
+                    "temperature": 0.2,
+                    "max_tokens": 4096,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if content.strip():
+                logger.info("[webhook] Groq API reply generated successfully")
+                return content.strip()
+            else:
+                raise ValueError("Empty response from LLM")
     except Exception as exc:
-        logger.error("[webhook] Unexpected error in LLM call: %s", exc)
+        logger.error("[webhook] Groq API call failed: %s", exc)
+        athlete_name = athlete.display_name or "there"
         return f"Hi {athlete_name}, thanks for your message. Your coach will get back to you soon!"
 
 
