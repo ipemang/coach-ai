@@ -88,7 +88,7 @@ class FakeWhatsAppService:
         return FakeSendResult()
 
 
-def test_process_check_in_submission_persists_dashboard_alert_and_whatsapp_message() -> None:
+async def test_process_check_in_submission_persists_dashboard_alert_and_whatsapp_message() -> None:
     tables = {
         "coaches": FakeTable(
             [
@@ -122,9 +122,9 @@ def test_process_check_in_submission_persists_dashboard_alert_and_whatsapp_messa
         rationale="HRV is below baseline and soreness is high.",
     )
 
-    import asyncio
 
-    result = asyncio.run(service.process_check_in_submission(check_in, recommendation))
+
+    result = await service.process_check_in_submission(check_in, recommendation)
 
     assert result.scanned == 1
     assert len(result.findings) == 1
@@ -137,7 +137,7 @@ def test_process_check_in_submission_persists_dashboard_alert_and_whatsapp_messa
     assert "proactive alert" in service.whatsapp_service.sent[0]["body"]  # type: ignore[index]
 
 
-def test_run_scans_latest_check_in_row_per_athlete() -> None:
+async def test_run_scans_latest_check_in_row_per_athlete() -> None:
     tables = {
         "memory_states": FakeTable(
             [
@@ -170,9 +170,9 @@ def test_run_scans_latest_check_in_row_per_athlete() -> None:
     }
     service = AlertService(supabase_client=FakeSupabaseClient(tables), whatsapp_service=None)
 
-    import asyncio
 
-    result = asyncio.run(service.run(now=datetime(2026, 4, 13, tzinfo=timezone.utc)))
+
+    result = await service.run(now=datetime(2026, 4, 13, tzinfo=timezone.
 
     assert result.scanned == 3
     assert len(result.findings) == 1
@@ -181,7 +181,7 @@ def test_run_scans_latest_check_in_row_per_athlete() -> None:
 
 
 
-def test_assess_check_in_uses_biological_baseline_for_recovery_expectations() -> None:
+async def test_assess_check_in_uses_biological_baseline_for_recovery_expectations() -> None:
     check_in = AthleteCheckIn(
         athlete_id="athlete-123",
         readiness=77,
@@ -203,9 +203,9 @@ def test_assess_check_in_uses_biological_baseline_for_recovery_expectations() ->
         },
     )
 
-    import asyncio
 
-    recommendation = asyncio.run(
+
+    recommendation = await 
         assess_check_in(
             check_in,
             observed_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
