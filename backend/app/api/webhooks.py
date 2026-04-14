@@ -250,6 +250,54 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
     if state_parts:
         prompt_parts.append("\n\nCurrent athlete state:\n" + "\n".join(f"- {p}" for p in state_parts))
 
+    # COA-27: Recent check-in history (last 5, excluding the current message)
+    checkin_history_parts: list[str] = []
+    try:
+        checkin_rows = await _query_rows(
+            supabase.table("athlete_checkins")
+            .select("message_text, created_at")
+            .eq("athlete_id", athlete.athlete_id)
+            .order("created_at", desc=True)
+            .limit(5)
+        )
+        total_len = 0
+        for row in checkin_rows:
+            msg = (row.get("message_text") or "")[:120]
+            dt = (row.get("created_at") or "")[:10]  # YYYY-MM-DD
+            entry = f'- [{dt}] "{msg}"'
+            if total_len + len(entry) > 500:
+                break
+            checkin_history_parts.append(entry)
+            total_len += len(entry)
+    except Exception as exc:
+        logger.warning("[webhook] Could not fetch check-in history: %s", exc)
+
+    # COA-27: Memory state (latest note for this athlete)
+    memory_note = ""
+    try:
+        memory_rows = await _query_rows(
+            supabase.table("memory_states")
+            .select("*")
+            .eq("athlete_id", athlete.athlete_id)
+            .order("created_at", desc=True)
+            .limit(1)
+        )
+        if memory_rows:
+            row = memory_rows[0]
+            memory_note = (
+                row.get("summary")
+                or row.get("notes")
+                or row.get("rationale")
+                or ""
+            )
+    except Exception as exc:
+        logger.warning("[webhook] Could not fetch memory state: %s", exc)
+
+    if checkin_history_parts:
+        prompt_parts.append("\n\nRecent check-in history:\n" + "\n".join(checkin_history_parts))
+    if memory_note:
+        prompt_parts.append(f"\n\nCoach memory note:\n{memory_note}")
+
     prompt = "".join(prompt_parts)
     logger.info(
         "[webhook] Built system prompt: %d chars, %d profile fields, %d state fields",
