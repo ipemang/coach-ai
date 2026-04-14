@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+import pytest
 
 from app.agents.check_in import AthleteCheckIn, CheckInRecommendation, assess_check_in
 from app.services.alert_service import AlertService
@@ -87,11 +88,12 @@ class FakeWhatsAppService:
         return FakeSendResult()
 
 
-async def test_process_check_in_submission_persists_dashboard_alert_and_whatsapp_message() -> None:
+@pytest.mark.asyncio @pytest.mark.asyncio @pytest.mark.asyncio async def test_process_check_in_submission_persists_dashboard_alert_and_whatsapp_message() -> None:
     tables = {
         "coaches": FakeTable(
             [
                 {
+                    @pytest.mark.asyncio
                     "coach_id": "coach-1",
                     "display_name": "Alex",
                     "phone_number": "+15550001111",
@@ -131,7 +133,7 @@ async def test_process_check_in_submission_persists_dashboard_alert_and_whatsapp
     assert "proactive alert" in service.whatsapp_service.sent[0]["body"]  # type: ignore[index]
 
 
-async def test_run_scans_latest_check_in_row_per_athlete() -> None:
+@pytest.mark.asyncio @pytest.mark.asyncio @pytest.mark.asyncio async def test_run_scans_latest_check_in_row_per_athlete() -> None:
     tables = {
         "memory_states": FakeTable(
             [
@@ -170,7 +172,7 @@ async def test_run_scans_latest_check_in_row_per_athlete() -> None:
     assert tables["coach_alerts"].inserted[0]["athlete_id"] == "athlete-456"
 
 
-async def test_assess_check_in_uses_biological_baseline_for_recovery_expectations() -> None:
+@pytest.mark.asyncio @pytest.mark.asyncio @pytest.mark.asyncio async def test_assess_check_in_uses_biological_baseline_for_recovery_expectations() -> None:
     check_in = AthleteCheckIn(
         athlete_id="athlete-123",
         readiness=77,
