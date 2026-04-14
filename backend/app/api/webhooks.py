@@ -4,6 +4,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -369,7 +370,26 @@ async def _generate_suggestion(athlete: AthleteRecord, text: str, supabase: Any 
         return "Coach, please review the new athlete check-in."
 
 
-def _extract_message(payload: dict) -> tuple[str | None, str | None, str | None]:
+async def _download_whatsapp_audio(media_id: str) -> bytes:
+    """Download audio bytes from the WhatsApp Cloud API for a given media ID."""
+    settings = get_settings()
+    token = settings.whatsapp_token
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Step 1: Get the media URL from Meta Graph API
+        meta_resp = await client.get(
+            f"https://graph.facebook.com/v18.0/{media_id}",
+            headers=headers,
+        )
+        meta_resp.raise_for_status()
+        media_url = meta_resp.json()["url"]
+        # Step 2: Download the actual audio bytes
+        audio_resp = await client.get(media_url, headers=headers)
+        audio_resp.raise_for_status()
+        return audio_resp.content
+
+
+async def _extract_message(payload: dict) -> tuple[str | None, str | None, str | None]:
     """Extract (sender, text, wa_msg_id) from a WhatsApp webhook payload."""
     if "entry" not in payload:
         return None, None, None
@@ -386,6 +406,24 @@ def _extract_message(payload: dict) -> tuple[str | None, str | None, str | None]
                 text = msg.get("text", {}).get("body")
             elif msg_type in ("audio", "voice"):
                 text = "[Audio Message]"
+                media_id = msg.get("audio", {}).get("id") or msg.get("voice", {}).get("id")
+                has_api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("LLM_API_KEY")
+                if media_id and has_api_key:
+                    try:
+                        audio_bytes = await _download_whatsapp_audio(media_id)
+                        from app.services.audio_service import AudioMemoInput, AudioService
+                        result = AudioService().process_voice_memo(
+                            AudioMemoInput(
+                                audio_bytes=audio_bytes,
+                                filename="voice_memo.ogg",
+                                mime_type="audio/ogg",
+                            )
+                        )
+                        text = result.transcription.text.strip() or "[Audio Message]"
+                        logger.info("[webhook] Transcribed voice note: %d chars", len(text))
+                    except Exception:
+                        logger.warning("[webhook] Voice note transcription failed — falling back", exc_info=True)
+                        text = "[Audio Message]"
             else:
                 text = None
             return sender, text, wa_msg_id
@@ -427,7 +465,7 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     content_type = (request.headers.get("content-type") or "").lower()
     payload = _parse_payload(raw_body, content_type)
 
-    sender, text, wa_msg_id = _extract_message(payload)
+    sender, text, wa_msg_id = await _extract_message(payload)
 
     if not sender or not text:
         logger.info("[webhook] No actionable message in payload — ignoring")
