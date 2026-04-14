@@ -581,5 +581,15 @@ async def _handle_coach_message(
     except Exception as exc:
         logger.error("[webhook] Failed to update suggestion status: %s", exc)
 
+    # COA-28: Send confirmation back to the coach
+    try:
+        athlete_name = suggestion.get("athlete_display_name") or "the athlete"
+        preview = reply_body[:80] + "..." if len(reply_body) > 80 else reply_body
+        confirmation = f"\u2713 Sent to {athlete_name}:\n\"{preview}\""
+        await _send_whatsapp_message(request, sender, confirmation)
+        logger.info("[webhook] Sent coach confirmation to %s", _mask_phone(sender))
+    except Exception as exc:
+        logger.warning("[webhook] Failed to send coach confirmation: %s", exc)
+
     logger.info("[webhook] Coach reply sent to athlete at %s", _mask_phone(athlete_phone))
     return WhatsAppWebhookResponse(status="sent", coach_id=str(coach_id))
