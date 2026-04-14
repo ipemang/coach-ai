@@ -88,12 +88,12 @@ class FakeWhatsAppService:
         return FakeSendResult()
 
 
-@pytest.mark.asyncio @pytest.mark.asyncio @pytest.mark.asyncio async def test_process_check_in_submission_persists_dashboard_alert_and_whatsapp_message() -> None:
+@pytest.mark.asyncioasync def test_process_check_in_submission_persists_dashboard_alert_and_whatsapp_message() -> None:
     tables = {
         "coaches": FakeTable(
             [
                 {
-                    @pytest.mark.asyncio
+    @pytest.ma                "coach_id": "coach-1",rk.asyncio
                     "coach_id": "coach-1",
                     "display_name": "Alex",
                     "phone_number": "+15550001111",
@@ -133,7 +133,7 @@ class FakeWhatsAppService:
     assert "proactive alert" in service.whatsapp_service.sent[0]["body"]  # type: ignore[index]
 
 
-@pytest.mark.asyncio @pytest.mark.asyncio @pytest.mark.asyncio async def test_run_scans_latest_check_in_row_per_athlete() -> None:
+@pytest.mark.asyncioasync def test_run_scans_latest_check_in_row_per_athlete() -> None:
     tables = {
         "memory_states": FakeTable(
             [
@@ -172,7 +172,7 @@ class FakeWhatsAppService:
     assert tables["coach_alerts"].inserted[0]["athlete_id"] == "athlete-456"
 
 
-@pytest.mark.asyncio @pytest.mark.asyncio @pytest.mark.asyncio async def test_assess_check_in_uses_biological_baseline_for_recovery_expectations() -> None:
+@pytest.mark.asyncioasync def test_assess_check_in_uses_biological_baseline_for_recovery_expectations() -> None:
     check_in = AthleteCheckIn(
         athlete_id="athlete-123",
         readiness=77,
