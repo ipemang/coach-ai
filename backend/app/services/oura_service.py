@@ -234,6 +234,45 @@ async def sync_all_athletes(dry_run: bool = False) -> None:
             _update_last_synced(supabase, athlete_id)
             logger.info("Successfully updated current_state for %s.", name)
 
+            # COA-38: Run predictive analysis after Oura sync
+            try:
+                from app.services.predictive_analysis import PredictiveAnalysisService
+
+                memory_rows = (
+                    supabase.table("memory_states")
+                    .select("*")
+                    .eq("athlete_id", athlete_id)
+                    .order("created_at", desc=True)
+                    .limit(20)
+                    .execute()
+                ).data or []
+
+                if memory_rows:
+                    service = PredictiveAnalysisService(supabase)
+                    analysis = await service.analyze_athlete(athlete_id, memory_rows)
+                    if analysis and analysis.flags:
+                        flags_data = [
+                            {
+                                "code": f.code,
+                                "label": f.label,
+                                "priority": f.priority,
+                                "reason": f.reason,
+                            }
+                            for f in analysis.flags
+                        ]
+                        merged_with_flags = {**merged, "predictive_flags": flags_data}
+                        _update_athlete_current_state(supabase, athlete_id, merged_with_flags)
+                        logger.info(
+                            "[COA-38] Stored %d predictive flags for %s",
+                            len(flags_data), name,
+                        )
+                    else:
+                        logger.info("[COA-38] No predictive flags for %s", name)
+                else:
+                    logger.info("[COA-38] No memory_states rows for %s — skipping analysis", name)
+            except Exception as exc:
+                logger.warning("[COA-38] Predictive analysis failed for %s: %s", name, exc)
+
     logger.info("Oura sync complete.")
 
 
