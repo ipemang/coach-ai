@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     whatsapp_phone_number_id: Optional[str] = None
     whatsapp_verify_token: Optional[str] = None
     whatsapp_webhook_secret: Optional[str] = None
+    coach_whatsapp_number: Optional[str] = None
 
     model_config = SettingsConfigDict(
         case_sensitive=False,
