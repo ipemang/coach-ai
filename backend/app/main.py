@@ -16,6 +16,7 @@ from .api.coach import router as coach_router
 from .api.methodology import router as methodology_router
 from .api.v1.router import router as v1_router
 from .api.webhooks import router as webhooks_router
+from .api.dashboard import router as dashboard_router
 from .services import DataScope, get_settings
 from .services.whatsapp_service import WhatsAppService
 
@@ -133,6 +134,7 @@ app.include_router(v1_router)
 app.include_router(methodology_router)
 app.include_router(webhooks_router)
 app.include_router(coach_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/privacy", response_class=HTMLResponse)
