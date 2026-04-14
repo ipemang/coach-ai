@@ -374,7 +374,7 @@ async def _generate_suggestion(athlete: AthleteRecord, text: str, supabase: Any 
 async def _download_whatsapp_audio(media_id: str) -> bytes:
     """Download audio bytes from the WhatsApp Cloud API for a given media ID."""
     settings = get_settings()
-    token = settings.whatsapp_token
+    token = settings.whatsapp_access_token
     headers = {"Authorization": f"Bearer {token}"}
     async with httpx.AsyncClient(timeout=30.0) as client:
         # Step 1: Get the media URL from Meta Graph API
