@@ -294,6 +294,152 @@ class WhatsAppTaskAdapter:
         self.whatsapp_client = whatsapp_client
         self.supabase_client = supabase_client
 
+    # ------------------------------------------------------------------
+    # COA-39: fetch athlete context for personalised check-in message
+    # ------------------------------------------------------------------
+
+    def _sync_rows(self, query: Any) -> list[dict[str, Any]]:
+        """Execute a Supabase query synchronously and return row list."""
+        result = query.execute()
+        data = getattr(result, "data", result)
+        if isinstance(data, list):
+            return [r for r in data if isinstance(r, dict)]
+        if isinstance(data, dict):
+            return [data]
+        return []
+
+    def _fetch_athlete_context(self, athlete_id: str) -> dict[str, Any]:
+        """
+        Return a dict with:
+          current_state  – oura_readiness_score, oura_avg_hrv, oura_sleep_score,
+                           predictive_flags, training_phase
+          last_checkin   – most recent athlete message text
+          last_reply     – most recent coach reply or approved AI draft
+        Falls back to empty dict on any error.
+        """
+        import logging as _logging
+        _logger = _logging.getLogger(__name__)
+        ctx: dict[str, Any] = {}
+        try:
+            athlete_rows = self._sync_rows(
+                self.supabase_client.table("athletes")
+                .select("current_state, stable_profile")
+                .eq("id", athlete_id)
+                .limit(1)
+            )
+            if athlete_rows:
+                ctx["current_state"] = athlete_rows[0].get("current_state") or {}
+                ctx["stable_profile"] = athlete_rows[0].get("stable_profile") or {}
+        except Exception as exc:
+            _logger.warning("[checkin] Could not fetch athlete row for %s: %s", athlete_id, exc)
+
+        try:
+            suggestion_rows = self._sync_rows(
+                self.supabase_client.table("suggestions")
+                .select("id, suggestion_text, coach_reply, status, created_at")
+                .eq("athlete_id", athlete_id)
+                .order("created_at", desc=True)
+                .limit(2)
+            )
+            if suggestion_rows:
+                latest = suggestion_rows[0]
+                # Get the athlete's own message for that suggestion
+                checkin_rows = self._sync_rows(
+                    self.supabase_client.table("athlete_checkins")
+                    .select("message_text")
+                    .eq("suggestion_id", latest["id"])
+                    .limit(1)
+                )
+                ctx["last_checkin"] = (checkin_rows[0].get("message_text") or "").strip() if checkin_rows else ""
+                coach_reply = latest.get("coach_reply") or ""
+                if not coach_reply and latest.get("status") == "approved":
+                    coach_reply = (latest.get("suggestion_text") or "")[:200]
+                ctx["last_reply"] = coach_reply.strip()
+        except Exception as exc:
+            _logger.warning("[checkin] Could not fetch conversation thread for %s: %s", athlete_id, exc)
+
+        return ctx
+
+    # ------------------------------------------------------------------
+    # COA-39: build a personalised check-in message
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_checkin_message(display_name: str, ctx: dict[str, Any]) -> str:
+        """
+        Compose a morning check-in message that:
+        1. Opens with a biometrics-aware hook based on Oura data
+        2. References the last coach/athlete thread if relevant
+        3. Closes with an open-ended prompt
+        """
+        cs = ctx.get("current_state") or {}
+        name = display_name or "there"
+
+        # --- Biometrics hook ---
+        readiness = cs.get("oura_readiness_score")
+        hrv = cs.get("oura_avg_hrv")
+        sleep = cs.get("oura_sleep_score")
+        oura_date = cs.get("oura_sync_date", "")
+
+        bio_line = ""
+        if readiness is not None:
+            r = int(readiness)
+            if r >= 85:
+                bio_line = f"Your Oura readiness is {r} this morning 🟢 — your body is primed."
+            elif r >= 70:
+                bio_line = f"Your Oura readiness is {r} this morning 🟡 — solid, some fuel left in the tank."
+            elif r >= 55:
+                bio_line = f"Your readiness came in at {r} this morning 🟠 — looks like a recovery-focused day."
+            else:
+                bio_line = f"Your readiness is {r} this morning 🔴 — your body is asking for rest. Let's talk about it."
+
+            # Enrich with HRV if available
+            if hrv is not None:
+                bio_line += f" HRV: {int(hrv)}ms."
+
+            # Sleep callout if notably low
+            if sleep is not None and int(sleep) < 70:
+                bio_line += f" Sleep score was {int(sleep)} — worth noting."
+
+        elif sleep is not None:
+            # No readiness but we have sleep
+            s = int(sleep)
+            if s >= 85:
+                bio_line = f"Your sleep score was {s} last night 🟢 — well rested."
+            elif s >= 70:
+                bio_line = f"Your sleep score was {s} last night 🟡 — decent recovery."
+            else:
+                bio_line = f"Your sleep score was {s} last night 🔴 — recovery may be limited today."
+
+        # Predictive flags — surface any HIGH priority ones
+        flags = cs.get("predictive_flags") or []
+        high_flags = [f["label"] for f in flags if isinstance(f, dict) and f.get("priority") == "high"]
+        flag_line = ""
+        if high_flags:
+            flag_line = f"⚠️ Flagged: {', '.join(high_flags)}."
+
+        # --- Conversation thread hook ---
+        last_checkin = (ctx.get("last_checkin") or "").strip()
+        thread_line = ""
+        if last_checkin and len(last_checkin) > 10:
+            # Truncate long messages to a natural snippet
+            snippet = last_checkin[:120].rsplit(" ", 1)[0] if len(last_checkin) > 120 else last_checkin
+            thread_line = f"Last time you mentioned: \"{snippet}\" — any update on that?"
+
+        # --- Assemble ---
+        parts = [f"Good morning {name}! ☀️"]
+        if bio_line:
+            parts.append(bio_line)
+        if flag_line:
+            parts.append(flag_line)
+        if thread_line:
+            parts.append(thread_line)
+        parts.append("How are you feeling today? Anything on training, recovery, or how yesterday went?")
+
+        return " ".join(parts)
+
+    # ------------------------------------------------------------------
+
     async def enqueue(self, task_name: str, payload: dict[str, Any]) -> Any:
         if task_name != "send_checkin_whatsapp":
             return None
@@ -303,13 +449,19 @@ class WhatsAppTaskAdapter:
         display_name = payload.get("display_name") or "there"
         dedupe_key = payload.get("dedupe_key")
 
-        msg = (
-            f"Hey {display_name}! Quick check-in \U0001f4cb "
-            "How are you feeling today? Any notes on training, sleep, or recovery?"
-        )
-
         import logging as _logging
         _logger = _logging.getLogger(__name__)
+
+        # COA-39: fetch biometrics + conversation context, build personalised message
+        ctx: dict[str, Any] = {}
+        if athlete_id and self.supabase_client:
+            try:
+                ctx = self._fetch_athlete_context(athlete_id)
+            except Exception as exc:
+                _logger.warning("[checkin] Context fetch failed for %s — using generic message: %s", athlete_id, exc)
+
+        msg = self._build_checkin_message(display_name, ctx)
+        _logger.info("[checkin] Sending personalised check-in to %s (%d chars)", athlete_id, len(msg))
 
         try:
             await self.whatsapp_client.send_message(to=phone, body=msg)
