@@ -231,25 +231,14 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
     )
     prompt_parts = [base]
     if coach_rules:
-        prompt_parts.append(f"
-
-Coaching methodology:
-{coach_rules}")
+        prompt_parts.append(f"\n\nCoaching methodology:\n{coach_rules}")
     if athlete_context_parts:
         prompt_parts.append(
-            f"
-
-Athlete profile for {athlete.display_name or 'this athlete'}:
-"
-            + "
-".join(f"- {p}" for p in athlete_context_parts)
+            f"\n\nAthlete profile for {athlete.display_name or 'this athlete'}:\n"
+            + "\n".join(f"- {p}" for p in athlete_context_parts)
         )
     if state_parts:
-        prompt_parts.append("
-
-Current athlete state:
-" + "
-".join(f"- {p}" for p in state_parts))
+        prompt_parts.append("\n\nCurrent athlete state:\n" + "\n".join(f"- {p}" for p in state_parts))
 
     prompt = "".join(prompt_parts)
     logger.info(
@@ -275,9 +264,7 @@ async def _generate_suggestion(athlete: AthleteRecord, text: str, supabase: Any 
             "Keep it under 3 sentences."
         )
 
-    user_prompt = f'Athlete check-in message: "{text}"
-
-Draft a coaching reply:'
+    user_prompt = f'Athlete check-in message: "{text}"\n\nDraft a coaching reply:'
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
