@@ -75,7 +75,7 @@ class CoachWorkflow:
 
     async def build_triage(self) -> list[CoachTriageItem]:
         scope = require_scope(self.scope, context="Coach triage")
-        table = self.supabase_client.table(self.memory_states_table)
+        table = await self.supabase_client.table(self.memory_states_table)
         rows = await _query_rows(apply_scope_query(_select_all(table), scope))
         latest_by_athlete: dict[str, dict[str, Any]] = {}
         athlete_history: dict[str, list[dict[str, Any]]] = {}
@@ -123,7 +123,7 @@ class CoachWorkflow:
         send_confirmation: bool = True,
     ) -> CoachVerifyResult:
         scope = require_scope(self.scope, context="Coach verification")
-        suggestions_table = self.supabase_client.table(self.suggestions_table)
+        suggestions_table = await self.supabase_client.table(self.suggestions_table)
         suggestion = await self._fetch_by_id(suggestions_table, suggestion_id, scope=scope)
         if suggestion is None:
             raise LookupError(f"Suggestion {suggestion_id} was not found")
@@ -223,7 +223,7 @@ class CoachWorkflow:
         if not athlete_id:
             return None
 
-        table = self.supabase_client.table(self.athletes_table)
+        table = await self.supabase_client.table(self.athletes_table)
         rows = await _query_rows(apply_scope_query(_select_all(table).eq("id", athlete_id) if hasattr(_select_all(table), "eq") else _select_all(table), scope))
         if not rows and hasattr(table, "select"):
             rows = await _query_rows(apply_scope_query(table.select("*"), scope))
