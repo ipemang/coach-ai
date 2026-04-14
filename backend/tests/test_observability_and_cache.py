@@ -75,7 +75,7 @@ def test_rate_limiter_enforces_request_limit(monkeypatch) -> None:
         "assess_check_in",
         lambda payload: CheckInRecommendation(recommended_action="continue planned session", rationale="Looks good."),
     )
-    monkeypatch.setattr(v1_routes, "persist_check_in_state", lambda payload, recommendation: True)
+    monkeypatch.setattr(v1_routes, "persist_check_in_state", lambda payload, recommendation, **kwargs: True)
 
     async def fake_authenticate_request(_request):
         return security_module.AuthenticatedPrincipal(
