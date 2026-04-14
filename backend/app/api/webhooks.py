@@ -274,15 +274,9 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     if coach_wa:
         athlete_name = athlete.display_name or "Unknown Athlete"
         coach_notification = (
-            f"New check-in from {athlete_name}:
-"
-            f"\"{text}\"
-
-"
-            f"AI draft reply:
-{suggestion_text}
-
-"
+            f"New check-in from {athlete_name}: "
+            f"\"{text}\" "
+            f"AI draft reply: {suggestion_text} "
             f"Reply APPROVE to send, or reply with your own message to override."
         )
         await _send_whatsapp_message(request, coach_wa, coach_notification)
