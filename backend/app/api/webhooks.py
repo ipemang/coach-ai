@@ -218,7 +218,7 @@ def _extract_rows(response: Any) -> list[dict[str, Any]]:
 
 async def _query_rows(query: Any) -> list[dict[str, Any]]:
     if hasattr(query, "execute"):
-        response = query.execute()
+        response = await query.execute()
     elif hasattr(query, "__await__"):
         response = await query
     else:
