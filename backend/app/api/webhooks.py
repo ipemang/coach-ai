@@ -506,6 +506,24 @@ async def _handle_onboarding_step(
 
     elif step == "ask_timezone":
         collected["timezone"] = "UTC" if text.strip().lower() == "skip" else text.strip()
+        supabase.table("onboarding_sessions").update({
+            "step": "ask_oura",
+            "collected": collected,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("phone_number", sender).execute()
+        await _send_whatsapp_message(
+            request, sender,
+            "One last thing — do you have an Oura Ring? 💍\n\n"
+            "If yes, paste your Personal Access Token from:\n"
+            "cloud.ouraring.com/personal-access-tokens\n\n"
+            "Or type 'skip' to set it up later."
+        )
+        logger.info("[onboarding] %s advanced to step=ask_oura", _mask_phone(sender))
+        return WhatsAppWebhookResponse(status="onboarding_ask_oura")
+
+    elif step == "ask_oura":
+        if text.strip().lower() != "skip":
+            collected["oura_token"] = text.strip()
         return await _complete_onboarding(request, supabase, sender, collected)
 
     else:
@@ -557,7 +575,7 @@ async def _complete_onboarding(
 
     # Create athlete
     name = collected.get("name", "New Athlete")
-    supabase.table("athletes").insert({
+    result = supabase.table("athletes").insert({
         "full_name": name,
         "phone_number": sender,
         "coach_id": coach_id,
@@ -566,15 +584,30 @@ async def _complete_onboarding(
         "current_state": {},
     }).execute()
 
+    athlete_id = result.data[0]["id"] if result.data else None
+
+    # Store Oura token if provided
+    if collected.get("oura_token") and athlete_id:
+        supabase.table("oura_tokens").upsert({
+            "athlete_id": athlete_id,
+            "access_token": collected["oura_token"],
+        }, on_conflict="athlete_id").execute()
+        logger.info("[onboarding] Stored Oura token for athlete %s", athlete_id)
+
     # Delete onboarding session
     supabase.table("onboarding_sessions").delete().eq("phone_number", sender).execute()
 
     # Confirm to athlete
+    oura_prefix = (
+        "✅ Oura Ring connected! We'll pull your readiness, HRV, and sleep scores automatically.\n\n"
+        if collected.get("oura_token") else ""
+    )
     await _send_whatsapp_message(
         request, sender,
-        f"\u2705 You're all set, {name}!\n\n"
-        "Your coach has been notified and will be in touch soon. "
-        "Feel free to start sending your daily check-ins here anytime."
+        f"{oura_prefix}✅ You're all set, {name}!\n\n"
+        "Your coach has been notified and will be in touch soon.\n"
+        "Feel free to start sending your daily check-ins here anytime.\n\n"
+        "💡 Your coach can also connect your Strava from the dashboard if needed."
     )
 
     # Notify coach
