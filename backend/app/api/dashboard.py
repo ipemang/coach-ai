@@ -10,6 +10,7 @@ import html
 import json
 import logging
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -569,6 +570,11 @@ async def update_state_form(
     oura_rows = supabase.table("oura_tokens").select("access_token").eq("athlete_id", athlete_id).execute()
     oura_token_stored = bool(oura_rows.data and oura_rows.data[0].get("access_token"))
 
+    # Check for existing Strava token
+    strava_rows = supabase.table("strava_tokens").select("last_synced_at").eq("athlete_id", athlete_id).execute()
+    strava_connected = bool(strava_rows.data)
+    strava_last_synced = strava_rows.data[0].get("last_synced_at") if strava_rows.data else None
+
     phase_options = "".join(
         f'<option value="{p}" {"selected" if p == cs.get("training_phase") else ""}>{p.capitalize()}</option>'
         for p in _PHASES
@@ -630,6 +636,16 @@ async def update_state_form(
           <span class="hint">Stored securely. Used for automatic daily readiness sync (COA-26).</span>
         </div>
 
+        <p class="section-title" style="margin-top:16px;">Strava Integration</p>
+        <div class="form-group">
+          {'<p style="color:#166534;font-size:14px;">&#10003; Strava connected'
+           + (f' (last synced: {_e(strava_last_synced[:16]) if strava_last_synced else "never"})' if strava_connected else '')
+           + '</p><a href="/dashboard/athletes/' + _e(athlete_id) + '/strava/connect' + _qs(secret) + '" class="btn btn-secondary btn-sm">Reconnect Strava</a>'
+           if strava_connected else
+           '<a href="/dashboard/athletes/' + _e(athlete_id) + '/strava/connect' + _qs(secret) + '" class="btn btn-primary btn-sm">Connect Strava</a>'
+           + '<span class="hint" style="margin-top:6px;display:block;">Links your athlete\'s Strava account for automatic activity sync.</span>'}
+        </div>
+
         <div style="display:flex;gap:12px;margin-top:8px;">
           <button type="submit" class="btn btn-primary">Save State</button>
           <a href="/dashboard{_qs(secret)}" class="btn btn-secondary">Cancel</a>
@@ -685,6 +701,128 @@ async def save_athlete_state(
 
     logger.info("[dashboard] Updated current_state for athlete %s", athlete_id)
     return RedirectResponse(f"/dashboard{_qs(secret)}&saved=1", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Strava OAuth (COA-30)
+# ---------------------------------------------------------------------------
+
+@router.get("/athletes/{athlete_id}/strava/connect")
+async def strava_connect(
+    athlete_id: str,
+    secret: str | None = Query(default=None),
+):
+    _auth(secret)
+    settings = get_settings()
+
+    if not settings.strava_client_id:
+        return HTMLResponse(_base_html(
+            "Strava Error",
+            '<div class="card"><p>Strava integration is not configured. '
+            "Set STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET environment variables.</p></div>",
+            secret,
+        ), status_code=500)
+
+    params = {
+        "client_id": settings.strava_client_id,
+        "redirect_uri": settings.strava_redirect_uri,
+        "response_type": "code",
+        "approval_prompt": "auto",
+        "scope": "activity:read_all",
+        "state": f"{athlete_id}:{secret}",
+    }
+    url = "https://www.strava.com/oauth/authorize?" + urlencode(params)
+    return RedirectResponse(url)
+
+
+@router.get("/strava/callback", response_class=HTMLResponse)
+async def strava_callback(
+    request: Request,
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    scope: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    if not state or ":" not in state:
+        return HTMLResponse(_base_html(
+            "Strava Error",
+            '<div class="card"><p>Invalid callback state parameter.</p></div>',
+        ), status_code=400)
+
+    athlete_id, secret = state.split(":", 1)
+    _auth(secret)
+
+    if error:
+        return HTMLResponse(_base_html(
+            "Strava Cancelled",
+            '<div class="card"><p>Strava connection was cancelled.</p>'
+            f'<a href="/dashboard{_qs(secret)}" class="btn btn-secondary">Back to Dashboard</a></div>',
+            secret,
+        ))
+
+    if not code:
+        return HTMLResponse(_base_html(
+            "Strava Error",
+            '<div class="card"><p>No authorization code received from Strava.</p></div>',
+            secret,
+        ), status_code=400)
+
+    settings = get_settings()
+    supabase = await _get_supabase(request)
+
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://www.strava.com/api/v3/oauth/token",
+                data={
+                    "client_id": settings.strava_client_id,
+                    "client_secret": settings.strava_client_secret,
+                    "code": code,
+                    "grant_type": "authorization_code",
+                },
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as exc:
+        logger.error("[dashboard] Strava token exchange failed: %s", exc)
+        return HTMLResponse(_base_html(
+            "Strava Error",
+            f'<div class="card"><p>Failed to exchange Strava authorization code: {_e(str(exc))}</p>'
+            f'<a href="/dashboard{_qs(secret)}" class="btn btn-secondary">Back to Dashboard</a></div>',
+            secret,
+        ), status_code=500)
+
+    strava_athlete_id = None
+    if data.get("athlete"):
+        strava_athlete_id = data["athlete"].get("id")
+
+    supabase.table("strava_tokens").upsert({
+        "athlete_id": athlete_id,
+        "strava_athlete_id": strava_athlete_id,
+        "access_token": data["access_token"],
+        "refresh_token": data["refresh_token"],
+        "expires_at": data["expires_at"],
+    }, on_conflict="athlete_id").execute()
+
+    # Look up athlete name for confirmation
+    athlete_name = "this athlete"
+    try:
+        rows = supabase.table("athletes").select("full_name").eq("id", athlete_id).execute()
+        if rows.data:
+            athlete_name = rows.data[0].get("full_name") or athlete_name
+    except Exception:
+        pass
+
+    logger.info("[dashboard] Strava connected for athlete %s (%s)", athlete_name, athlete_id)
+    return HTMLResponse(_base_html(
+        "Strava Connected",
+        f'<div class="card success"><p>Strava connected for {_e(athlete_name)}. You can close this tab.</p>'
+        f'<a href="/dashboard/athletes/{_e(athlete_id)}/state{_qs(secret)}" class="btn btn-secondary" '
+        f'style="margin-top:12px;">Back to Athlete</a></div>',
+        secret,
+    ))
 
 
 @router.get("/coach/settings", response_class=HTMLResponse)
