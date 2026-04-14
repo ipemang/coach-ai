@@ -5,8 +5,9 @@ import inspect
 import json
 import logging
 import os
+import secrets
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -594,6 +595,24 @@ async def _complete_onboarding(
         }, on_conflict="athlete_id").execute()
         logger.info("[onboarding] Stored Oura token for athlete %s", athlete_id)
 
+    # Generate Strava connect link
+    strava_link = None
+    if athlete_id:
+        try:
+            connect_token = secrets.token_urlsafe(24)
+            expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+            supabase.table("athlete_connect_tokens").insert({
+                "athlete_id": athlete_id,
+                "token": connect_token,
+                "purpose": "strava_connect",
+                "expires_at": expires_at,
+            }).execute()
+            base_url = "https://coach-ai-production-a5aa.up.railway.app"
+            strava_link = f"{base_url}/connect/strava?token={connect_token}"
+            logger.info("[onboarding] Generated Strava connect token for %s", _mask_phone(sender))
+        except Exception as exc:
+            logger.warning("[onboarding] Failed to generate Strava connect link: %s", exc)
+
     # Delete onboarding session
     supabase.table("onboarding_sessions").delete().eq("phone_number", sender).execute()
 
@@ -606,9 +625,18 @@ async def _complete_onboarding(
         request, sender,
         f"{oura_prefix}✅ You're all set, {name}!\n\n"
         "Your coach has been notified and will be in touch soon.\n"
-        "Feel free to start sending your daily check-ins here anytime.\n\n"
-        "💡 Your coach can also connect your Strava from the dashboard if needed."
+        "Feel free to start sending your daily check-ins here anytime."
     )
+
+    # Send Strava connect link as a separate message
+    if strava_link:
+        await _send_whatsapp_message(
+            request, sender,
+            f"\U0001f6b4 Want to connect Strava?\n\n"
+            f"Tap this link on your phone (valid 24 hours):\n{strava_link}\n\n"
+            "Just tap Authorize and you're done!"
+        )
+        logger.info("[onboarding] Sent Strava connect link to %s", _mask_phone(sender))
 
     # Notify coach
     if coach_whatsapp:
