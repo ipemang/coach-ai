@@ -29,6 +29,8 @@ class AthleteRecord:
     timezone_name: str
     display_name: str | None = None
     coach_whatsapp_number: str | None = None
+    stable_profile: dict | None = None   # COA-25: race, zones, injury history
+    current_state: dict | None = None    # COA-25: phase, readiness, HRV, soreness
 
 
 class WhatsAppWebhookResponse(BaseModel):
@@ -112,6 +114,8 @@ async def _find_athlete_by_phone(supabase_client: Any, phone_number: str) -> Ath
                 timezone_name=str(row.get("timezone_name") or "UTC"),
                 display_name=row.get("full_name") or row.get("display_name"),
                 coach_whatsapp_number=coach_wa,
+                stable_profile=row.get("stable_profile") or {},
+                current_state=row.get("current_state") or {},
             )
     logger.warning("[webhook] No athlete found for phone variants: %s", variants)
     return None
@@ -143,19 +147,131 @@ async def _send_whatsapp_message(request: Request, to: str, body: str) -> None:
         logger.error("[webhook] Failed to send WhatsApp message to %s: %s", to, exc)
 
 
-async def _generate_suggestion(athlete: AthleteRecord, text: str) -> str:
+async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
+    """Build a rich system prompt using athlete profile, current state, and coach methodology (COA-25)."""
+    coach_persona = ""
+    coach_rules = ""
+    try:
+        coach_rows = await _query_rows(
+            supabase.table("coaches").select(
+                "methodology_playbook, persona_system_prompt"
+            ).eq("id", athlete.coach_id)
+        )
+        if coach_rows:
+            coach = coach_rows[0]
+            coach_persona = coach.get("persona_system_prompt") or ""
+            playbook = coach.get("methodology_playbook") or {}
+            if playbook:
+                rules = playbook.get("rules", [])
+                periodization = playbook.get("periodization", "")
+                intensity = playbook.get("intensity_system", "")
+                parts = []
+                if periodization:
+                    parts.append(f"Periodization: {periodization}")
+                if intensity:
+                    parts.append(f"Intensity system: {intensity}")
+                if rules:
+                    parts.append("Coaching rules: " + "; ".join(rules))
+                coach_rules = ". ".join(parts)
+    except Exception as exc:
+        logger.warning("[webhook] Could not fetch coach methodology: %s", exc)
+
+    sp = athlete.stable_profile or {}
+    cs = athlete.current_state or {}
+
+    athlete_context_parts = []
+    if sp.get("target_race"):
+        race_str = sp["target_race"]
+        if sp.get("race_date"):
+            race_str += f" on {sp['race_date']}"
+        athlete_context_parts.append(f"Target race: {race_str}")
+    if sp.get("max_weekly_hours"):
+        athlete_context_parts.append(f"Max weekly training volume: {sp['max_weekly_hours']} hours")
+    if sp.get("training_zones", {}).get("run"):
+        zones = sp["training_zones"]["run"]
+        zone_str = ", ".join(f"{k.upper()}: {v}" for k, v in zones.items() if v)
+        if zone_str:
+            athlete_context_parts.append(f"Run HR zones (bpm): {zone_str}")
+    if sp.get("swim_css"):
+        athlete_context_parts.append(f"Swim CSS pace: {sp['swim_css']}/100m")
+    if sp.get("injury_history"):
+        athlete_context_parts.append(f"Injury history: {sp['injury_history']}")
+    if sp.get("notes"):
+        athlete_context_parts.append(f"Athlete notes: {sp['notes']}")
+
+    state_parts = []
+    if cs.get("training_phase"):
+        phase_str = cs["training_phase"]
+        if cs.get("training_week"):
+            phase_str += f" (week {cs['training_week']})"
+        state_parts.append(f"Training phase: {phase_str}")
+    if cs.get("last_readiness_score") is not None:
+        state_parts.append(f"Today's readiness score: {cs['last_readiness_score']}/100")
+    if cs.get("last_hrv") is not None:
+        state_parts.append(f"Last HRV: {cs['last_hrv']}ms")
+    if cs.get("last_sleep_score") is not None:
+        state_parts.append(f"Last sleep score: {cs['last_sleep_score']}/100")
+    if cs.get("soreness"):
+        state_parts.append(f"Current soreness: {cs['soreness']}")
+    if cs.get("missed_workouts_this_week"):
+        state_parts.append(f"Missed workouts this week: {cs['missed_workouts_this_week']}")
+    if cs.get("coach_notes"):
+        state_parts.append(f"Coach notes: {cs['coach_notes']}")
+
+    base = coach_persona or (
+        "You are an expert endurance sports coach assistant. "
+        "Draft a concise, supportive, professional reply FROM the coach TO the athlete. "
+        "Keep it under 3 sentences. Be specific and data-driven when biometric data is available."
+    )
+    prompt_parts = [base]
+    if coach_rules:
+        prompt_parts.append(f"
+
+Coaching methodology:
+{coach_rules}")
+    if athlete_context_parts:
+        prompt_parts.append(
+            f"
+
+Athlete profile for {athlete.display_name or 'this athlete'}:
+"
+            + "
+".join(f"- {p}" for p in athlete_context_parts)
+        )
+    if state_parts:
+        prompt_parts.append("
+
+Current athlete state:
+" + "
+".join(f"- {p}" for p in state_parts))
+
+    prompt = "".join(prompt_parts)
+    logger.info(
+        "[webhook] Built system prompt: %d chars, %d profile fields, %d state fields",
+        len(prompt), len(athlete_context_parts), len(state_parts),
+    )
+    return prompt
+
+
+async def _generate_suggestion(athlete: AthleteRecord, text: str, supabase: Any = None) -> str:
     settings = get_settings()
     groq_api_key = getattr(settings, "groq_api_key", None)
     if not groq_api_key:
         logger.warning("[webhook] GROQ_API_KEY not set — returning fallback suggestion")
         return "Coach, the athlete shared an update. Please review their check-in."
-    system_prompt = (
-        "You are an AI assistant helping a professional sports coach. "
-        f"Analyze the following check-in from athlete {athlete.display_name or 'the athlete'}. "
-        "Draft a supportive, professional reply FROM the coach to the athlete. "
-        "Keep it under 3 sentences."
-    )
-    user_prompt = f"Athlete check-in: '{text}'"
+
+    if supabase:
+        system_prompt = await _build_system_prompt(athlete, supabase)
+    else:
+        system_prompt = (
+            f"You are an expert endurance sports coach assistant. "
+            f"Draft a concise, supportive reply FROM the coach TO {athlete.display_name or 'the athlete'}. "
+            "Keep it under 3 sentences."
+        )
+
+    user_prompt = f'Athlete check-in message: "{text}"
+
+Draft a coaching reply:'
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -165,7 +281,7 @@ async def _generate_suggestion(athlete: AthleteRecord, text: str) -> str:
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "llama-3.3-70b-versatile",  # updated from deprecated llama-3.1-70b-versatile
+                    "model": "llama-3.3-70b-versatile",
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
@@ -298,7 +414,7 @@ async def _handle_athlete_message(
         logger.error("[webhook] Failed to store check-in: %s", exc)
 
     # 3. Generate AI suggestion
-    suggestion_text = await _generate_suggestion(athlete, text)
+    suggestion_text = await _generate_suggestion(athlete, text, supabase)
 
     # 4. Store suggestion
     suggestion_payload = {
