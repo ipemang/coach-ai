@@ -1,4 +1,4 @@
-"""Webhook routes for coach-driven flow."""
+"""Webhook routes for athlete check-in flow."""
 from __future__ import annotations
 import asyncio
 import inspect
@@ -26,27 +26,17 @@ router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
 @dataclass(slots=True)
 class AthleteRecord:
     athlete_id: str
+    coach_id: str
     phone_number: str
     timezone_name: str
     display_name: str | None = None
-    organization_id: str | None = None
-    coach_id: str | None = None
-    age_years: int | None = None
-    training_age_years: float | None = None
-    biological_baseline: dict[str, Any] = field(default_factory=dict)
-    missing_fields: list[str] = field(default_factory=list)
 
 
 class WhatsAppWebhookResponse(BaseModel):
     status: str
-    matched_coach: bool = False
+    athlete_id: str | None = None
     coach_id: str | None = None
-    phone_number: str | None = None
-    inbound_text: str | None = None
-    reply_sent: bool = False
-    provider_message_id: str | None = None
-    reply_body: str | None = None
-    delivery_error: str | None = None
+    message_id: str | None = None
 
 
 async def _read_payload(request: Request) -> dict[str, Any]:
@@ -65,13 +55,9 @@ async def _read_payload(request: Request) -> dict[str, Any]:
 
 
 def _phone_variants(phone_number: str) -> list[str]:
-    """Generate all plausible formats for a phone number to match DB entries."""
     raw = phone_number.strip()
     digits = "".join(ch for ch in raw if ch.isdigit())
-    variants = set()
-    variants.add(raw)
-    variants.add(digits)
-    variants.add(f"+{digits}")
+    variants = {raw, digits, f"+{digits}"}
     if len(digits) == 11 and digits.startswith("1"):
         variants.add(digits[1:])
         variants.add(f"+1{digits[1:]}")
@@ -97,71 +83,46 @@ async def _query_rows(query: Any) -> list[dict[str, Any]]:
     return []
 
 
-async def _find_coach_by_phone(supabase_client: Any, phone_number: str) -> dict[str, Any] | None:
+async def _find_athlete_by_phone(supabase_client: Any, phone_number: str) -> AthleteRecord | None:
     variants = _phone_variants(phone_number)
-    logger.info("[webhook] Looking up coach by phone variants: %s", variants)
+    logger.info("[webhook] Looking up athlete by phone variants: %s", variants)
     for value in variants:
-        rows = await _query_rows(supabase_client.table("coaches").select("*").eq("phone_number", value))
+        rows = await _query_rows(supabase_client.table("athletes").select("*").eq("phone_number", value))
         if rows:
-            logger.info("[webhook] Found coach for variant '%s': id=%s", value, rows[0].get("id"))
-            return rows[0]
-    logger.warning("[webhook] No coach found for phone %s (tried variants: %s)", phone_number, variants)
+            row = rows[0]
+            logger.info("[webhook] Found athlete: id=%s coach_id=%s", row.get("id"), row.get("coach_id"))
+            return AthleteRecord(
+                athlete_id=str(row.get("id") or ""),
+                coach_id=str(row.get("coach_id") or ""),
+                phone_number=str(row.get("phone_number") or ""),
+                timezone_name=str(row.get("timezone_name") or "UTC"),
+                display_name=row.get("full_name") or row.get("display_name"),
+            )
     return None
 
 
-async def _find_first_athlete(supabase_client: Any, coach_id: str) -> AthleteRecord | None:
-    rows = await _query_rows(supabase_client.table("athletes").select("*").eq("coach_id", coach_id).limit(1))
-    if not rows:
-        logger.warning("[webhook] No athlete found for coach_id=%s", coach_id)
-        return None
-    row = rows[0]
-    return AthleteRecord(
-        athlete_id=str(row.get("id") or ""),
-        phone_number=str(row.get("phone_number") or ""),
-        timezone_name=str(row.get("timezone_name") or "UTC"),
-        display_name=row.get("full_name") or row.get("display_name"),
-        organization_id=str(row.get("organization_id") or "1"),
-        coach_id=str(row.get("coach_id") or ""),
-    )
-
-
-async def _get_ai_reply(request: Request, coach: dict[str, Any], athlete: AthleteRecord, text: str) -> str:
-    # First try checkin_service if available
-    checkin_service = getattr(request.app.state, "checkin_service", None)
-    if checkin_service and hasattr(checkin_service, "handle_inbound_message"):
-        reply = await checkin_service.handle_inbound_message(athlete=athlete, message_text=text)
-        if isinstance(reply, str) and reply.strip():
-            return reply
-
-    # Fall back to direct Groq API call via httpx
+async def _generate_suggestion(supabase: Any, athlete: AthleteRecord, text: str) -> str:
     settings = get_settings()
     groq_api_key = getattr(settings, "groq_api_key", None)
     if not groq_api_key:
-        logger.warning("[webhook] No GROQ_API_KEY found, using fallback message")
-        athlete_name = athlete.display_name or "there"
-        return f"Hi {athlete_name}, thanks for your message. Your coach will get back to you soon!"
+        return "Coach, the athlete shared an update. Please review their check-in."
 
-    coach_name = coach.get("full_name") or coach.get("name") or "Coach"
-    athlete_name = athlete.display_name or "your athlete"
+    # In a real app, you'd fetch athlete history/memory here
     system_prompt = (
-        f"You are an AI assistant helping {coach_name}, a professional sports coach. "
-        f"You are responding on behalf of the coach to their athlete {athlete_name}. "
-        "Be supportive, concise, and professional. Keep replies under 3 sentences."
+        "You are an AI assistant helping a professional sports coach. "
+        f"Analyze the following check-in from athlete {athlete.display_name}. "
+        "Draft a supportive, professional reply FROM the coach to the athlete. "
+        "Keep it under 3 sentences."
     )
-    user_prompt = f"The athlete sent this message: '{text}'\n\nWrite a helpful reply from the coach."
+    user_prompt = f"Athlete check-in: '{text}'"
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {groq_api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers={"Authorization": f"Bearer {groq_api_key}", "Content-Type": "application/json"},
                 json={
                     "model": "llama-3.1-70b-versatile",
-                    "temperature": 0.2,
-                    "max_tokens": 4096,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
@@ -170,16 +131,10 @@ async def _get_ai_reply(request: Request, coach: dict[str, Any], athlete: Athlet
             )
             response.raise_for_status()
             data = response.json()
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            if content.strip():
-                logger.info("[webhook] Groq API reply generated successfully")
-                return content.strip()
-            else:
-                raise ValueError("Empty response from LLM")
+            return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
     except Exception as exc:
-        logger.error("[webhook] Groq API call failed: %s", exc)
-        athlete_name = athlete.display_name or "there"
-        return f"Hi {athlete_name}, thanks for your message. Your coach will get back to you soon!"
+        logger.error("[webhook] AI suggestion failed: %s", exc)
+        return "Coach, please review the new athlete check-in."
 
 
 @router.get("/whatsapp", response_class=PlainTextResponse)
@@ -196,7 +151,7 @@ async def whatsapp_webhook_handshake(
 @router.post("/whatsapp", response_model=WhatsAppWebhookResponse)
 async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     raw_body = await request.body()
-    logger.info("[webhook] Received POST /whatsapp, body size=%d bytes", len(raw_body))
+    logger.info("[webhook] Received athlete POST /whatsapp, body size=%d bytes", len(raw_body))
 
     settings = get_settings()
     if getattr(settings, "whatsapp_webhook_secret", None):
@@ -205,70 +160,79 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
         except HTTPException as exc:
             logger.error("[webhook] Signature verification failed: %s", exc.detail)
             raise
-    else:
-        logger.warning("[webhook] WHATSAPP_WEBHOOK_SECRET not set - skipping signature check")
-
+    
     payload = await _read_payload(request)
-    logger.info("[webhook] Payload keys: %s", list(payload.keys()))
-
     sender = None
     text = None
+    wa_msg_id = None
 
+    # Handle WhatsApp Graph API payload
     if "entry" in payload:
         for entry in payload["entry"]:
             for change in entry.get("changes", []):
                 val = change.get("value", {})
-                if "statuses" in val and "messages" not in val:
-                    logger.info("[webhook] Received status update, ignoring")
-                    return WhatsAppWebhookResponse(status="status_update")
                 if "messages" in val:
                     msg = val["messages"][0]
                     sender = msg.get("from")
-                    text = msg.get("text", {}).get("body")
-                    logger.info("[webhook] Extracted sender=%s text=%r", sender, text)
+                    wa_msg_id = msg.get("id")
+                    if msg.get("type") == "text":
+                        text = msg.get("text", {}).get("body")
+                    elif msg.get("type") in ("audio", "voice"):
+                        text = "[Audio Message]" # Placeholder for transcription flow
                     break
-            if sender:
-                break
-
+    
     if not sender or not text:
-        sender = payload.get("From") or payload.get("sender_phone_number")
-        text = payload.get("Body") or payload.get("message_text")
-
-    if not sender or not text:
-        logger.warning("[webhook] Missing sender or text in payload: %s", payload)
-        raise HTTPException(status_code=400, detail="Missing sender or text")
+        logger.info("[webhook] No message content found in payload")
+        return WhatsAppWebhookResponse(status="ignored")
 
     supabase = request.app.state.supabase_client
-    coach = await _find_coach_by_phone(supabase, sender)
-    if not coach:
-        logger.warning("[webhook] No coach matched for sender=%s - returning ignored", sender)
-        return WhatsAppWebhookResponse(status="ignored", phone_number=sender, inbound_text=text)
-
-    athlete = await _find_first_athlete(supabase, coach["id"])
+    athlete = await _find_athlete_by_phone(supabase, sender)
+    
     if not athlete:
-        return WhatsAppWebhookResponse(status="no_athlete", matched_coach=True, coach_id=coach["id"])
+        logger.warning("[webhook] Sender %s not recognized as athlete", sender)
+        return WhatsAppWebhookResponse(status="ignored", phone_number=sender)
 
-    reply_body = await _get_ai_reply(request, coach, athlete, text)
-    logger.info("[webhook] Sending reply to %s: %r", sender, reply_body)
+    # 1. Log the check-in
+    checkin_payload = {
+        "athlete_id": athlete.athlete_id,
+        "coach_id": athlete.coach_id,
+        "phone_number": sender,
+        "message_text": text,
+        "whatsapp_message_id": wa_msg_id,
+        "message_type": "text" if text != "[Audio Message]" else "voice",
+    }
+    checkin_res = await supabase.table("athlete_checkins").insert(checkin_payload).execute()
+    checkin_id = checkin_res.data[0].get("id") if checkin_res.data else None
 
-    whatsapp = request.app.state.whatsapp_service
-    recipient = WhatsAppRecipient(
-        athlete_id=athlete.athlete_id,
-        phone_number=sender,
-        timezone_name=athlete.timezone_name,
-        display_name=coach.get("full_name"),
-    )
-    res = await whatsapp.send_text_message(recipient, reply_body)
-    logger.info("[webhook] send_text_message result: delivered=%s error=%s", res.delivered, res.error_message)
+    # 2. Generate AI suggestion for coach review
+    suggestion_text = await _generate_suggestion(supabase, athlete, text)
 
+    # 3. Create suggestion entry
+    suggestion_payload = {
+        "athlete_id": athlete.athlete_id,
+Rebuild: athlete check-in flow with AI suggestions for coach review        "athlete_display_name": athlete.display_name,
+        "athlete_phone_number": sender,
+        "suggestion": {"reply": suggestion_text},
+        "suggestion_text": suggestion_text,
+        "status": "pending",
+        "source": "whatsapp_checkin",
+    }
+    suggestion_res = await supabase.table("suggestions").insert(suggestion_payload).execute()
+    suggestion_id = suggestion_res.data[0].get("id") if suggestion_res.data else None
+
+    # 4. Link checkin to suggestion
+    if checkin_id and suggestion_id:
+        await supabase.table("athlete_checkins").update({
+            "suggestion_id": suggestion_id,
+            "processed": True,
+            "processed_at": datetime.now(timezone.utc).isoformat()
+        }).eq("id", checkin_id).execute()
+
+    logger.info("[webhook] Athlete check-in processed: id=%s suggestion_id=%s", checkin_id, suggestion_id)
+    
     return WhatsAppWebhookResponse(
         status="processed",
-        matched_coach=True,
-        coach_id=coach["id"],
-        phone_number=sender,
-        inbound_text=text,
-        reply_sent=res.delivered,
-        provider_message_id=res.provider_message_id,
-        reply_body=res.body,
-        delivery_error=res.error_message,
+        athlete_id=athlete.athlete_id,
+        coach_id=athlete.coach_id,
+        message_id=wa_msg_id
     )
