@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -218,8 +219,9 @@ def _extract_rows(response: Any) -> list[dict[str, Any]]:
 
 async def _query_rows(query: Any) -> list[dict[str, Any]]:
     if hasattr(query, "execute"):
-        response = await query.execute()
-    elif hasattr(query, "__await__"):
+        result = query.execute()
+        response = await result if inspect.isawaitable(result) else result
+    elif inspect.isawaitable(query):
         response = await query
     else:
         response = query
