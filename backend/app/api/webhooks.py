@@ -663,6 +663,28 @@ async def _complete_onboarding(
         )
         logger.info("[onboarding] Sent Strava connect link to %s", _mask_phone(sender))
 
+    # Generate plan_access token and send plan link
+    if athlete_id:
+        try:
+            plan_token = secrets.token_urlsafe(32)
+            plan_expires = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat()
+            supabase.table("athlete_connect_tokens").insert({
+                "athlete_id": athlete_id,
+                "token": plan_token,
+                "purpose": "plan_access",
+                "expires_at": plan_expires,
+            }).execute()
+            base_url = "https://coach-ai-production-a5aa.up.railway.app"
+            await _send_whatsapp_message(
+                request, sender,
+                f"📋 Your training plan is ready! View it anytime here:\n"
+                f"{base_url}/my-plan?token={plan_token}\n\n"
+                "Bookmark this link — it's your personal plan page."
+            )
+            logger.info("[onboarding] Sent plan link to %s", _mask_phone(sender))
+        except Exception as exc:
+            logger.warning("[onboarding] Failed to generate plan link: %s", exc)
+
     # Notify coach
     if coach_whatsapp:
         masked = _mask_phone(sender)

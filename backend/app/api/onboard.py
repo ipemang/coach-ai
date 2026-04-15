@@ -1111,6 +1111,43 @@ async def _finalize_onboarding(
         .eq("phone_number", f"web:{token_row['token']}")
     )
 
+    # Generate plan_access token so athlete can view /my-plan
+    base_url = "https://coach-ai-production-a5aa.up.railway.app"
+    plan_token = secrets.token_urlsafe(32)
+    try:
+        _sync_exec(supabase.table("athlete_connect_tokens").insert({
+            "athlete_id": athlete_id,
+            "token": plan_token,
+            "purpose": "plan_access",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
+        }))
+        logger.info("[onboard] Created plan_access token for athlete %s", athlete_id)
+    except Exception as exc:
+        logger.warning("[onboard] Could not create plan_access token: %s", exc)
+        plan_token = None
+
+    # Send plan link to athlete via WhatsApp (only if they have a real phone number)
+    if plan_token and athlete_id:
+        whatsapp_client = getattr(request.app.state, "whatsapp_client", None)
+        if whatsapp_client:
+            try:
+                athlete_phone_rows = await _qr(
+                    supabase.table("athletes").select("phone_number").eq("id", athlete_id)
+                )
+                phone = athlete_phone_rows[0].get("phone_number", "") if athlete_phone_rows else ""
+                if phone and not phone.startswith("web:"):
+                    await whatsapp_client.send_message(
+                        to=phone,
+                        body=(
+                            f"📋 Your training plan is ready! View it anytime here:\n"
+                            f"{base_url}/my-plan?token={plan_token}\n\n"
+                            "Bookmark this link — it's your personal plan page."
+                        ),
+                    )
+                    logger.info("[onboard] Sent plan link to athlete %s", athlete_id)
+            except Exception as exc:
+                logger.warning("[onboard] Could not send plan link: %s", exc)
+
     # Notify coach via WhatsApp
     if coach_whatsapp:
         whatsapp_client = getattr(request.app.state, "whatsapp_client", None)

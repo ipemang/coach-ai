@@ -122,6 +122,7 @@ def _base_html(title: str, body: str, secret: str | None = None) -> str:
 <nav class="nav">
   <span class="brand">Coach.AI</span>
   <a href="/dashboard{nav_secret}">Athletes</a>
+  <a href="/dashboard/workouts{nav_secret}">Workouts</a>
   <a href="/dashboard/coach/settings{nav_secret}">My Settings</a>
 </nav>
 <div class="container">
@@ -179,10 +180,27 @@ async def dashboard_home(request: Request, secret: str | None = Query(default=No
     ).execute()
     athletes = rows.data or []
 
+    # Fetch plan_access tokens for all athletes (for the Plan link button)
+    plan_tokens: dict[str, str] = {}
+    try:
+        token_rows = await _query_rows(
+            supabase.table("athlete_connect_tokens")
+            .select("athlete_id, token")
+            .eq("purpose", "plan_access")
+            .gte("expires_at", "now()")
+        )
+        for tr in token_rows:
+            aid = tr.get("athlete_id")
+            if aid and aid not in plan_tokens:
+                plan_tokens[aid] = tr["token"]
+    except Exception:
+        pass  # non-critical — buttons will just show "No plan link"
+
     if not athletes:
         athlete_html = '<p style="color:#6b7280;font-size:14px;">No athletes yet. Add your first one.</p>'
     else:
         items = []
+        base_url = "https://coach-ai-production-a5aa.up.railway.app"
         for a in athletes:
             cs = a.get("current_state") or {}
             sp = a.get("stable_profile") or {}
@@ -197,6 +215,11 @@ async def dashboard_home(request: Request, secret: str | None = Query(default=No
             if cs.get("training_week"):
                 meta_parts.append(f"Week {_e(cs['training_week'])}")
             meta = " · ".join(meta_parts)
+            plan_token = plan_tokens.get(a["id"])
+            if plan_token:
+                plan_btn = f'<a href="{base_url}/my-plan?token={_e(plan_token)}" target="_blank" class="btn btn-secondary btn-sm" title="Athlete plan page">📋 Plan</a>'
+            else:
+                plan_btn = '<span class="btn btn-sm" style="color:#9ca3af;cursor:default;">No plan link</span>'
             items.append(f"""
             <div class="athlete-item">
               <div>
@@ -207,6 +230,7 @@ async def dashboard_home(request: Request, secret: str | None = Query(default=No
                 <a href="/dashboard/athletes/{a['id']}/history{_qs(secret)}" class="btn btn-secondary btn-sm">History</a>
                 <a href="/dashboard/athletes/{a['id']}/edit{_qs(secret)}" class="btn btn-secondary btn-sm">Edit Profile</a>
                 <a href="/dashboard/athletes/{a['id']}/state{_qs(secret)}" class="btn btn-primary btn-sm">Update State</a>
+                {plan_btn}
                 <a href="/dashboard/athletes/{a['id']}/onboard_link{_qs(secret)}" class="btn btn-secondary btn-sm" title="Generate web onboarding link">📋 Onboard</a>
               </div>
             </div>""")
