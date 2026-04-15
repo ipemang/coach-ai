@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!,
-);
-
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_KEY!,
+  );
+
   const { id } = params;
   const body = await req.json();
   const { action, coach_reply } = body as { action: "approved" | "ignored"; coach_reply?: string };
@@ -25,7 +25,7 @@ export async function PATCH(
   if (coach_reply) update.coach_reply = coach_reply;
 
   const { error } = await supabase
-    .table("suggestions")
+    .from("suggestions")
     .update(update)
     .eq("id", id);
 
