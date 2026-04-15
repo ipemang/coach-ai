@@ -16,6 +16,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
+from app.agents.check_in import (
+    AthleteCheckIn,
+    assess_check_in,
+    persist_check_in_state,
+)
 from app.core.config import get_settings
 from app.core.security import verify_whatsapp_signature
 
@@ -843,6 +848,63 @@ async def _handle_athlete_message(
         logger.info("[webhook] Notified coach at %s", _mask_phone(coach_wa))
     else:
         logger.warning("[webhook] No coach WhatsApp number found — skipping coach notification")
+
+    # 7. COA-43: Persist check-in state to memory_states so future AI calls have
+    # a running record of this athlete's readiness trends. Wrapped in try/except
+    # so a failure here never breaks the webhook response.
+    try:
+        cs = athlete.current_state or {}
+        # Oura-synced values take priority; fall back to coach-entered values
+        readiness_raw = cs.get("oura_readiness_score") if cs.get("oura_readiness_score") is not None else cs.get("last_readiness_score")
+        readiness = max(0, min(100, int(float(readiness_raw)))) if readiness_raw is not None else 70
+
+        soreness_raw = cs.get("soreness")
+        try:
+            soreness = max(0, min(10, int(float(str(soreness_raw))))) if soreness_raw is not None else 5
+        except (ValueError, TypeError):
+            soreness = 5
+
+        oura_hrv = cs.get("oura_avg_hrv") if cs.get("oura_avg_hrv") is not None else cs.get("last_hrv")
+        if oura_hrv is not None:
+            hrv_ms = float(oura_hrv)
+            hrv_status = "below" if hrv_ms < 50 else ("above" if hrv_ms > 80 else "normal")
+        else:
+            hrv_status = "normal"
+
+        # Oura sleep score (0–100) → approximate hours (max ~9h)
+        sleep_score = cs.get("oura_sleep_score") if cs.get("oura_sleep_score") is not None else cs.get("last_sleep_score")
+        sleep_hours = round((float(sleep_score) / 100) * 9.0, 1) if sleep_score is not None else 7.5
+
+        check_in_obj = AthleteCheckIn(
+            athlete_id=athlete.athlete_id,
+            readiness=readiness,
+            hrv=hrv_status,
+            sleep_hours=sleep_hours,
+            sleep_quality="good" if sleep_hours >= 7 else "poor",
+            soreness=soreness,
+        )
+        recommendation = assess_check_in(check_in_obj)
+        persisted = persist_check_in_state(
+            check_in_obj,
+            recommendation,
+            coach_id=athlete.coach_id,
+        )
+        if persisted:
+            logger.info(
+                "[webhook] Persisted memory state for athlete=%s action=%s",
+                athlete.athlete_id, recommendation.recommended_action,
+            )
+        else:
+            logger.warning(
+                "[webhook] persist_check_in_state returned False for athlete=%s — "
+                "check SUPABASE env vars and scope config",
+                athlete.athlete_id,
+            )
+    except Exception as exc:
+        logger.warning(
+            "[webhook] Failed to persist check-in memory state for athlete=%s: %s",
+            athlete.athlete_id, exc,
+        )
 
     logger.info(
         "[webhook] Athlete check-in processed: athlete=%s checkin_id=%s suggestion_id=%s",
