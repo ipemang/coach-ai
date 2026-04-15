@@ -1105,8 +1105,17 @@ async def _handle_athlete_message(
     text: str,
     wa_msg_id: str | None,
 ) -> WhatsAppWebhookResponse:
-    # 1. Acknowledge immediately
-    ack_msg = f"Got your check-in, {athlete.display_name or 'Athlete'}! Your coach will review it shortly."
+    # 1. Acknowledge immediately — wording depends on office hours / autonomy mode (COA-54)
+    # Fetch coach row early so we can use it for both the ack and the routing decision below.
+    coach_row = await _fetch_coach_row(supabase, athlete.coach_id)
+    outside_hours = _is_outside_office_hours(coach_row)
+    if outside_hours:
+        ack_msg = (
+            f"Hey {athlete.display_name or 'there'} 👋 Got your check-in! "
+            "Your coach's AI assistant is on it and will reply in just a moment."
+        )
+    else:
+        ack_msg = f"Got your check-in, {athlete.display_name or 'Athlete'}! Your coach will review it shortly."
     await _send_whatsapp_message(request, sender, ack_msg)
 
     # 2. Store check-in
@@ -1137,8 +1146,7 @@ async def _handle_athlete_message(
     # COA-54: Office hours override — if coach is outside office hours or has autonomy
     # override enabled, force auto_send=True so the AI handles it without coach review.
     # Exception: urgent messages ALWAYS notify the coach (but also auto-reply to athlete).
-    coach_row = await _fetch_coach_row(supabase, athlete.coach_id)
-    outside_hours = _is_outside_office_hours(coach_row)
+    # Note: coach_row and outside_hours already fetched above for the ack message.
     if outside_hours and urgency != "urgent":
         if not auto_send:
             logger.info(
