@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { SuggestionQueue } from "@/components/suggestion-queue";
 import { AthleteRoster } from "@/components/athlete-roster";
 import { InviteButton } from "@/components/invite-button";
+import { OfficeHoursPanel } from "@/components/office-hours-panel";
 import type { Athlete, Suggestion } from "@/app/lib/types";
 
 async function getData() {
@@ -95,6 +96,7 @@ export default async function DashboardPage() {
           <div className="flex items-center gap-3 text-sm">
             <div className="rounded-full bg-emerald-400/10 px-3 py-1.5 text-emerald-300">● Live</div>
             <div className="rounded-full bg-white/5 px-3 py-1.5 text-slate-300">{athletes.length} athletes</div>
+            <OfficeHoursPanel />
           </div>
           <InviteButton />
         </div>
