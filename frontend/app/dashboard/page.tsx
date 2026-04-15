@@ -24,7 +24,7 @@ async function getData() {
       .select(`
         id, athlete_id, athlete_display_name, suggestion_text,
         status, coach_reply, created_at, updated_at,
-        athlete_checkins!inner(message_text)
+        athlete_checkins(message_text)
       `)
       .eq("status", "pending")
       .order("created_at", { ascending: false })
