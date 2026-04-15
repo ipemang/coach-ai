@@ -692,12 +692,7 @@ async def update_state_form(
 
         <p class="section-title" style="margin-top:16px;">Strava Integration</p>
         <div class="form-group">
-          {'<p style="color:#166534;font-size:14px;">&#10003; Strava connected'
-           + (f' (last synced: {_e(strava_last_synced[:16]) if strava_last_synced else "never"})' if strava_connected else '')
-           + '</p><a href="/dashboard/athletes/' + _e(athlete_id) + '/strava/connect' + _qs(secret) + '" class="btn btn-secondary btn-sm">Reconnect Strava</a>'
-           if strava_connected else
-           '<a href="/dashboard/athletes/' + _e(athlete_id) + '/strava/connect' + _qs(secret) + '" class="btn btn-primary btn-sm">Connect Strava</a>'
-           + '<span class="hint" style="margin-top:6px;display:block;">Links your athlete\'s Strava account for automatic activity sync.</span>'}
+          {_strava_connect_html(athlete_id, secret, strava_connected, strava_last_synced)}
         </div>
 
         {_risk_flags_html(cs)}
