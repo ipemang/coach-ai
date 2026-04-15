@@ -23,8 +23,20 @@ from app.agents.check_in import (
 )
 from app.core.config import get_settings
 from app.core.security import verify_whatsapp_signature
+from app.services.scope import DataScope, apply_scope_payload, apply_scope_query
 
 logger = logging.getLogger(__name__)
+
+
+def _get_scope() -> DataScope:
+    """Build a DataScope from the app settings singleton.
+    Settings already loads ORGANIZATION_ID and COACH_ID from Railway env vars,
+    so this always returns a configured scope in production."""
+    s = get_settings()
+    return DataScope(
+        organization_id=str(s.organization_id) if s.organization_id else None,
+        coach_id=str(s.coach_id) if s.coach_id else None,
+    )
 
 
 def _mask_phone(phone: str) -> str:
@@ -291,20 +303,26 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
     conversation_parts: list[str] = []
     try:
         suggestion_rows = await _query_rows(
-            supabase.table("suggestions")
-            .select("id, suggestion_text, coach_reply, status, created_at")
-            .eq("athlete_id", athlete.athlete_id)
-            .order("created_at", desc=True)
-            .limit(10)
+            apply_scope_query(
+                supabase.table("suggestions")
+                .select("id, suggestion_text, coach_reply, status, created_at")
+                .eq("athlete_id", athlete.athlete_id)
+                .order("created_at", desc=True)
+                .limit(10),
+                _get_scope(),
+            )
         )
         total_len = 0
         for row in suggestion_rows:
             dt = (row.get("created_at") or "")[:10]
             checkin_rows = await _query_rows(
-                supabase.table("athlete_checkins")
-                .select("message_text")
-                .eq("suggestion_id", row["id"])
-                .limit(1)
+                apply_scope_query(
+                    supabase.table("athlete_checkins")
+                    .select("message_text")
+                    .eq("suggestion_id", row["id"])
+                    .limit(1),
+                    _get_scope(),
+                )
             )
             athlete_msg = (checkin_rows[0].get("message_text") or "")[:150] if checkin_rows else ""
             coach_sent = row.get("coach_reply") or ""
@@ -328,11 +346,14 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
     memory_note = ""
     try:
         memory_rows = await _query_rows(
-            supabase.table("memory_states")
-            .select("*")
-            .eq("athlete_id", athlete.athlete_id)
-            .order("created_at", desc=True)
-            .limit(1)
+            apply_scope_query(
+                supabase.table("memory_states")
+                .select("*")
+                .eq("athlete_id", athlete.athlete_id)
+                .order("created_at", desc=True)
+                .limit(1),
+                _get_scope(),
+            )
         )
         if memory_rows:
             row = memory_rows[0]
@@ -606,14 +627,15 @@ async def _complete_onboarding(
 
     # Create athlete
     name = collected.get("name", "New Athlete")
-    result = supabase.table("athletes").insert({
+    athlete_payload = {
         "full_name": name,
         "phone_number": sender,
         "coach_id": coach_id,
         "timezone_name": collected.get("timezone") or "UTC",
         "stable_profile": stable_profile,
         "current_state": {},
-    }).execute()
+    }
+    result = supabase.table("athletes").insert(apply_scope_payload(athlete_payload, _get_scope())).execute()
 
     athlete_id = result.data[0]["id"] if result.data else None
 
@@ -795,7 +817,7 @@ async def _handle_athlete_message(
     }
     checkin_id = None
     try:
-        checkin_res = supabase.table("athlete_checkins").insert(checkin_payload).execute()
+        checkin_res = supabase.table("athlete_checkins").insert(apply_scope_payload(checkin_payload, _get_scope())).execute()
         checkin_id = checkin_res.data[0].get("id") if checkin_res.data else None
         logger.info("[webhook] Stored check-in: id=%s", checkin_id)
     except Exception as exc:
@@ -817,7 +839,7 @@ async def _handle_athlete_message(
     }
     suggestion_id = None
     try:
-        suggestion_res = supabase.table("suggestions").insert(suggestion_payload).execute()
+        suggestion_res = supabase.table("suggestions").insert(apply_scope_payload(suggestion_payload, _get_scope())).execute()
         suggestion_id = suggestion_res.data[0].get("id") if suggestion_res.data else None
         logger.info("[webhook] Stored suggestion: id=%s", suggestion_id)
     except Exception as exc:
