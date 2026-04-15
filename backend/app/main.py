@@ -127,6 +127,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://coach-ai-production-a5aa.up.railway.app",
+        "https://coach-dashboard-production-ae22.up.railway.app",
         "http://localhost:3000",
         "http://localhost:8000",
     ],
