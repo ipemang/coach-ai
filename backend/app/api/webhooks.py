@@ -283,11 +283,25 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
         elif all_flags:
             state_parts.append(f"Predictive flags: {', '.join(all_flags)}")
 
+    # COA-22: Ethical AI guardrails — non-medical, coach-first, non-diagnostic tone
+    ETHICAL_GUARDRAILS = (
+        "\n\nIMPORTANT GUARDRAILS (always follow):\n"
+        "- You are NOT a medical professional. Never diagnose injuries, interpret symptoms as "
+        "medical conditions, or suggest treatments. If an athlete mentions pain, injury, or "
+        "illness, recommend they consult a healthcare provider and flag it for the coach.\n"
+        "- All recommendations are training guidance only, not medical advice.\n"
+        "- Never override or contradict the coach's explicit instructions.\n"
+        "- If you are uncertain about an athlete's readiness or health, default to rest or "
+        "reduced load and recommend the coach reviews before proceeding.\n"
+        "- Do not share one athlete's data or progress with another athlete."
+    )
+
     base = coach_persona or (
         "You are an expert endurance sports coach assistant. "
         "Draft a concise, supportive, professional reply FROM the coach TO the athlete. "
         "Keep it under 3 sentences. Be specific and data-driven when biometric data is available."
     )
+    base = base + ETHICAL_GUARDRAILS
     prompt_parts = [base]
     if coach_rules:
         prompt_parts.append(f"\n\nCoaching methodology:\n{coach_rules}")

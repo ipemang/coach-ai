@@ -24,9 +24,60 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-DEFAULT_TRANSCRIPTION_MODEL = os.getenv("OPENAI_TRANSCRIPTION_MODEL", "whisper-1").strip() or "whisper-1"
+# ---------------------------------------------------------------------------
+# COA-32: Groq-first audio routing
+# Priority: GROQ_API_KEY → OPENAI_API_KEY → LLM_API_KEY
+# Groq supports the OpenAI Whisper API interface at its own base URL.
+# When GROQ_API_KEY is set and no OPENAI_BASE_URL override exists, we
+# automatically route transcription through Groq (whisper-large-v3) which
+# is free on their API and has no per-minute cost at our current scale.
+# ---------------------------------------------------------------------------
+
+def _resolve_audio_api_key() -> str | None:
+    """Return the best available API key for audio transcription."""
+    # Explicit OpenAI key takes priority if the user deliberately set it
+    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if openai_key:
+        return openai_key
+    # Fall back to Groq key — works with the same OpenAI-compatible interface
+    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    if groq_key:
+        return groq_key
+    # Last resort: generic LLM key
+    return os.getenv("LLM_API_KEY", "").strip() or None
+
+
+def _resolve_audio_base_url() -> str:
+    """Return the base URL for audio API calls.
+    If an explicit OPENAI_BASE_URL is set, honour it.
+    Otherwise auto-detect: use Groq endpoint when GROQ_API_KEY is available
+    (and no OPENAI_API_KEY is set), otherwise fall back to OpenAI."""
+    explicit = os.getenv("OPENAI_BASE_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    has_openai_key = bool(os.getenv("OPENAI_API_KEY", "").strip())
+    has_groq_key = bool(os.getenv("GROQ_API_KEY", "").strip())
+    if has_groq_key and not has_openai_key:
+        return "https://api.groq.com/openai/v1"
+    return "https://api.openai.com/v1"
+
+
+def _resolve_transcription_model() -> str:
+    """Whisper model name: prefer env override, then pick by provider."""
+    override = os.getenv("OPENAI_TRANSCRIPTION_MODEL", "").strip()
+    if override:
+        return override
+    # Groq uses whisper-large-v3; OpenAI uses whisper-1
+    has_openai_key = bool(os.getenv("OPENAI_API_KEY", "").strip())
+    has_groq_key = bool(os.getenv("GROQ_API_KEY", "").strip())
+    if has_groq_key and not has_openai_key:
+        return "whisper-large-v3"
+    return "whisper-1"
+
+
+DEFAULT_TRANSCRIPTION_MODEL = _resolve_transcription_model()
 DEFAULT_METADATA_MODEL = os.getenv("OPENAI_METADATA_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini")).strip() or "gpt-4o-mini"
-DEFAULT_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+DEFAULT_BASE_URL = _resolve_audio_base_url()
 DEFAULT_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "120"))
 
 
@@ -36,9 +87,9 @@ class AudioServiceError(RuntimeError):
 
 @dataclass(slots=True)
 class AudioServiceConfig:
-    api_key: str | None = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", os.getenv("LLM_API_KEY", "")).strip() or None)
-    base_url: str = field(default_factory=lambda: os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"))
-    transcription_model: str = field(default_factory=lambda: DEFAULT_TRANSCRIPTION_MODEL)
+    api_key: str | None = field(default_factory=_resolve_audio_api_key)
+    base_url: str = field(default_factory=_resolve_audio_base_url)
+    transcription_model: str = field(default_factory=_resolve_transcription_model)
     metadata_model: str = field(default_factory=lambda: DEFAULT_METADATA_MODEL)
     timeout_seconds: float = field(default_factory=lambda: DEFAULT_TIMEOUT_SECONDS)
 
