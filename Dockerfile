@@ -16,5 +16,6 @@ COPY backend/ ./backend/
 
 EXPOSE 8000
 
-# Shell form so $PORT is expanded at runtime (Railway injects PORT env var)
-CMD sh -c "cd /app/backend && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+# Railway injects PORT at runtime. startCommand in railway.json overrides this,
+# but keep as fallback for local docker run.
+CMD ["sh", "-c", "cd /app/backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT"]
