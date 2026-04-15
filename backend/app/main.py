@@ -101,13 +101,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         supabase_client = create_client(settings.supabase_url, settings.supabase_service_role_key)
     app.state.supabase_client = supabase_client
 
-    whatsapp_client = WhatsAppGraphClient(settings.whatsapp_access_token, settings.whatsapp_phone_number_id)
+    # Only initialize WhatsApp if credentials are present — app must start without them
+    whatsapp_client = None
+    whatsapp_service = None
+    if settings.whatsapp_access_token and settings.whatsapp_phone_number_id:
+        whatsapp_client = WhatsAppGraphClient(
+            settings.whatsapp_access_token, settings.whatsapp_phone_number_id
+        )
+        whatsapp_service = WhatsAppService(
+            whatsapp_client=whatsapp_client,
+            supabase_client=supabase_client,
+        )
+        whatsapp_service.scope = scope
+        logger.info("[startup] WhatsApp client initialized")
+    else:
+        logger.warning("[startup] WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID not set — WhatsApp disabled")
     app.state.whatsapp_client = whatsapp_client
-    app.state.whatsapp_service = WhatsAppService(
-        whatsapp_client=whatsapp_client,
-        supabase_client=supabase_client,
-    )
-    app.state.whatsapp_service.scope = scope
+    app.state.whatsapp_service = whatsapp_service
     yield
 
 
@@ -115,9 +125,13 @@ app = FastAPI(title="Coach.AI API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://coach-ai-production-a5aa.up.railway.app"],
+    allow_origins=[
+        "https://coach-ai-production-a5aa.up.railway.app",
+        "http://localhost:3000",
+        "http://localhost:8000",
+    ],
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Hub-Signature-256"],
 )
 
@@ -152,6 +166,12 @@ app.include_router(connect_router)
 app.include_router(onboard_router)
 app.include_router(workouts_dashboard_router)
 app.include_router(workouts_plan_router)
+
+
+@app.get("/health", tags=["health"])
+async def health_check() -> dict:
+    """Liveness probe for Railway and load balancers."""
+    return {"status": "ok", "service": "coach-ai-backend"}
 
 
 @app.get("/privacy", response_class=HTMLResponse)
