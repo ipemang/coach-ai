@@ -15,6 +15,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.agents.check_in import (
     AthleteCheckIn,
@@ -1030,6 +1031,69 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
 
 
 # ---------------------------------------------------------------------------
+# COA-54: Office hours / AI autonomy helpers
+# ---------------------------------------------------------------------------
+
+_DAY_MAP = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]  # weekday() → key
+
+
+def _is_outside_office_hours(coach_row: dict) -> bool:
+    """Return True if current time (in coach's timezone) is outside configured office hours.
+
+    office_hours format: {"mon": ["09:00", "18:00"], "fri": ["09:00", "13:00"], "timezone": "America/New_York"}
+    Days omitted from the dict = fully autonomous that day (treat as outside hours).
+    If office_hours is None/empty, always return False (no restriction configured).
+    ai_autonomy_override=True always returns True (full autonomy regardless of time).
+    """
+    if coach_row.get("ai_autonomy_override"):
+        return True
+
+    office_hours = coach_row.get("office_hours")
+    if not office_hours or not isinstance(office_hours, dict):
+        return False  # No hours configured — use normal routing
+
+    tz_name = office_hours.get("timezone", "UTC")
+    try:
+        tz = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, Exception):
+        logger.warning("[office_hours] Unknown timezone %r — defaulting to UTC", tz_name)
+        tz = ZoneInfo("UTC")
+
+    now = datetime.now(tz)
+    day_key = _DAY_MAP[now.weekday()]  # e.g. "tue"
+    hours = office_hours.get(day_key)
+
+    if not hours or len(hours) < 2:
+        # Day not configured — fully autonomous
+        return True
+
+    try:
+        start_h, start_m = [int(x) for x in hours[0].split(":")]
+        end_h, end_m = [int(x) for x in hours[1].split(":")]
+        start = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
+        end = now.replace(hour=end_h, minute=end_m, second=0, microsecond=0)
+        return not (start <= now < end)
+    except Exception as exc:
+        logger.warning("[office_hours] Could not parse hours %r: %s", hours, exc)
+        return False
+
+
+async def _fetch_coach_row(supabase: Any, coach_id: str) -> dict:
+    """Fetch coach row including office_hours + ai_autonomy_override."""
+    try:
+        rows = await _query_rows(
+            supabase.table("coaches")
+            .select("id, office_hours, ai_autonomy_override, whatsapp_number")
+            .eq("id", coach_id)
+            .limit(1)
+        )
+        return rows[0] if rows else {}
+    except Exception as exc:
+        logger.warning("[office_hours] Failed to fetch coach row for %s: %s", coach_id, exc)
+        return {}
+
+
+# ---------------------------------------------------------------------------
 # Athlete flow
 # ---------------------------------------------------------------------------
 
@@ -1069,6 +1133,19 @@ async def _handle_athlete_message(
     urgency = decision.get("urgency", "flag")
     workout_adjustment = decision.get("workout_adjustment")
     # adjustment_reason is internal only — stored in DB, never surfaced in WhatsApp
+
+    # COA-54: Office hours override — if coach is outside office hours or has autonomy
+    # override enabled, force auto_send=True so the AI handles it without coach review.
+    # Exception: urgent messages ALWAYS notify the coach (but also auto-reply to athlete).
+    coach_row = await _fetch_coach_row(supabase, athlete.coach_id)
+    outside_hours = _is_outside_office_hours(coach_row)
+    if outside_hours and urgency != "urgent":
+        if not auto_send:
+            logger.info(
+                "[office_hours] Outside coach hours — forcing auto_send=True for athlete=%s urgency=%s",
+                athlete.athlete_id, urgency,
+            )
+        auto_send = True
 
     # 4. Store suggestion (full decision JSON stored in `suggestion` JSONB field for dashboard)
     suggestion_payload = {
@@ -1131,17 +1208,23 @@ async def _handle_athlete_message(
     athlete_name = athlete.display_name or "Unknown Athlete"
 
     if urgency == "urgent":
-        # Immediate coach alert — hold athlete message until coach acts
+        # Immediate coach alert — always notify coach regardless of office hours
         if coach_wa:
+            hours_note = " (AI is in autonomous mode — reply was also sent to athlete)" if outside_hours else ""
             alert_msg = (
-                f"🚨 URGENT — {athlete_name} needs immediate attention.\n"
+                f"🚨 URGENT — {athlete_name} needs immediate attention.{hours_note}\n"
                 f"Message: \"{text[:200]}\"\n\n"
                 f"Reply to send them a message."
             )
             await _send_whatsapp_message(request, coach_wa, alert_msg)
             logger.info("[webhook] Sent URGENT coach alert for athlete=%s", athlete.athlete_id)
-        # Holding message to athlete — coach will send manually
-        logger.warning("[webhook] URGENT: holding auto-reply for athlete=%s", athlete.athlete_id)
+        # COA-54: Outside office hours → also auto-reply to athlete so they're not left waiting
+        if outside_hours and suggestion_text:
+            await _send_whatsapp_message(request, sender, suggestion_text)
+            logger.info("[webhook] URGENT outside hours — auto-replied to athlete=%s", athlete.athlete_id)
+        elif not outside_hours:
+            # Inside hours — hold for coach, as before
+            logger.warning("[webhook] URGENT: holding auto-reply for athlete=%s", athlete.athlete_id)
 
     elif auto_send:
         # Routine check-in — send AI reply directly to athlete, silent note to coach

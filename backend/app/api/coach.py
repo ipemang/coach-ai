@@ -1,11 +1,13 @@
 """Coach triage and verification API routes."""
 from __future__ import annotations
 import logging
-from typing import Any, Literal, List
+from typing import Any, Literal, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel as _BaseModel
 
 logger = logging.getLogger(__name__)
 from pydantic import BaseModel, Field
+
 from app.core.security import AuthenticatedPrincipal, require_roles, resolve_coach_scope
 from app.services.coach_workflow import CoachWorkflow, CoachDecision
 from app.services.whatsapp_service import WhatsAppService
@@ -119,3 +121,145 @@ async def list_checkins(
         logger.exception("Failed to list checkins")
         raise HTTPException(status_code=500, detail="Internal server error") from exc
     return {"checkins": rows, "count": len(rows)}
+
+
+# ---------------------------------------------------------------------------
+# COA-54: Office hours endpoints
+# ---------------------------------------------------------------------------
+
+class DayHours(_BaseModel):
+    start: str  # "09:00"
+    end: str    # "18:00"
+
+
+class OfficeHoursPayload(_BaseModel):
+    timezone: str = "America/New_York"
+    mon: Optional[list[str]] = None  # ["09:00", "18:00"] or None = autonomous
+    tue: Optional[list[str]] = None
+    wed: Optional[list[str]] = None
+    thu: Optional[list[str]] = None
+    fri: Optional[list[str]] = None
+    sat: Optional[list[str]] = None
+    sun: Optional[list[str]] = None
+    ai_autonomy_override: bool = False
+
+
+class OfficeHoursResponse(_BaseModel):
+    coach_id: str
+    office_hours: Optional[dict]
+    ai_autonomy_override: bool
+    is_currently_autonomous: bool
+
+
+@router.get("/office-hours", response_model=OfficeHoursResponse)
+async def get_office_hours(
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+):
+    """Get the coach's current office hours config and autonomy status."""
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    from datetime import datetime
+
+    supabase_client = getattr(request.app.state, "supabase_client", None)
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    scope = resolve_coach_scope(principal)
+    coach_id = str(scope.coach_id)
+
+    result = supabase_client.table("coaches").select(
+        "id, office_hours, ai_autonomy_override"
+    ).eq("id", coach_id).limit(1).execute()
+
+    row = result.data[0] if result.data else {}
+    office_hours = row.get("office_hours")
+    override = bool(row.get("ai_autonomy_override", False))
+
+    # Compute current autonomy status
+    _DAY_MAP = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    is_autonomous = override
+    if not is_autonomous and office_hours and isinstance(office_hours, dict):
+        tz_name = office_hours.get("timezone", "UTC")
+        try:
+            tz = ZoneInfo(tz_name)
+        except (ZoneInfoNotFoundError, Exception):
+            tz = ZoneInfo("UTC")
+        now = datetime.now(tz)
+        day_key = _DAY_MAP[now.weekday()]
+        hours = office_hours.get(day_key)
+        if not hours or len(hours) < 2:
+            is_autonomous = True
+        else:
+            try:
+                sh, sm = [int(x) for x in hours[0].split(":")]
+                eh, em = [int(x) for x in hours[1].split(":")]
+                start = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
+                end = now.replace(hour=eh, minute=em, second=0, microsecond=0)
+                is_autonomous = not (start <= now < end)
+            except Exception:
+                is_autonomous = False
+
+    return OfficeHoursResponse(
+        coach_id=coach_id,
+        office_hours=office_hours,
+        ai_autonomy_override=override,
+        is_currently_autonomous=is_autonomous,
+    )
+
+
+@router.patch("/office-hours")
+async def update_office_hours(
+    body: OfficeHoursPayload,
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+):
+    """Update the coach's office hours and autonomy override."""
+    supabase_client = getattr(request.app.state, "supabase_client", None)
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    scope = resolve_coach_scope(principal)
+    coach_id = str(scope.coach_id)
+
+    # Build JSONB from payload — only include days that were provided
+    days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    office_hours: dict = {"timezone": body.timezone}
+    for day in days:
+        val = getattr(body, day, None)
+        if val is not None:
+            office_hours[day] = val
+
+    try:
+        supabase_client.table("coaches").update({
+            "office_hours": office_hours,
+            "ai_autonomy_override": body.ai_autonomy_override,
+        }).eq("id", coach_id).execute()
+    except Exception as exc:
+        logger.exception("Failed to update office hours for coach %s", coach_id)
+        raise HTTPException(status_code=500, detail="Failed to save office hours") from exc
+
+    logger.info("[COA-54] Updated office hours for coach=%s override=%s", coach_id, body.ai_autonomy_override)
+    return {"status": "updated", "coach_id": coach_id, "ai_autonomy_override": body.ai_autonomy_override}
+
+
+@router.patch("/autonomy-override")
+async def toggle_autonomy_override(
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+):
+    """Quick toggle for ai_autonomy_override — flips current value."""
+    supabase_client = getattr(request.app.state, "supabase_client", None)
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    scope = resolve_coach_scope(principal)
+    coach_id = str(scope.coach_id)
+
+    result = supabase_client.table("coaches").select("ai_autonomy_override").eq("id", coach_id).limit(1).execute()
+    current = bool(result.data[0].get("ai_autonomy_override", False)) if result.data else False
+    new_value = not current
+
+    supabase_client.table("coaches").update({"ai_autonomy_override": new_value}).eq("id", coach_id).execute()
+
+    logger.info("[COA-54] Toggled autonomy override for coach=%s: %s → %s", coach_id, current, new_value)
+    return {"coach_id": coach_id, "ai_autonomy_override": new_value}
