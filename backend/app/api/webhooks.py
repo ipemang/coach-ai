@@ -176,6 +176,146 @@ async def _send_whatsapp_message(request: Request, to: str, body: str) -> None:
         logger.error("[webhook] Failed to send WhatsApp message to %s: %s", _mask_phone(to), exc)
 
 
+async def _build_training_plan_context(athlete: "AthleteRecord", supabase: Any) -> str:
+    """Return a formatted block of this week's workouts with completion status (COA-47)."""
+    from datetime import date as _date
+    today = _date.today()
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    try:
+        workout_rows = await _query_rows(
+            apply_scope_query(
+                supabase.table("workouts")
+                .select(
+                    "scheduled_date, session_type, duration_min, distance_km, "
+                    "hr_zone, target_pace, coaching_notes, status"
+                )
+                .eq("athlete_id", athlete.athlete_id)
+                .gte("scheduled_date", week_start.isoformat())
+                .lte("scheduled_date", week_end.isoformat())
+                .order("scheduled_date", desc=False),
+                _get_scope(),
+            )
+        )
+    except Exception as exc:
+        logger.warning("[webhook] Training plan context failed: %s", exc)
+        return ""
+
+    if not workout_rows:
+        return ""
+
+    lines = ["=== THIS WEEK'S TRAINING PLAN ==="]
+    total_planned_min = 0
+    total_completed_min = 0
+    for row in workout_rows:
+        try:
+            sched = _date.fromisoformat(row["scheduled_date"])
+        except (KeyError, ValueError):
+            continue
+        dow = day_names[sched.weekday()]
+        if sched < today:
+            tag = "COMPLETED" if row.get("status") == "completed" else "MISSED"
+        elif sched == today:
+            tag = "TODAY"
+        else:
+            tag = "UPCOMING"
+        dur = row.get("duration_min") or 0
+        total_planned_min += dur
+        if tag == "COMPLETED":
+            total_completed_min += dur
+        line = f"  {dow} {sched.isoformat()} [{tag}] {row.get('session_type', '?')} — {dur}min"
+        if row.get("distance_km"):
+            line += f", {row['distance_km']}km"
+        if row.get("hr_zone"):
+            line += f", Zone {row['hr_zone']}"
+        if row.get("coaching_notes"):
+            line += f" | Note: {str(row['coaching_notes'])[:80]}"
+        lines.append(line)
+    lines.append(
+        f"  Weekly load: {total_completed_min}min completed of {total_planned_min}min planned"
+    )
+    return "\n".join(lines)
+
+
+async def _build_biometric_trend(athlete: "AthleteRecord", supabase: Any) -> str:
+    """Return a 7-day HRV/readiness/sleep trend with divergence detection (COA-47)."""
+    try:
+        rows = await _query_rows(
+            apply_scope_query(
+                supabase.table("memory_states")
+                .select("created_at, state, state_type")
+                .eq("athlete_id", athlete.athlete_id)
+                .in_("state_type", ["check_in", "biometric", "daily"])
+                .order("created_at", desc=True)
+                .limit(14),
+                _get_scope(),
+            )
+        )
+    except Exception as exc:
+        logger.warning("[webhook] Biometric trend failed: %s", exc)
+        return ""
+
+    if not rows:
+        return ""
+
+    from datetime import date as _date
+    today = _date.today()
+    seen_dates: dict[str, dict] = {}
+    for row in rows:
+        dt = (row.get("created_at") or "")[:10]
+        if not dt or dt in seen_dates:
+            continue
+        state = row.get("state") or {}
+        seen_dates[dt] = state
+
+    # Build series newest-first, cap at 7 days
+    sorted_dates = sorted(seen_dates.keys(), reverse=True)[:7]
+    if not sorted_dates:
+        return ""
+
+    lines = ["=== 7-DAY BIOMETRIC TREND (newest first) ==="]
+    hrv_vals: list[float] = []
+    readiness_vals: list[float] = []
+    for dt in sorted_dates:
+        s = seen_dates[dt]
+        hrv = s.get("hrv_ms") or s.get("hrv")
+        readiness = s.get("readiness") or s.get("readiness_score")
+        sleep = s.get("sleep_hours")
+        parts = [dt]
+        if hrv is not None:
+            try:
+                hrv_vals.append(float(hrv))
+                parts.append(f"HRV={float(hrv):.0f}ms")
+            except (ValueError, TypeError):
+                pass
+        if readiness is not None:
+            try:
+                readiness_vals.append(float(readiness))
+                parts.append(f"Readiness={float(readiness):.0f}")
+            except (ValueError, TypeError):
+                pass
+        if sleep is not None:
+            try:
+                parts.append(f"Sleep={float(sleep):.1f}h")
+            except (ValueError, TypeError):
+                pass
+        lines.append("  " + " | ".join(parts))
+
+    # Divergence signal: athlete self-reports high readiness but HRV trending down
+    if len(hrv_vals) >= 3 and len(readiness_vals) >= 1:
+        recent_hrv_avg = sum(hrv_vals[:3]) / 3
+        oldest_hrv = hrv_vals[-1]
+        latest_readiness = readiness_vals[0]
+        if oldest_hrv > 0 and (oldest_hrv - recent_hrv_avg) / oldest_hrv > 0.10 and latest_readiness >= 70:
+            lines.append(
+                "  ⚠ DIVERGENCE SIGNAL: HRV declining >10% over window while self-reported "
+                "readiness is high — possible accumulating fatigue."
+            )
+
+    return "\n".join(lines)
+
+
 async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
     """Build a rich system prompt using athlete profile, current state, and coach methodology (COA-25)."""
     coach_persona = ""
@@ -283,25 +423,11 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
         elif all_flags:
             state_parts.append(f"Predictive flags: {', '.join(all_flags)}")
 
-    # COA-22: Ethical AI guardrails — non-medical, coach-first, non-diagnostic tone
-    ETHICAL_GUARDRAILS = (
-        "\n\nIMPORTANT GUARDRAILS (always follow):\n"
-        "- You are NOT a medical professional. Never diagnose injuries, interpret symptoms as "
-        "medical conditions, or suggest treatments. If an athlete mentions pain, injury, or "
-        "illness, recommend they consult a healthcare provider and flag it for the coach.\n"
-        "- All recommendations are training guidance only, not medical advice.\n"
-        "- Never override or contradict the coach's explicit instructions.\n"
-        "- If you are uncertain about an athlete's readiness or health, default to rest or "
-        "reduced load and recommend the coach reviews before proceeding.\n"
-        "- Do not share one athlete's data or progress with another athlete."
-    )
-
     base = coach_persona or (
         "You are an expert endurance sports coach assistant. "
         "Draft a concise, supportive, professional reply FROM the coach TO the athlete. "
         "Keep it under 3 sentences. Be specific and data-driven when biometric data is available."
     )
-    base = base + ETHICAL_GUARDRAILS
     prompt_parts = [base]
     if coach_rules:
         prompt_parts.append(f"\n\nCoaching methodology:\n{coach_rules}")
@@ -385,6 +511,22 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
     if memory_note:
         prompt_parts.append(f"\n\nCoach memory note:\n{memory_note}")
 
+    # COA-47: Training plan context (this week's workouts + completion)
+    try:
+        training_plan_block = await _build_training_plan_context(athlete, supabase)
+        if training_plan_block:
+            prompt_parts.append(f"\n\n{training_plan_block}")
+    except Exception as exc:
+        logger.warning("[webhook] Training plan context failed: %s", exc)
+
+    # COA-47: Biometric trend (7-day HRV/readiness/sleep + divergence detection)
+    try:
+        biometric_trend_block = await _build_biometric_trend(athlete, supabase)
+        if biometric_trend_block:
+            prompt_parts.append(f"\n\n{biometric_trend_block}")
+    except Exception as exc:
+        logger.warning("[webhook] Biometric trend context failed: %s", exc)
+
     prompt = "".join(prompt_parts)
     logger.info(
         "[webhook] Built system prompt: %d chars, %d profile fields, %d state fields",
@@ -393,23 +535,82 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
     return prompt
 
 
-async def _generate_suggestion(athlete: AthleteRecord, text: str, supabase: Any = None) -> str:
+# ---------------------------------------------------------------------------
+# COA-47: Structured AI decision engine (Poke architecture)
+# Reasoning stays internal. What's surfaced to coach/athlete is clean output only.
+# ---------------------------------------------------------------------------
+
+_AI_DECISION_SYSTEM = """\
+You are an expert endurance sports coach AI. Your job is to analyze an athlete check-in \
+and produce a structured coaching decision.
+
+You MUST respond with a valid JSON object — no prose, no markdown, just the JSON.
+
+Required fields:
+{
+  "reply": "<string — the draft WhatsApp message FROM the coach TO the athlete. \
+Warm, concise, specific. 1-3 sentences max. No coaching jargon. No reasoning shown.>",
+  "workout_adjustment": null | {
+    "session_type": "<e.g. Easy Run, Rest, Swim Threshold>",
+    "duration_min": <integer>,
+    "distance_km": <number | null>,
+    "hr_zone": <integer | null>,
+    "coaching_notes": "<very short internal note for coach dashboard, NOT sent to athlete>"
+  },
+  "adjustment_reason": "<internal rationale — never shown to athlete or coach in WhatsApp. \
+Stored in DB only. Be specific: cite the data signal that drove the decision.>",
+  "urgency": "<one of: routine | flag | urgent>",
+  "auto_send": <true | false>
+}
+
+URGENCY + AUTO-SEND RULES:
+- "routine": standard positive check-in, no concerns → auto_send: true
+- "flag": readiness/HRV concern or missed workouts → auto_send: false (coach reviews)
+- "urgent": injury mention, distress, or extreme biometric signal → auto_send: false
+
+SAFETY OVERRIDES (always apply regardless of data):
+- If urgency == "urgent" → auto_send MUST be false
+- If workout_adjustment is not null → auto_send MUST be false (coach must approve changes)
+- When in doubt → auto_send: false
+
+Keep the "reply" field as a clean, ready-to-send WhatsApp message. \
+The coach will see the draft, approve or edit it, then send. \
+Do not leak reasoning into the reply."""
+
+_AI_DECISION_FALLBACK = {
+    "reply": "Thanks for checking in — your coach will review this and get back to you shortly.",
+    "workout_adjustment": None,
+    "adjustment_reason": "AI decision failed — fallback used.",
+    "urgency": "flag",
+    "auto_send": False,
+}
+
+
+async def _generate_ai_decision(
+    athlete: AthleteRecord, text: str, supabase: Any = None
+) -> dict:
+    """COA-47: Generate a structured AI coaching decision.
+
+    Returns a dict with keys: reply, workout_adjustment, adjustment_reason, urgency, auto_send.
+    Reasoning (adjustment_reason) is NEVER included in WhatsApp messages — stored in DB only.
+    """
     settings = get_settings()
     groq_api_key = getattr(settings, "groq_api_key", None)
     if not groq_api_key:
-        logger.warning("[webhook] GROQ_API_KEY not set — returning fallback suggestion")
-        return "Coach, the athlete shared an update. Please review their check-in."
+        logger.warning("[webhook] GROQ_API_KEY not set — using fallback decision")
+        return dict(_AI_DECISION_FALLBACK)
 
     if supabase:
         system_prompt = await _build_system_prompt(athlete, supabase)
     else:
         system_prompt = (
-            f"You are an expert endurance sports coach assistant. "
-            f"Draft a concise, supportive reply FROM the coach TO {athlete.display_name or 'the athlete'}. "
-            "Keep it under 3 sentences."
+            f"You are an expert endurance sports coach AI. "
+            f"Draft a concise, supportive reply FROM the coach TO {athlete.display_name or 'the athlete'}."
         )
 
-    user_prompt = f'Athlete check-in message: "{text}"\n\nDraft a coaching reply:'
+    full_system = f"{system_prompt}\n\n{_AI_DECISION_SYSTEM}"
+    user_prompt = f'Athlete check-in message: "{text}"\n\nProduce your structured coaching decision as JSON:'
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -420,20 +621,44 @@ async def _generate_suggestion(athlete: AthleteRecord, text: str, supabase: Any 
                 },
                 json={
                     "model": "llama-3.3-70b-versatile",
+                    "response_format": {"type": "json_object"},
                     "messages": [
-                        {"role": "system", "content": system_prompt},
+                        {"role": "system", "content": full_system},
                         {"role": "user", "content": user_prompt},
                     ],
                 },
             )
             response.raise_for_status()
             data = response.json()
-            suggestion = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-            logger.info("[webhook] AI suggestion generated (%d chars)", len(suggestion))
-            return suggestion
+            raw = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            decision = json.loads(raw)
+
+            # Safety overrides — enforce regardless of what the model returned
+            if decision.get("urgency") == "urgent":
+                decision["auto_send"] = False
+            if decision.get("workout_adjustment") is not None:
+                decision["auto_send"] = False
+
+            logger.info(
+                "[webhook] AI decision: urgency=%s auto_send=%s adjustment=%s",
+                decision.get("urgency"),
+                decision.get("auto_send"),
+                "yes" if decision.get("workout_adjustment") else "no",
+            )
+            return decision
+
+    except json.JSONDecodeError as exc:
+        logger.error("[webhook] AI decision JSON parse failed: %s", exc)
+        return dict(_AI_DECISION_FALLBACK)
     except Exception as exc:
-        logger.error("[webhook] AI suggestion failed: %s", exc)
-        return "Coach, please review the new athlete check-in."
+        logger.error("[webhook] AI decision failed: %s", exc)
+        return dict(_AI_DECISION_FALLBACK)
+
+
+async def _generate_suggestion(athlete: AthleteRecord, text: str, supabase: Any = None) -> str:
+    """Backward-compatible shim — callers not yet updated to structured decisions."""
+    decision = await _generate_ai_decision(athlete, text, supabase)
+    return decision.get("reply", _AI_DECISION_FALLBACK["reply"])
 
 
 async def _download_whatsapp_audio(media_id: str) -> bytes:
@@ -837,27 +1062,58 @@ async def _handle_athlete_message(
     except Exception as exc:
         logger.error("[webhook] Failed to store check-in: %s", exc)
 
-    # 3. Generate AI suggestion
-    suggestion_text = await _generate_suggestion(athlete, text, supabase)
+    # 3. Generate structured AI decision (COA-47)
+    decision = await _generate_ai_decision(athlete, text, supabase)
+    suggestion_text = decision.get("reply", "")
+    auto_send = decision.get("auto_send", False)
+    urgency = decision.get("urgency", "flag")
+    workout_adjustment = decision.get("workout_adjustment")
+    # adjustment_reason is internal only — stored in DB, never surfaced in WhatsApp
 
-    # 4. Store suggestion
+    # 4. Store suggestion (full decision JSON stored in `suggestion` JSONB field for dashboard)
     suggestion_payload = {
         "athlete_id": athlete.athlete_id,
         "coach_id": athlete.coach_id,
         "athlete_display_name": athlete.display_name,
         "athlete_phone_number": sender,
-        "suggestion": {"reply": suggestion_text},
+        "suggestion": decision,          # full structured decision for dashboard
         "suggestion_text": suggestion_text,
         "status": "pending",
         "source": "whatsapp_checkin",
     }
     suggestion_id = None
     try:
-        suggestion_res = supabase.table("suggestions").insert(apply_scope_payload(suggestion_payload, _get_scope())).execute()
+        suggestion_res = supabase.table("suggestions").insert(
+            apply_scope_payload(suggestion_payload, _get_scope())
+        ).execute()
         suggestion_id = suggestion_res.data[0].get("id") if suggestion_res.data else None
-        logger.info("[webhook] Stored suggestion: id=%s", suggestion_id)
+        logger.info("[webhook] Stored suggestion: id=%s urgency=%s auto_send=%s", suggestion_id, urgency, auto_send)
     except Exception as exc:
         logger.error("[webhook] Failed to store suggestion: %s", exc)
+
+    # 4b. Write workout adjustment to workouts table if AI recommended one
+    if workout_adjustment and athlete.athlete_id:
+        try:
+            from datetime import date as _date
+            adj_payload = {
+                "athlete_id": athlete.athlete_id,
+                "coach_id": athlete.coach_id,
+                "scheduled_date": _date.today().isoformat(),
+                "session_type": workout_adjustment.get("session_type", ""),
+                "duration_min": workout_adjustment.get("duration_min"),
+                "distance_km": workout_adjustment.get("distance_km"),
+                "hr_zone": workout_adjustment.get("hr_zone"),
+                "coaching_notes": workout_adjustment.get("coaching_notes", ""),
+                "status": "pending",
+                "source": "ai_adjustment",
+                "suggestion_id": suggestion_id,
+            }
+            supabase.table("workouts").insert(
+                apply_scope_payload({k: v for k, v in adj_payload.items() if v is not None}, _get_scope())
+            ).execute()
+            logger.info("[webhook] Wrote AI workout adjustment for athlete=%s", athlete.athlete_id)
+        except Exception as exc:
+            logger.error("[webhook] Failed to write workout adjustment: %s", exc)
 
     # 5. Link check-in to suggestion
     if checkin_id and suggestion_id:
@@ -870,20 +1126,64 @@ async def _handle_athlete_message(
         except Exception as exc:
             logger.error("[webhook] Failed to link check-in to suggestion: %s", exc)
 
-    # 6. Notify coach
+    # 6. Route based on urgency + auto_send (Poke principle: no reasoning in WhatsApp)
     coach_wa = athlete.coach_whatsapp_number
-    if coach_wa:
-        athlete_name = athlete.display_name or "Unknown Athlete"
-        coach_notification = (
-            f"New check-in from {athlete_name}:\n"
-            f"\"{text}\"\n\n"
-            f"AI draft reply:\n{suggestion_text}\n\n"
-            f"Reply APPROVE to send this, or reply with your own message to override."
-        )
-        await _send_whatsapp_message(request, coach_wa, coach_notification)
-        logger.info("[webhook] Notified coach at %s", _mask_phone(coach_wa))
+    athlete_name = athlete.display_name or "Unknown Athlete"
+
+    if urgency == "urgent":
+        # Immediate coach alert — hold athlete message until coach acts
+        if coach_wa:
+            alert_msg = (
+                f"🚨 URGENT — {athlete_name} needs immediate attention.\n"
+                f"Message: \"{text[:200]}\"\n\n"
+                f"Reply to send them a message."
+            )
+            await _send_whatsapp_message(request, coach_wa, alert_msg)
+            logger.info("[webhook] Sent URGENT coach alert for athlete=%s", athlete.athlete_id)
+        # Holding message to athlete — coach will send manually
+        logger.warning("[webhook] URGENT: holding auto-reply for athlete=%s", athlete.athlete_id)
+
+    elif auto_send:
+        # Routine check-in — send AI reply directly to athlete, silent note to coach
+        if suggestion_text:
+            await _send_whatsapp_message(request, sender, suggestion_text)
+            logger.info("[webhook] Auto-sent AI reply to athlete=%s", athlete.athlete_id)
+        if coach_wa:
+            if workout_adjustment:
+                adj_summary = (
+                    f"{workout_adjustment.get('session_type', '')} "
+                    f"{workout_adjustment.get('duration_min', '')}min"
+                ).strip()
+                coach_note = (
+                    f"✅ Auto-sent reply to {athlete_name}.\n"
+                    f"AI adjusted today's workout: {adj_summary}\n"
+                    f"Full detail in dashboard."
+                )
+            else:
+                coach_note = f"✅ Auto-sent reply to {athlete_name} — routine check-in."
+            await _send_whatsapp_message(request, coach_wa, coach_note)
+
     else:
-        logger.warning("[webhook] No coach WhatsApp number found — skipping coach notification")
+        # Coach review required — send full draft to coach (clean, no reasoning)
+        if coach_wa:
+            if workout_adjustment:
+                adj_summary = (
+                    f"{workout_adjustment.get('session_type', '')} "
+                    f"{workout_adjustment.get('duration_min', '')}min"
+                ).strip()
+                adj_line = f"\n⚡ AI workout adjustment: {adj_summary} — see dashboard for detail."
+            else:
+                adj_line = ""
+            coach_notification = (
+                f"Check-in from {athlete_name}:\n"
+                f"\"{text[:300]}\"\n\n"
+                f"AI draft reply:\n{suggestion_text}{adj_line}\n\n"
+                f"Reply APPROVE to send, or reply with your own message to override."
+            )
+            await _send_whatsapp_message(request, coach_wa, coach_notification)
+            logger.info("[webhook] Sent coach review notification for athlete=%s", athlete.athlete_id)
+        else:
+            logger.warning("[webhook] No coach WhatsApp number found — skipping coach notification")
 
     # 7. COA-43: Persist check-in state to memory_states so future AI calls have
     # a running record of this athlete's readiness trends. Wrapped in try/except
