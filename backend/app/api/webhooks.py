@@ -1160,7 +1160,8 @@ async def _handle_athlete_message(
                     f"Full detail in dashboard."
                 )
             else:
-                coach_note = f"✅ Auto-sent reply to {athlete_name} — routine check-in."
+                ref = _suggestion_ref(suggestion_id) if suggestion_id else "????"
+                coach_note = f"✅ Auto-sent reply to {athlete_name} [#{ref}] — routine check-in."
             await _send_whatsapp_message(request, coach_wa, coach_note)
 
     else:
@@ -1174,11 +1175,13 @@ async def _handle_athlete_message(
                 adj_line = f"\n⚡ AI workout adjustment: {adj_summary} — see dashboard for detail."
             else:
                 adj_line = ""
+            ref = _suggestion_ref(suggestion_id) if suggestion_id else "????"
             coach_notification = (
-                f"Check-in from {athlete_name}:\n"
+                f"Check-in from {athlete_name} [#{ref}]:\n"
                 f"\"{text[:300]}\"\n\n"
                 f"AI draft reply:\n{suggestion_text}{adj_line}\n\n"
-                f"Reply APPROVE to send, or reply with your own message to override."
+                f"Reply \"APPROVE #{ref}\" to send, or reply with your own message to override.\n"
+                f"Reply \"QUEUE\" to see all pending."
             )
             await _send_whatsapp_message(request, coach_wa, coach_notification)
             logger.info("[webhook] Sent coach review notification for athlete=%s", athlete.athlete_id)
