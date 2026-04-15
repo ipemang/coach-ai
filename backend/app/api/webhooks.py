@@ -1258,6 +1258,11 @@ async def _handle_athlete_message(
 # Coach triage flow (FIX 3: now handled inside the single /whatsapp endpoint)
 # ---------------------------------------------------------------------------
 
+def _suggestion_ref(suggestion_id: str) -> str:
+    """Return a short 4-char hex reference from a UUID for use in WhatsApp messages."""
+    return suggestion_id.replace("-", "")[:4].lower()
+
+
 async def _handle_coach_message(
     request: Request,
     supabase: Any,
@@ -1265,41 +1270,117 @@ async def _handle_coach_message(
     sender: str,
     text: str,
 ) -> WhatsAppWebhookResponse:
-    coach_id = coach.get("id")
+    """COA-49: Handle incoming coach WhatsApp message.
 
-    # Find most recent pending suggestion for this coach
+    Supported commands:
+      APPROVE [#ref]   -- approve AI draft for most recent (or specific) pending suggestion
+      <custom text>    -- send custom reply to oldest pending athlete
+      QUEUE / STATUS   -- list all pending suggestions with ref codes
+    """
+    import re as _re
+    coach_id = coach.get("id")
+    cmd = text.strip()
+
+    # QUEUE / STATUS -- list pending suggestions
+    if cmd.upper() in ("QUEUE", "STATUS", "LIST"):
+        try:
+            all_pending = await _query_rows(
+                apply_scope_query(
+                    supabase.table("suggestions")
+                    .select("id, athlete_display_name, suggestion_text, created_at")
+                    .eq("coach_id", coach_id)
+                    .eq("status", "pending")
+                    .order("created_at", desc=False)
+                    .limit(10),
+                    _get_scope(),
+                )
+            )
+        except Exception as exc:
+            logger.error("[webhook] QUEUE fetch failed for coach %s: %s", coach_id, exc)
+            all_pending = []
+
+        if not all_pending:
+            await _send_whatsapp_message(request, sender, "\u2705 No pending check-ins right now.")
+            return WhatsAppWebhookResponse(status="no_pending_suggestion", coach_id=str(coach_id))
+
+        lines = [f"\U0001f4cb Pending ({len(all_pending)}):"]
+        for s in all_pending:
+            ref = _suggestion_ref(s["id"])
+            name = s.get("athlete_display_name") or "Unknown"
+            preview = (s.get("suggestion_text") or "")[:60]
+            dt = (s.get("created_at") or "")[:10]
+            lines.append(f"[#{ref}] {name} ({dt})\nDraft: {preview}\u2026")
+        lines.append("\nReply \"APPROVE #ref\" or \"APPROVE\" for the oldest.")
+        await _send_whatsapp_message(request, sender, "\n\n".join(lines))
+        return WhatsAppWebhookResponse(status="queue_listed", coach_id=str(coach_id))
+
+    # Parse APPROVE [#ref] or treat as custom reply
+    approve_match = _re.match(r"^APPROVE\s*#?([a-f0-9]{4})?$", cmd, _re.IGNORECASE)
+    is_approve = bool(approve_match)
+    ref_code = approve_match.group(1).lower() if (approve_match and approve_match.group(1)) else None
+
+    # Fetch pending suggestions -- oldest first so default targets oldest unhandled
     try:
-        sugg_rows = await _query_rows(
-            supabase.table("suggestions")
-            .select("*")
-            .eq("coach_id", coach_id)
-            .eq("status", "pending")
-            .order("created_at", descending=True)
-            .limit(1)
+        all_pending = await _query_rows(
+            apply_scope_query(
+                supabase.table("suggestions")
+                .select("*")
+                .eq("coach_id", coach_id)
+                .eq("status", "pending")
+                .order("created_at", desc=False)
+                .limit(20),
+                _get_scope(),
+            )
         )
     except Exception as exc:
         logger.error("[webhook] Failed to query suggestions for coach %s: %s", coach_id, exc)
-        sugg_rows = []
+        all_pending = []
 
-    if not sugg_rows:
-        logger.info("[webhook] No pending suggestions for coach %s", coach_id)
-        await _send_whatsapp_message(request, sender, "No pending athlete check-ins to review right now.")
+    if not all_pending:
+        await _send_whatsapp_message(request, sender, "No pending athlete check-ins right now.")
         return WhatsAppWebhookResponse(status="no_pending_suggestion", coach_id=str(coach_id))
 
-    suggestion = sugg_rows[0]
+    # Pick target suggestion -- by ref code or oldest
+    suggestion = None
+    if ref_code:
+        for s in all_pending:
+            if _suggestion_ref(s["id"]) == ref_code:
+                suggestion = s
+                break
+        if not suggestion:
+            await _send_whatsapp_message(
+                request, sender,
+                f"Couldn\'t find a pending check-in with ref #{ref_code}. "
+                "Reply QUEUE to see all pending."
+            )
+            return WhatsAppWebhookResponse(status="ref_not_found", coach_id=str(coach_id))
+    else:
+        suggestion = all_pending[0]
+
     athlete_phone = suggestion.get("athlete_phone_number")
     suggestion_id = suggestion.get("id")
+    athlete_name = suggestion.get("athlete_display_name") or "the athlete"
 
-    if text.strip().upper() == "APPROVE":
+    # Determine reply body
+    if is_approve:
         reply_body = suggestion.get("suggestion_text", "")
-        logger.info("[webhook] Coach approved AI suggestion for suggestion_id=%s", suggestion_id)
+        action = "approved AI draft"
+        logger.info("[webhook][COA-49] Coach APPROVED suggestion=%s athlete=%s", suggestion_id, athlete_name)
     else:
-        reply_body = text
-        logger.info("[webhook] Coach overrode suggestion with custom reply for suggestion_id=%s", suggestion_id)
+        reply_body = cmd
+        action = "sent custom reply"
+        logger.info("[webhook][COA-49] Coach CUSTOM reply for suggestion=%s athlete=%s", suggestion_id, athlete_name)
+
+    if not reply_body:
+        await _send_whatsapp_message(request, sender, "\u26a0\ufe0f No reply text found -- nothing sent.")
+        return WhatsAppWebhookResponse(status="empty_reply", coach_id=str(coach_id))
 
     # Send to athlete
     if athlete_phone:
         await _send_whatsapp_message(request, athlete_phone, reply_body)
+        logger.info("[webhook][COA-49] Reply sent to athlete at %s", _mask_phone(athlete_phone))
+    else:
+        logger.warning("[webhook][COA-49] No athlete phone for suggestion=%s -- skipping send", suggestion_id)
 
     # Update suggestion status
     try:
@@ -1310,17 +1391,22 @@ async def _handle_coach_message(
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", suggestion_id).execute()
     except Exception as exc:
-        logger.error("[webhook] Failed to update suggestion status: %s", exc)
+        logger.error("[webhook][COA-49] Failed to update suggestion status: %s", exc)
 
-    # COA-28: Send confirmation back to the coach
+    # Confirmation to coach -- include remaining queue count and next pending
     try:
-        athlete_name = suggestion.get("athlete_display_name") or "the athlete"
-        preview = reply_body[:80] + "..." if len(reply_body) > 80 else reply_body
-        confirmation = f"\u2713 Sent to {athlete_name}:\n\"{preview}\""
+        remaining = len(all_pending) - 1
+        preview = reply_body[:80] + "\u2026" if len(reply_body) > 80 else reply_body
+        queue_note = f"\n{remaining} more pending." if remaining > 0 else "\n\u2705 Queue clear."
+        confirmation = f"\u2713 {action} \u2192 {athlete_name}:\n\"{preview}\"{queue_note}"
+        if remaining > 0:
+            next_s = next((s for s in all_pending if s["id"] != suggestion_id), None)
+            if next_s:
+                next_ref = _suggestion_ref(next_s["id"])
+                next_name = next_s.get("athlete_display_name") or "Unknown"
+                confirmation += f"\nNext: {next_name} [#{next_ref}]"
         await _send_whatsapp_message(request, sender, confirmation)
-        logger.info("[webhook] Sent coach confirmation to %s", _mask_phone(sender))
     except Exception as exc:
-        logger.warning("[webhook] Failed to send coach confirmation: %s", exc)
+        logger.warning("[webhook][COA-49] Failed to send coach confirmation: %s", exc)
 
-    logger.info("[webhook] Coach reply sent to athlete at %s", _mask_phone(athlete_phone))
     return WhatsAppWebhookResponse(status="sent", coach_id=str(coach_id))
