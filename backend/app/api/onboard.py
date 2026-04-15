@@ -1016,18 +1016,20 @@ async def _finalize_onboarding(
             return [data]
         return []
 
-    # Resolve coach
-    coach_id = None
-    coach_whatsapp = None
-    try:
-        coach_rows = await _qr(supabase.table("coaches").select("id, whatsapp_number").limit(1))
-        if coach_rows:
-            coach_id = coach_rows[0].get("id")
-            coach_whatsapp = coach_rows[0].get("whatsapp_number")
-    except Exception as exc:
-        logger.warning("[onboard] Could not fetch coach: %s", exc)
+    # Resolve coach — prefer from invite token, fall back to settings
+    coach_id = token_row.get("coach_id")
+    coach_whatsapp = token_row.get("coach_whatsapp_number")
+    organization_id = token_row.get("organization_id", "1")
 
     settings = get_settings()
+    if not coach_id:
+        try:
+            coach_rows = await _qr(supabase.table("coaches").select("id, whatsapp_number").limit(1))
+            if coach_rows:
+                coach_id = coach_rows[0].get("id")
+                coach_whatsapp = coach_rows[0].get("whatsapp_number")
+        except Exception as exc:
+            logger.warning("[onboard] Could not fetch coach: %s", exc)
     if not coach_id:
         coach_id = getattr(settings, "coach_id", None)
     if not coach_whatsapp:
@@ -1078,6 +1080,7 @@ async def _finalize_onboarding(
             "full_name": name,
             "phone_number": f"web:{token_row['token']}",
             "coach_id": coach_id,
+            "organization_id": organization_id,
             "timezone_name": collected.get("timezone") or "UTC",
             "stable_profile": stable_profile,
             "current_state": {},

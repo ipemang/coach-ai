@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { SuggestionQueue } from "@/components/suggestion-queue";
 import { AthleteRoster } from "@/components/athlete-roster";
+import { InviteButton } from "@/components/invite-button";
 import type { Athlete, Suggestion } from "@/app/lib/types";
 
 async function getData() {
@@ -90,9 +91,12 @@ export default async function DashboardPage() {
           <h1 className="mt-1 text-3xl font-semibold text-white">Coach Dashboard</h1>
           <p className="mt-2 text-sm text-slate-300">Live from Supabase · {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
         </div>
-        <div className="flex items-center gap-3 text-sm">
-          <div className="rounded-full bg-emerald-400/10 px-3 py-1.5 text-emerald-300">● Live</div>
-          <div className="rounded-full bg-white/5 px-3 py-1.5 text-slate-300">{athletes.length} athletes</div>
+        <div className="flex flex-col items-end gap-3">
+          <div className="flex items-center gap-3 text-sm">
+            <div className="rounded-full bg-emerald-400/10 px-3 py-1.5 text-emerald-300">● Live</div>
+            <div className="rounded-full bg-white/5 px-3 py-1.5 text-slate-300">{athletes.length} athletes</div>
+          </div>
+          <InviteButton />
         </div>
       </header>
 
