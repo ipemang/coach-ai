@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserSupabase } from "@/app/lib/supabase";
 
@@ -741,7 +741,7 @@ function StepDone({ coachName }: { coachName: string }) {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-export default function OnboardingPage() {
+function OnboardingInner() {
   const searchParams = useSearchParams();
   const [step, setStep] = useState<Step>(1);
   const [coachName, setCoachName] = useState(searchParams.get("name") ?? "");
@@ -927,5 +927,17 @@ export default function OnboardingPage() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense fallback={
+      <div style={{ minHeight: "100vh", background: "#0f1117", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ color: "#6b7280", fontFamily: "-apple-system, sans-serif", fontSize: "14px" }}>Loading…</div>
+      </div>
+    }>
+      <OnboardingInner />
+    </Suspense>
   );
 }
