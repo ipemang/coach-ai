@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import type { Athlete, CurrentState } from "@/app/lib/types";
+import { createBrowserSupabase } from "@/app/lib/supabase";
 
 function timeAgo(iso: string | null | undefined): string {
   if (!iso) return "Never";
@@ -158,14 +159,91 @@ function AthleteCard({ athlete }: { athlete: Athlete }) {
   );
 }
 
-export function AthleteRoster({ athletes }: { athletes: Athlete[] }) {
+export function AthleteRoster({ athletes: initial }: { athletes: Athlete[] }) {
+  const [athletes, setAthletes] = useState<Athlete[]>(initial);
+  const channelRef = useRef<ReturnType<ReturnType<typeof createBrowserSupabase>["channel"]> | null>(null);
+
+  useEffect(() => {
+    const supabase = createBrowserSupabase();
+
+    // Subscribe to check-in inserts — update that athlete's pending count + last check-in
+    channelRef.current = supabase
+      .channel("athlete-roster-realtime")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "athlete_checkins" },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>;
+          const athleteId = row.athlete_id as string;
+          setAthletes((prev) =>
+            prev.map((a) =>
+              a.id === athleteId
+                ? {
+                    ...a,
+                    total_checkins: (a.total_checkins ?? 0) + 1,
+                    last_checkin_at: row.created_at as string,
+                  }
+                : a
+            )
+          );
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "suggestions", filter: "status=eq.pending" },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>;
+          const athleteId = row.athlete_id as string;
+          setAthletes((prev) =>
+            prev.map((a) =>
+              a.id === athleteId
+                ? { ...a, pending_suggestions: (a.pending_suggestions ?? 0) + 1 }
+                : a
+            )
+          );
+        }
+      )
+      .on(
+        // When a suggestion is approved/ignored, decrement pending count
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "suggestions" },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>;
+          const old = payload.old as Record<string, unknown>;
+          if (old.status === "pending" && row.status !== "pending") {
+            const athleteId = row.athlete_id as string;
+            setAthletes((prev) =>
+              prev.map((a) =>
+                a.id === athleteId
+                  ? { ...a, pending_suggestions: Math.max(0, (a.pending_suggestions ?? 1) - 1) }
+                  : a
+              )
+            );
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+    };
+  }, []);
+
   return (
     <section className="rounded-3xl border border-line bg-surface/90 p-6 shadow-panel backdrop-blur">
       <div className="flex items-center justify-between border-b border-line pb-5">
         <div>
-          <p className="text-sm font-medium text-sky-300">Athlete Roster</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-sky-300">Athlete Roster</p>
+            <span className="flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Live
+            </span>
+          </div>
           <h2 className="mt-1 text-2xl font-semibold text-white">Your athletes</h2>
-          <p className="mt-2 text-sm text-slate-300">{athletes.length} athlete{athletes.length !== 1 ? "s" : ""} · live data</p>
+          <p className="mt-2 text-sm text-slate-300">{athletes.length} athlete{athletes.length !== 1 ? "s" : ""} · updates in real time</p>
         </div>
       </div>
 

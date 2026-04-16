@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Suggestion } from "@/app/lib/types";
+import { createBrowserSupabase } from "@/app/lib/supabase";
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -93,6 +94,54 @@ export function SuggestionQueue({ suggestions: initial }: { suggestions: Suggest
   const [suggestions, setSuggestions] = useState<Suggestion[]>(initial);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pulse, setPulse] = useState(false); // brief highlight when a new suggestion arrives
+  const channelRef = useRef<ReturnType<ReturnType<typeof createBrowserSupabase>["channel"]> | null>(null);
+
+  useEffect(() => {
+    const supabase = createBrowserSupabase();
+
+    // Subscribe to new pending suggestions inserted into the table
+    channelRef.current = supabase
+      .channel("suggestion-queue-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "suggestions",
+          filter: "status=eq.pending",
+        },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>;
+          const newSuggestion: Suggestion = {
+            id: row.id as string,
+            athlete_id: row.athlete_id as string | null,
+            athlete_display_name: row.athlete_display_name as string | null,
+            suggestion_text: row.suggestion_text as string | null,
+            status: "pending",
+            coach_reply: null,
+            created_at: row.created_at as string,
+            updated_at: row.updated_at as string,
+            athlete_message: null, // checkin join not available in realtime payload
+          };
+          setSuggestions((prev) => {
+            // Deduplicate — don't add if already present (e.g. from SSR)
+            if (prev.some((s) => s.id === newSuggestion.id)) return prev;
+            return [newSuggestion, ...prev];
+          });
+          // Flash the panel to signal a new arrival
+          setPulse(true);
+          setTimeout(() => setPulse(false), 1500);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+    };
+  }, []);
 
   async function handleAction(id: string, action: "approved" | "ignored") {
     setLoadingId(id);
@@ -114,10 +163,16 @@ export function SuggestionQueue({ suggestions: initial }: { suggestions: Suggest
   }
 
   return (
-    <section className="rounded-3xl border border-line bg-surface/90 p-6 shadow-panel backdrop-blur">
+    <section className={`rounded-3xl border bg-surface/90 p-6 shadow-panel backdrop-blur transition-all duration-500 ${pulse ? "border-sky-400/60 shadow-sky-500/10" : "border-line"}`}>
       <div className="flex items-center justify-between border-b border-line pb-5">
         <div>
-          <p className="text-sm font-medium text-sky-300">Approval Queue</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-sky-300">Approval Queue</p>
+            <span className="flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Live
+            </span>
+          </div>
           <h2 className="mt-1 text-2xl font-semibold text-white">Pending AI suggestions</h2>
           <p className="mt-2 text-sm text-slate-300">
             {suggestions.length === 0
@@ -127,7 +182,7 @@ export function SuggestionQueue({ suggestions: initial }: { suggestions: Suggest
         </div>
         <div className="rounded-2xl bg-accent-soft px-4 py-3 text-right">
           <p className="text-xs uppercase tracking-[0.2em] text-sky-200/80">Queue</p>
-          <p className="mt-1 text-2xl font-bold text-white">{suggestions.length}</p>
+          <p className={`mt-1 text-2xl font-bold transition-colors duration-500 ${pulse ? "text-sky-300" : "text-white"}`}>{suggestions.length}</p>
         </div>
       </div>
 

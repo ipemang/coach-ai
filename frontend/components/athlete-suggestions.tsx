@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Suggestion } from "@/app/lib/types";
+import { createBrowserSupabase } from "@/app/lib/supabase";
 
 interface Props {
   suggestions: Suggestion[];
@@ -13,6 +14,48 @@ export function AthleteSuggestions({ suggestions: initial, athleteId }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [loading, setLoading] = useState<string | null>(null);
+  const channelRef = useRef<ReturnType<ReturnType<typeof createBrowserSupabase>["channel"]> | null>(null);
+
+  useEffect(() => {
+    const supabase = createBrowserSupabase();
+
+    channelRef.current = supabase
+      .channel(`athlete-suggestions-${athleteId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "suggestions",
+          filter: `athlete_id=eq.${athleteId}`,
+        },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>;
+          if (row.status !== "pending") return;
+          const s: Suggestion = {
+            id: row.id as string,
+            athlete_id: row.athlete_id as string | null,
+            athlete_display_name: row.athlete_display_name as string | null,
+            suggestion_text: row.suggestion_text as string | null,
+            status: "pending",
+            coach_reply: null,
+            created_at: row.created_at as string,
+            updated_at: row.updated_at as string,
+            athlete_message: null,
+          };
+          setSuggestions((prev) =>
+            prev.some((x) => x.id === s.id) ? prev : [s, ...prev]
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+    };
+  }, [athleteId]);
 
   if (suggestions.length === 0) return null;
 
