@@ -172,15 +172,12 @@ def _shell(step_id: str, token: str, body: str) -> str:
         is_active = current_section == sec["id"]
         if is_done:
             num_html = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="8" fill="#1a1a1a"/><path d="M5 8l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-            num_color = "#1a1a1a"
             label_color = "#1a1a1a"
         elif is_active:
             num_html = f'<span style="width:24px;height:24px;border-radius:50%;background:#1a1a1a;color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">{i+1}</span>'
-            num_color = "#1a1a1a"
             label_color = "#1a1a1a"
         else:
             num_html = f'<span style="width:24px;height:24px;border-radius:50%;border:1.5px solid #ccc;color:#999;display:flex;align-items:center;justify-content:center;font-size:12px;">{i+1}</span>'
-            num_color = "#999"
             label_color = "#999"
 
         sidebar_items.append(f"""
@@ -653,7 +650,7 @@ def _render_oura(token: str, collected: dict, athlete_id: str | None = None) -> 
   <span class="connect-btn connect-btn-connected">Connected</span>
 </div>"""
     else:
-        connect_section = f"""
+        connect_section = """
 <div class="connect-card">
   <div class="connect-icon">💍</div>
   <div>
@@ -740,7 +737,6 @@ def _render_strava(token: str, collected: dict, athlete_id: str | None = None) -
 
 
 def _render_notes(token: str, collected: dict) -> str:
-    name = _e(collected.get("name", "there"))
     val = _e(collected.get("notes", ""))
     return f"""
 <h1 class="step-title">Is there anything else you'd like to share?</h1>

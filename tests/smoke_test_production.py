@@ -28,7 +28,6 @@ import time
 import hmac
 import hashlib
 from datetime import datetime, timezone
-from typing import Optional
 
 try:
     import httpx
@@ -119,7 +118,7 @@ def test_webhook_verification(client: httpx.Client):
     try:
         r = client.get(f"{BASE_URL}/api/v1/webhooks/whatsapp", params=params, timeout=TIMEOUT)
         if r.status_code == 200 and challenge in r.text:
-            ok("Webhook verification", f"Challenge echoed correctly")
+            ok("Webhook verification", "Challenge echoed correctly")
         elif r.status_code == 403:
             fail("Webhook verification", "403 — verify token mismatch")
         else:
@@ -329,8 +328,10 @@ def test_webhook_idempotency(client: httpx.Client):
         r2 = client.post(f"{BASE_URL}/api/v1/webhooks/whatsapp", content=payload, headers=headers, timeout=TIMEOUT)
         if r1.status_code == 200 and r2.status_code == 200:
             d2 = {}
-            try: d2 = r2.json()
-            except: pass
+            try:
+                d2 = r2.json()
+            except Exception:
+                pass
             if d2.get("status") in ("duplicate", "ignored", "already_processed"):
                 ok("Duplicate message deduplicated", f"2nd response: status={d2.get('status')}")
             else:

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+
+# Payments router is intentionally disabled (COA-23) until auth is implemented.
+pytestmark = pytest.mark.skip(reason="Payments router disabled (COA-23) — re-enable when auth is wired")
 
 
 class FakeStripeService:

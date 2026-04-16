@@ -4,6 +4,8 @@ import hashlib
 import hmac
 import json
 
+import pytest
+
 from app.api import coach as coach_module
 from app.api import webhooks as webhooks_module
 from app.api.v1 import routes as v1_routes
@@ -12,7 +14,6 @@ from app.agents.check_in import CheckInRecommendation
 from app.core import security as security_module
 from app.main import app
 from app.services.coach_workflow import CoachTriageItem
-from app.services.scope import DataScope
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
@@ -148,41 +149,50 @@ def test_triage_endpoint(monkeypatch) -> None:
 
 def test_whatsapp_webhook_signature_verification(monkeypatch) -> None:
     secret = "whatsapp-secret"
-    body = json.dumps({"From": "+15551234567", "Body": "hello"}).encode("utf-8")
+    body = json.dumps({
+        "entry": [{
+            "changes": [{
+                "value": {
+                    "messages": [{
+                        "from": "+15551234567",
+                        "id": "wamid.test123",
+                        "type": "text",
+                        "text": {"body": "hello"}
+                    }]
+                }
+            }]
+        }]
+    }).encode("utf-8")
     signature = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
     class _FakeSettings:
         whatsapp_webhook_secret = secret
 
-    async def fake_resolve_supabase_client(_request):
-        return object()
-
-    def fake_resolve_scope(_request):
-        return DataScope(organization_id="org-1", coach_id="coach-123")
-
-    async def fake_find_athlete_by_phone(_supabase_client, _phone_number, _scope):
+    # _find_athlete_by_phone now takes (supabase_client, phone_number) — no scope arg
+    async def fake_find_athlete_by_phone(_supabase_client, _phone_number):
         return webhooks_module.AthleteRecord(
             athlete_id="athlete-123",
             phone_number="+15551234567",
             timezone_name="America/New_York",
             display_name="Sam",
-            organization_id="org-1",
             coach_id="coach-123",
         )
 
-    async def fake_route_to_checkin_logic(_request, _athlete, _message_text):
-        return "reply text"
+    # Supabase is now accessed via request.app.state — inject a no-op fake
+    async def fake_handle_athlete_message(_request, _supabase, _athlete, _sender, _text, _wa_msg_id, **_kw):
+        return webhooks_module.WhatsAppWebhookResponse(
+            status="processed", athlete_id="athlete-123", message_id="fake-id"
+        )
 
-    async def fake_resolve_whatsapp_service(_request):
-        return _FakeWhatsAppService()
+    # _find_coach_by_phone — return None so message routes to athlete path
+    async def fake_find_coach_by_phone(_supabase_client, _phone_number):
+        return None
 
     monkeypatch.setattr(webhooks_module, "get_settings", lambda: _FakeSettings())
-    monkeypatch.setattr(webhooks_module, "_resolve_supabase_client", fake_resolve_supabase_client)
-    monkeypatch.setattr(webhooks_module, "_resolve_scope", fake_resolve_scope)
     monkeypatch.setattr(webhooks_module, "_find_athlete_by_phone", fake_find_athlete_by_phone)
-    monkeypatch.setattr(webhooks_module, "_route_to_checkin_logic", fake_route_to_checkin_logic)
-    monkeypatch.setattr(webhooks_module, "_resolve_whatsapp_service", fake_resolve_whatsapp_service)
-    monkeypatch.setattr(webhooks_module, "_verify_signature", lambda _req, _body: None)
+    monkeypatch.setattr(webhooks_module, "_find_coach_by_phone", fake_find_coach_by_phone)
+    monkeypatch.setattr(webhooks_module, "_handle_athlete_message", fake_handle_athlete_message)
+    monkeypatch.setattr(webhooks_module, "verify_whatsapp_signature", lambda _req, _body: None)
 
     response = client.post(
         "/api/v1/webhooks/whatsapp",
@@ -195,7 +205,7 @@ def test_whatsapp_webhook_signature_verification(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "processed"
-    assert response.json()["reply_sent"] is True
+    assert response.json()["athlete_id"] == "athlete-123"
 
 
 class _FakeTable:
@@ -257,6 +267,7 @@ class _FakeSettings:
     supabase_service_role_key = "test-secret"
 
 
+@pytest.mark.skip(reason="Invites router disabled (COA-23) — re-enable when auth is wired")
 def test_invite_generation_and_resolution(monkeypatch) -> None:
     db = {
         "coaches": [

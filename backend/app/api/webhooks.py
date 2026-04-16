@@ -260,8 +260,6 @@ async def _build_biometric_trend(athlete: "AthleteRecord", supabase: Any) -> str
     if not rows:
         return ""
 
-    from datetime import date as _date
-    today = _date.today()
     seen_dates: dict[str, dict] = {}
     for row in rows:
         dt = (row.get("created_at") or "")[:10]
@@ -752,7 +750,7 @@ async def _extract_message(payload: dict) -> tuple[str | None, str | None, str |
 # COA-56: Workout context detection for voice notes
 # ---------------------------------------------------------------------------
 
-import re as _re
+import re as _re  # noqa: E402
 
 # Patterns that indicate the athlete is narrating in real-time during a workout.
 # Deliberately specific — present-tense, live data references only.
@@ -1060,7 +1058,6 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     raw_body = await request.body()
     logger.info("[webhook] Received POST /whatsapp, body size=%d bytes", len(raw_body))
 
-    settings = get_settings()
     try:
         verify_whatsapp_signature(request, raw_body)
     except HTTPException as exc:
@@ -1188,7 +1185,7 @@ async def _handle_athlete_message(
     outside_hours = _is_outside_office_hours(coach_row)
 
     if workout_context:
-        ack_msg = f"Got it 💪 Sending this to your coach now."
+        ack_msg = "Got it 💪 Sending this to your coach now."
     elif outside_hours:
         ack_msg = (
             f"Hey {athlete.display_name or 'there'} 👋 Got your check-in! "

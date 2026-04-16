@@ -25,7 +25,6 @@ import logging
 import os
 import sys
 from datetime import date, timedelta
-from typing import Optional
 
 import httpx
 from supabase import create_client, Client

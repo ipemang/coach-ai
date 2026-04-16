@@ -1,16 +1,16 @@
 """Coach triage and verification API routes."""
 from __future__ import annotations
-import logging
-from typing import Any, Literal, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel as _BaseModel
 
-logger = logging.getLogger(__name__)
-from pydantic import BaseModel, Field
+import logging
+from typing import Literal, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, BaseModel as _BaseModel, Field
 
 from app.core.security import AuthenticatedPrincipal, require_roles, resolve_coach_scope
-from app.services.coach_workflow import CoachWorkflow, CoachDecision
-from app.services.whatsapp_service import WhatsAppService
+from app.services.coach_workflow import CoachWorkflow
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/coach", tags=["coach"])
 
@@ -22,6 +22,10 @@ class CoachTriageResponseItem(BaseModel):
     urgency_label: str
     latest_memory_state_id: str | None = None
     latest_memory_state_at: str | None = None
+    hrv_flag: str | None = None
+    soreness_score: float | None = None
+    missed_workouts: int = 0
+    memory_state: dict = Field(default_factory=dict)
     reasons: list[str] = Field(default_factory=list)
 
 
@@ -62,6 +66,10 @@ async def get_triage_queue(
             urgency_label=item.urgency_label,
             latest_memory_state_id=item.latest_memory_state_id,
             latest_memory_state_at=item.latest_memory_state_at,
+            hrv_flag=item.hrv_flag,
+            soreness_score=item.soreness_score,
+            missed_workouts=item.missed_workouts,
+            memory_state=item.memory_state,
             reasons=item.reasons,
         )
         for item in items
@@ -281,9 +289,7 @@ async def list_checkins(
         raise HTTPException(status_code=503, detail="Database not available")
     scope = resolve_coach_scope(principal)
     try:
-        table = await supabase_client.table("athlete_checkins")
-        query = table.select("*").eq("coach_id", scope.coach_id).order("created_at", desc=True).limit(limit)
-        response = await query.execute()
+        response = supabase_client.table("athlete_checkins").select("*").eq("coach_id", scope.coach_id).order("created_at", desc=True).limit(limit).execute()
         rows = response.data if hasattr(response, "data") else []
     except Exception as exc:
         logger.exception("Failed to list checkins")

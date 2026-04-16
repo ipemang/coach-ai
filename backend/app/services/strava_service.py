@@ -18,7 +18,6 @@ import os
 import sys
 import time
 from datetime import date, datetime, timedelta, timezone as tz
-from typing import Optional
 
 import httpx
 from supabase import create_client, Client

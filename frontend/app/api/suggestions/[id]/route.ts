@@ -60,7 +60,7 @@ export async function PATCH(
         if (phone && messageText && !phone.startsWith("web:")) {
           // Call the backend send endpoint — it handles WhatsApp delivery
           const backendRes = await fetch(
-            `${BACKEND_URL}/api/v1/suggestions/${id}/send`,
+            `${BACKEND_URL}/api/v1/coach/suggestions/${id}/send`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },

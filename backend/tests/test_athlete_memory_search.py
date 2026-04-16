@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from app.services.athlete_memory_search import AthleteMemorySearchService
 from app.services.scope import DataScope
 from app.main import app
+from app.core import security as security_module
 
 
 class FakeQuery:
@@ -102,7 +103,18 @@ def test_memory_search_service_prefers_recent_relevant_memory() -> None:
     assert result[0].excerpt is not None
 
 
-def test_memory_search_endpoint_returns_ranked_context() -> None:
+def test_memory_search_endpoint_returns_ranked_context(monkeypatch) -> None:
+    async def _fake_coach_principal(_request):
+        from app.core.security import AuthenticatedPrincipal
+        return AuthenticatedPrincipal(
+            user_id="user-1",
+            email="coach@example.com",
+            roles=frozenset({"authenticated", "coach"}),
+            organization_id="org-1",
+            coach_id="coach-1",
+        )
+
+    monkeypatch.setattr(security_module, "authenticate_request", _fake_coach_principal)
     app.state.supabase_client = FakeSupabaseClient(
         [
             {

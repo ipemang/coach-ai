@@ -379,7 +379,6 @@ class WhatsAppTaskAdapter:
         readiness = cs.get("oura_readiness_score")
         hrv = cs.get("oura_avg_hrv")
         sleep = cs.get("oura_sleep_score")
-        oura_date = cs.get("oura_sync_date", "")
 
         bio_line = ""
         if readiness is not None:

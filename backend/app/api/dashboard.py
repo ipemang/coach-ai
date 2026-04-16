@@ -132,6 +132,24 @@ def _base_html(title: str, body: str, secret: str | None = None) -> str:
 </html>"""
 
 
+def _strava_connect_html(athlete_id: str, secret: str | None, connected: bool, last_synced: str | None) -> str:
+    """Render the Strava connect / disconnect widget for the athlete state form."""
+    if connected:
+        synced_label = f"Last synced: {last_synced[:10]}" if last_synced else "Connected"
+        return (
+            f'<label>Strava</label>'
+            f'<span style="color:#4ade80;font-weight:600;">✓ Connected</span>'
+            f'<span style="color:#94a3b8;font-size:12px;margin-left:8px;">({_e(synced_label)})</span>'
+        )
+    connect_url = f"/dashboard/athletes/{athlete_id}/strava/connect{_qs(secret)}"
+    return (
+        f'<label>Strava</label>'
+        f'<a href="{connect_url}" style="display:inline-block;background:#fc4c02;color:#fff;'
+        f'padding:6px 14px;border-radius:6px;font-size:13px;text-decoration:none;">'
+        f'Connect Strava</a>'
+    )
+
+
 def _risk_flags_html(cs: dict) -> str:
     """COA-38: Render predictive risk flags as colored badges."""
     flags = cs.get("predictive_flags") or []
@@ -717,8 +735,6 @@ async def update_state_form(
 
     # Pre-fill fitness metrics from current_state
     readiness = cs.get("oura_readiness_score") or cs.get("last_readiness_score") or 70
-    hrv = cs.get("oura_avg_hrv") or cs.get("last_hrv") or 55
-    sleep_score = cs.get("oura_sleep_score") or cs.get("last_sleep_score") or 75
     fitness_score = readiness  # use readiness as proxy for current_fitness_score
 
     # Parse swim CSS from stable_profile (format "M:SS" -> seconds per 100m)

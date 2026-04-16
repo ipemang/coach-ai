@@ -1,7 +1,6 @@
 """Coach.AI backend application entrypoint."""
 from __future__ import annotations
 
-import json
 import logging
 from contextlib import asynccontextmanager
 from uuid import uuid4
