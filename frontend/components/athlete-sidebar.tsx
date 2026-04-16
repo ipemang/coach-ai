@@ -67,11 +67,18 @@ export function AthleteSidebar({ athlete, readiness, hrv, sleep, ouraDate, hasOu
   const flags = (cs.predictive_flags as Array<{ label: string; priority: string }>) ?? [];
   const highFlags = flags.filter((f) => f.priority === "high");
 
+  // Extract typed values from unknown JSONB fields to avoid TypeScript ReactNode errors
+  const stravaActivityType = cs.strava_last_activity_type as string | undefined;
+  const stravaActivityDate = cs.strava_last_activity_date as string | undefined;
+  const stravaDistanceKm = cs.strava_last_distance_km as number | undefined;
+  const stravaDurationMin = cs.strava_last_duration_min as number | undefined;
+  const stravaAvgHr = cs.strava_last_avg_hr as number | undefined;
+
   return (
     <div className="space-y-4">
 
       {/* Biometrics */}
-      {hasOura && (
+      {!!hasOura && (
         <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 p-4">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-xs font-semibold text-purple-300 uppercase tracking-widest">Biometrics</h3>
@@ -107,17 +114,17 @@ export function AthleteSidebar({ athlete, readiness, hrv, sleep, ouraDate, hasOu
       )}
 
       {/* Strava last activity */}
-      {cs.strava_last_activity_type && (
+      {!!stravaActivityType && (
         <div className="rounded-2xl border border-orange-500/20 bg-orange-500/5 p-4">
           <h3 className="text-xs font-semibold text-orange-300 uppercase tracking-widest mb-3">Last Activity</h3>
           <p className="text-sm text-white font-medium">
-            {cs.strava_last_activity_type as string}
+            {stravaActivityType}
           </p>
           <div className="mt-1 flex gap-3 text-xs text-slate-400 flex-wrap">
-            {cs.strava_last_activity_date && <span>{cs.strava_last_activity_date as string}</span>}
-            {cs.strava_last_distance_km && <span>{cs.strava_last_distance_km as number}km</span>}
-            {cs.strava_last_duration_min && <span>{cs.strava_last_duration_min as number}min</span>}
-            {cs.strava_last_avg_hr && <span>avg {cs.strava_last_avg_hr as number}bpm</span>}
+            {stravaActivityDate && <span>{stravaActivityDate}</span>}
+            {stravaDistanceKm && <span>{stravaDistanceKm}km</span>}
+            {stravaDurationMin && <span>{stravaDurationMin}min</span>}
+            {stravaAvgHr && <span>avg {stravaAvgHr}bpm</span>}
           </div>
         </div>
       )}
