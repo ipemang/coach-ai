@@ -685,6 +685,11 @@ def _render_oura(token: str, collected: dict, athlete_id: str | None = None) -> 
 def _render_strava(token: str, collected: dict, athlete_id: str | None = None) -> str:
     has_strava = bool(collected.get("strava_connected"))
 
+    # Check if Strava is configured on the backend
+    from app.core.config import get_settings as _get_settings
+    _settings = _get_settings()
+    strava_configured = bool(getattr(_settings, "strava_client_id", None))
+
     if has_strava:
         strava_block = """
 <div class="connect-card">
@@ -695,8 +700,7 @@ def _render_strava(token: str, collected: dict, athlete_id: str | None = None) -
   </div>
   <span class="connect-btn connect-btn-connected">Connected</span>
 </div>"""
-    else:
-        # Generate a Strava connect link if athlete_id is known
+    elif strava_configured:
         if athlete_id:
             strava_href = f"/onboard/strava_oauth?token={_e(token)}&athlete_id={_e(athlete_id)}"
         else:
@@ -710,6 +714,19 @@ def _render_strava(token: str, collected: dict, athlete_id: str | None = None) -
   </div>
   <a href="{strava_href}" class="connect-btn connect-btn-primary">Connect</a>
 </div>"""
+    else:
+        # Strava not yet configured — show a friendly skip card
+        strava_block = """
+<div class="connect-card" style="opacity:0.6;">
+  <div class="connect-icon">🚴</div>
+  <div>
+    <div class="connect-label">Strava</div>
+    <div class="connect-sub">Your coach will send you a Strava connect link separately.</div>
+  </div>
+</div>
+<p style="font-size:13px;color:#9ca3af;margin-top:12px;">
+  You can connect Strava later — just hit Continue for now.
+</p>"""
 
     return f"""
 <h1 class="step-title">Connect Strava</h1>
@@ -914,7 +931,8 @@ async def onboard_strava_oauth(
 
     settings = get_settings()
     if not getattr(settings, "strava_client_id", None):
-        return _error_page("Strava is not configured. Ask your coach.")
+        # Strava not configured — send athlete back to the step showing a skip option
+        return RedirectResponse(f"/onboard?token={token}&step=strava", status_code=303)
 
     from urllib.parse import urlencode
     base_url = "https://coach-ai-production-a5aa.up.railway.app"
