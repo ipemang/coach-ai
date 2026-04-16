@@ -588,12 +588,13 @@ _AI_DECISION_FALLBACK = {
 
 
 async def _generate_ai_decision(
-    athlete: AthleteRecord, text: str, supabase: Any = None
+    athlete: AthleteRecord, text: str, supabase: Any = None, workout_context: bool = False
 ) -> dict:
     """COA-47: Generate a structured AI coaching decision.
 
     Returns a dict with keys: reply, workout_adjustment, adjustment_reason, urgency, auto_send.
     Reasoning (adjustment_reason) is NEVER included in WhatsApp messages — stored in DB only.
+    workout_context=True (COA-56) injects a mid-workout prompt modifier and bumps urgency floor to 'flag'.
     """
     settings = get_settings()
     groq_api_key = getattr(settings, "groq_api_key", None)
@@ -608,6 +609,17 @@ async def _generate_ai_decision(
             f"You are an expert endurance sports coach AI. "
             f"Draft a concise, supportive reply FROM the coach TO {athlete.display_name or 'the athlete'}."
         )
+
+    # COA-56: Inject workout context modifier when athlete is narrating mid-effort
+    if workout_context:
+        workout_prefix = (
+            "⚡ WORKOUT CONTEXT: The athlete sent this as a voice note during or immediately after "
+            "an active workout. They may be mid-effort. Be extremely direct and concise — 1 sentence max. "
+            "Focus on immediate actionable feedback (pace, effort, form, hydration). "
+            "Do NOT suggest stopping unless there is a safety concern. "
+            "Do NOT ask follow-up questions. Respond as if you are coaching them in real time.\n\n"
+        )
+        system_prompt = workout_prefix + system_prompt
 
     full_system = f"{system_prompt}\n\n{_AI_DECISION_SYSTEM}"
     user_prompt = f'Athlete check-in message: "{text}"\n\nProduce your structured coaching decision as JSON:'
@@ -640,11 +652,19 @@ async def _generate_ai_decision(
             if decision.get("workout_adjustment") is not None:
                 decision["auto_send"] = False
 
+            # COA-56: Workout context floor — never auto-send mid-workout voice notes,
+            # and bump routine → flag so coach always sees real-time narration.
+            if workout_context:
+                if decision.get("urgency") == "routine":
+                    decision["urgency"] = "flag"
+                decision["auto_send"] = False
+
             logger.info(
-                "[webhook] AI decision: urgency=%s auto_send=%s adjustment=%s",
+                "[webhook] AI decision: urgency=%s auto_send=%s adjustment=%s workout_context=%s",
                 decision.get("urgency"),
                 decision.get("auto_send"),
                 "yes" if decision.get("workout_adjustment") else "no",
+                workout_context,
             )
             return decision
 
@@ -656,9 +676,9 @@ async def _generate_ai_decision(
         return dict(_AI_DECISION_FALLBACK)
 
 
-async def _generate_suggestion(athlete: AthleteRecord, text: str, supabase: Any = None) -> str:
+async def _generate_suggestion(athlete: AthleteRecord, text: str, supabase: Any = None, workout_context: bool = False) -> str:
     """Backward-compatible shim — callers not yet updated to structured decisions."""
-    decision = await _generate_ai_decision(athlete, text, supabase)
+    decision = await _generate_ai_decision(athlete, text, supabase, workout_context=workout_context)
     return decision.get("reply", _AI_DECISION_FALLBACK["reply"])
 
 
@@ -681,10 +701,14 @@ async def _download_whatsapp_audio(media_id: str) -> bytes:
         return audio_resp.content
 
 
-async def _extract_message(payload: dict) -> tuple[str | None, str | None, str | None]:
-    """Extract (sender, text, wa_msg_id) from a WhatsApp webhook payload."""
+async def _extract_message(payload: dict) -> tuple[str | None, str | None, str | None, bool]:
+    """Extract (sender, text, wa_msg_id, is_voice) from a WhatsApp webhook payload.
+
+    is_voice=True when the original message was an audio/voice note (even if transcribed to text).
+    Used by COA-56 to apply workout-context detection and prompt tuning.
+    """
     if "entry" not in payload:
-        return None, None, None
+        return None, None, None, False
     for entry in payload["entry"]:
         for change in entry.get("changes", []):
             val = change.get("value", {})
@@ -694,9 +718,11 @@ async def _extract_message(payload: dict) -> tuple[str | None, str | None, str |
             sender = msg.get("from")
             wa_msg_id = msg.get("id")
             msg_type = msg.get("type")
+            is_voice = False
             if msg_type == "text":
                 text = msg.get("text", {}).get("body")
             elif msg_type in ("audio", "voice"):
+                is_voice = True
                 text = "[Audio Message]"
                 media_id = msg.get("audio", {}).get("id") or msg.get("voice", {}).get("id")
                 has_api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("LLM_API_KEY")
@@ -718,8 +744,52 @@ async def _extract_message(payload: dict) -> tuple[str | None, str | None, str |
                         text = "[Audio Message]"
             else:
                 text = None
-            return sender, text, wa_msg_id
-    return None, None, None
+            return sender, text, wa_msg_id, is_voice
+    return None, None, None, False
+
+
+# ---------------------------------------------------------------------------
+# COA-56: Workout context detection for voice notes
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+# Patterns that indicate the athlete is narrating in real-time during a workout.
+# Deliberately specific — present-tense, live data references only.
+# Generic post-workout phrases ("just finished", "I ran today") are intentionally excluded.
+_WORKOUT_CONTEXT_PATTERNS = [
+    r"\bi'?m\s+currently\b",              # "I'm currently at zone 2", "I'm currently feeling"
+    r"\bcurrently\s+(in|at|on)\s+my\b",   # "currently in my workout", "currently on my bike"
+    r"\bmy\s+(current\s+)?(heart\s+rate|hr)\s+(is|at)\b",  # "my heart rate is", "my current HR is"
+    r"\b(heart\s+rate|hr)\s+is\s+\d+\b",  # "heart rate is 165"
+    r"\bi'?m\s+at\s+(km|mile|k)\b",       # "I'm at km 15", "I'm at mile 8"
+    r"\b(pace|watts|power|cadence)\s+(is|are)\s+\d+",  # "pace is 5:30", "watts are 280"
+    r"\bfeeling\b.{0,30}\bright\s+now\b", # "feeling strong right now"
+    r"\bright\s+now\b.{0,30}\bfeeling\b", # "right now feeling"
+    r"\bi'?m\s+(in|on)\s+(my|the)\s+(run|ride|bike|swim|workout|interval|set)\b",  # "I'm on my ride"
+    r"\bzone\s+[1-7]\b.{0,40}\bright\s+now\b",  # "zone 2 right now"
+    r"\bright\s+now\b.{0,40}\bzone\s+[1-7]\b",
+    r"\bstill\s+(going|running|riding|swimming|pushing)\b",  # "still going", "still pushing"
+    r"\bkm\s+\d+\b",                      # "km 18" mid-ride GPS callout
+    r"\bmile\s+\d+\b",                    # "mile 12"
+]
+
+_WORKOUT_CONTEXT_RE = [_re.compile(p, _re.IGNORECASE) for p in _WORKOUT_CONTEXT_PATTERNS]
+
+
+def _detect_workout_context(text: str) -> bool:
+    """Return True if the transcription reads like real-time in-workout narration.
+
+    Uses present-tense, live data references — not post-workout language.
+    Requires at least one pattern match to avoid false positives.
+    """
+    if not text or text == "[Audio Message]":
+        return False
+    for pattern in _WORKOUT_CONTEXT_RE:
+        if pattern.search(text):
+            logger.info("[COA-56] Workout context detected via pattern: %s", pattern.pattern)
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -1000,7 +1070,7 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     content_type = (request.headers.get("content-type") or "").lower()
     payload = _parse_payload(raw_body, content_type)
 
-    sender, text, wa_msg_id = await _extract_message(payload)
+    sender, text, wa_msg_id, is_voice = await _extract_message(payload)
 
     if not sender or not text:
         logger.info("[webhook] No actionable message in payload — ignoring")
@@ -1017,7 +1087,7 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     # Otherwise treat as athlete
     athlete = await _find_athlete_by_phone(supabase, sender)
     if athlete:
-        return await _handle_athlete_message(request, supabase, athlete, sender, text, wa_msg_id)
+        return await _handle_athlete_message(request, supabase, athlete, sender, text, wa_msg_id, is_voice=is_voice)
 
     # Check if in progress onboarding
     onboarding = await _find_onboarding_session(supabase, sender)
@@ -1104,12 +1174,22 @@ async def _handle_athlete_message(
     sender: str,
     text: str,
     wa_msg_id: str | None,
+    is_voice: bool = False,
 ) -> WhatsAppWebhookResponse:
+    # COA-56: Detect workout context before ack — affects both message wording and AI routing
+    workout_context = is_voice and _detect_workout_context(text)
+    if workout_context:
+        logger.info("[COA-56] Workout context voice note detected for athlete=%s", athlete.athlete_id)
+
     # 1. Acknowledge immediately — wording depends on office hours / autonomy mode (COA-54)
+    # and workout context (COA-56).
     # Fetch coach row early so we can use it for both the ack and the routing decision below.
     coach_row = await _fetch_coach_row(supabase, athlete.coach_id)
     outside_hours = _is_outside_office_hours(coach_row)
-    if outside_hours:
+
+    if workout_context:
+        ack_msg = f"Got it 💪 Sending this to your coach now."
+    elif outside_hours:
         ack_msg = (
             f"Hey {athlete.display_name or 'there'} 👋 Got your check-in! "
             "Your coach's AI assistant is on it and will reply in just a moment."
@@ -1135,8 +1215,8 @@ async def _handle_athlete_message(
     except Exception as exc:
         logger.error("[webhook] Failed to store check-in: %s", exc)
 
-    # 3. Generate structured AI decision (COA-47)
-    decision = await _generate_ai_decision(athlete, text, supabase)
+    # 3. Generate structured AI decision (COA-47 + COA-56 workout context)
+    decision = await _generate_ai_decision(athlete, text, supabase, workout_context=workout_context)
     suggestion_text = decision.get("reply", "")
     auto_send = decision.get("auto_send", False)
     urgency = decision.get("urgency", "flag")
@@ -1267,15 +1347,18 @@ async def _handle_athlete_message(
             else:
                 adj_line = ""
             ref = _suggestion_ref(suggestion_id) if suggestion_id else "????"
+            # COA-56: Add 🎙️ mid-workout indicator so coach knows to respond fast
+            workout_label = "🎙️ MID-WORKOUT voice note" if workout_context else "Check-in"
             coach_notification = (
-                f"Check-in from {athlete_name} [#{ref}]:\n"
+                f"{workout_label} from {athlete_name} [#{ref}]:\n"
                 f"\"{text[:300]}\"\n\n"
                 f"AI draft reply:\n{suggestion_text}{adj_line}\n\n"
                 f"Reply \"APPROVE #{ref}\" to send, or reply with your own message to override.\n"
                 f"Reply \"QUEUE\" to see all pending."
             )
             await _send_whatsapp_message(request, coach_wa, coach_notification)
-            logger.info("[webhook] Sent coach review notification for athlete=%s", athlete.athlete_id)
+            logger.info("[webhook] Sent coach review notification for athlete=%s workout_context=%s",
+                        athlete.athlete_id, workout_context)
         else:
             logger.warning("[webhook] No coach WhatsApp number found — skipping coach notification")
 
