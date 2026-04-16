@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { Athlete, CurrentState } from "@/app/lib/types";
 
 function timeAgo(iso: string | null | undefined): string {
@@ -52,18 +53,18 @@ function AthleteCard({ athlete }: { athlete: Athlete }) {
   return (
     <article className="rounded-2xl border border-white/5 bg-white/5 p-4 transition hover:bg-white/[0.07]">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
+        <Link href={`/dashboard/athletes/${athlete.id}`} className="flex items-center gap-3 flex-1 min-w-0">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-500/20 text-sm font-bold text-sky-300">
             {initials}
           </div>
-          <div>
-            <p className="font-semibold text-white">{athlete.full_name}</p>
+          <div className="min-w-0">
+            <p className="font-semibold text-white hover:text-sky-300 transition">{athlete.full_name}</p>
             <p className="text-xs text-slate-400">
               Last check-in: {timeAgo(athlete.last_checkin_at)}
             </p>
           </div>
-        </div>
-        <div className="flex flex-col items-end gap-1">
+        </Link>
+        <div className="flex flex-col items-end gap-1 shrink-0">
           {(athlete.pending_suggestions ?? 0) > 0 && (
             <span className="rounded-full bg-amber-400/10 px-2 py-0.5 text-xs font-medium text-amber-300">
               {athlete.pending_suggestions} pending
@@ -99,13 +100,21 @@ function AthleteCard({ athlete }: { athlete: Athlete }) {
         </div>
       )}
 
-      {/* Expand for more detail */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="mt-3 text-xs text-slate-500 hover:text-sky-400 transition"
-      >
-        {expanded ? "▲ Less detail" : "▼ More detail"}
-      </button>
+      {/* Actions */}
+      <div className="mt-3 flex items-center gap-3">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-xs text-slate-500 hover:text-sky-400 transition"
+        >
+          {expanded ? "▲ Less" : "▼ More"}
+        </button>
+        <Link
+          href={`/dashboard/athletes/${athlete.id}`}
+          className="ml-auto rounded-lg bg-sky-500/15 px-3 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-500/25 transition"
+        >
+          View Profile →
+        </Link>
+      </div>
 
       {expanded && (
         <dl className="mt-3 space-y-2 border-t border-white/5 pt-3 text-sm">
