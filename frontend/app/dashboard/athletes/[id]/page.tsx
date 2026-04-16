@@ -93,6 +93,8 @@ export default async function AthleteProfilePage({
   const pending = suggestions.filter((s) => s.status === "pending");
   const cs = (athlete.current_state ?? {}) as Record<string, unknown>;
   const sp = (athlete.stable_profile ?? {}) as Record<string, unknown>;
+  const targetRace = sp.target_race as string | undefined;
+  const raceDate = sp.race_date as string | undefined;
 
   const readiness = (cs.oura_readiness_score ?? cs.last_readiness_score) as number | undefined;
   const hrv = (cs.oura_avg_hrv ?? cs.last_hrv) as number | undefined;
@@ -140,10 +142,10 @@ export default async function AthleteProfilePage({
                 {pending.length} pending
               </span>
             )}
-            {sp.target_race && (
+            {targetRace && (
               <span className="rounded-full bg-white/5 px-3 py-1.5 text-slate-300">
-                🏁 {sp.target_race as string}
-                {sp.race_date ? ` · ${sp.race_date as string}` : ""}
+                🏁 {targetRace}
+                {raceDate ? ` · ${raceDate}` : ""}
               </span>
             )}
           </div>
