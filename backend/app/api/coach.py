@@ -101,6 +101,58 @@ async def verify_suggestion(
     }
 
 
+class SendSuggestionRequest(_BaseModel):
+    phone_number: str
+    message: str
+
+
+@router.post("/suggestions/{suggestion_id}/send")
+async def send_suggestion_to_athlete(
+    suggestion_id: str,
+    body: SendSuggestionRequest,
+    request: Request,
+):
+    """Send an approved suggestion to the athlete via WhatsApp.
+
+    Called by the Next.js dashboard after the coach approves a suggestion.
+    No auth required here — request comes from the internal Next.js server, not the browser.
+    The DB update is already done by the time this is called.
+    """
+    whatsapp_client = getattr(request.app.state, "whatsapp_client", None)
+    if whatsapp_client is None:
+        raise HTTPException(status_code=503, detail="WhatsApp client not available")
+
+    phone = body.phone_number.strip()
+    message = body.message.strip()
+
+    if not phone or not message:
+        raise HTTPException(status_code=400, detail="phone_number and message are required")
+
+    if phone.startswith("web:"):
+        # Athlete onboarded via web with no real phone — can't send WhatsApp
+        return {"sent": False, "reason": "athlete has no WhatsApp number (web onboarding only)"}
+
+    try:
+        await whatsapp_client.send_message(to=phone, body=message)
+        logger.info("[send_suggestion] Sent suggestion %s to %s", suggestion_id, phone[:6] + "****")
+    except Exception as exc:
+        logger.exception("[send_suggestion] Failed to send suggestion %s", suggestion_id)
+        raise HTTPException(status_code=500, detail=f"WhatsApp send failed: {exc}") from exc
+
+    # Mark sent_at on the suggestion row
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase:
+        try:
+            from datetime import datetime, timezone
+            supabase.table("suggestions").update({
+                "sent_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", suggestion_id).execute()
+        except Exception:
+            pass  # Non-fatal
+
+    return {"sent": True, "suggestion_id": suggestion_id}
+
+
 @router.get("/checkins")
 async def list_checkins(
     request: Request,

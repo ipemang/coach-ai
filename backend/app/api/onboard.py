@@ -789,7 +789,28 @@ def _error_page(msg: str) -> HTMLResponse:
 </body></html>""", status_code=410)
 
 
-def _done_page(name: str) -> HTMLResponse:
+def _done_page(name: str, coach_whatsapp: str | None = None) -> HTMLResponse:
+    # Build the WhatsApp CTA block if we have the coach's number
+    if coach_whatsapp:
+        # Normalise to digits only for wa.me link
+        wa_digits = "".join(c for c in coach_whatsapp if c.isdigit())
+        wa_block = f"""<div style="margin-top:32px">
+<a href="https://wa.me/{_e(wa_digits)}"
+   style="display:inline-block;background:#25D366;color:#fff;font-weight:700;
+          font-size:17px;padding:16px 32px;border-radius:14px;text-decoration:none;
+          box-shadow:0 4px 16px rgba(37,211,102,0.3)">
+  💬 Message your coach on WhatsApp
+</a>
+<p style="margin-top:12px;font-size:13px;color:#999">
+  Tap to open WhatsApp and send your first check-in.
+</p>
+</div>"""
+    else:
+        wa_block = """<div style="margin-top:28px;font-size:15px;color:#666">
+Your coach will send you a WhatsApp message to get started.<br>
+Make sure to save their number when they reach out!
+</div>"""
+
     return HTMLResponse(f"""<!DOCTYPE html><html><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{{font-family:-apple-system,sans-serif;text-align:center;padding:80px 24px;color:#1a1a1a;max-width:480px;margin:0 auto}}
@@ -797,8 +818,8 @@ def _done_page(name: str) -> HTMLResponse:
 .sub{{color:#666;font-size:16px;line-height:1.6}}</style></head><body>
 <div class="icon">✅</div>
 <div class="title">You're all set, {_e(name)}!</div>
-<div class="sub">Your coach has been notified and will be in touch soon.<br><br>
-You can close this tab and check WhatsApp for your next steps.</div>
+<div class="sub">Your coach has been notified and will be in touch soon.</div>
+{wa_block}
 </body></html>""")
 
 
@@ -881,9 +902,9 @@ async def onboard_save(
     if next_step is None:
         # Final step — complete onboarding
         _save_session(supabase, token, "complete", collected)
-        await _finalize_onboarding(request, supabase, token_row, collected)
+        coach_wa = await _finalize_onboarding(request, supabase, token_row, collected)
         name = collected.get("name", "there")
-        return _done_page(name)
+        return _done_page(name, coach_whatsapp=coach_wa)
 
     _save_session(supabase, token, next_step, collected)
     return RedirectResponse(f"/onboard?token={token}&step={next_step}", status_code=303)
@@ -908,9 +929,9 @@ async def onboard_skip(
 
     if next_step is None:
         _save_session(supabase, token, "complete", collected)
-        await _finalize_onboarding(request, supabase, token_row, collected)
+        coach_wa = await _finalize_onboarding(request, supabase, token_row, collected)
         name = collected.get("name", "there")
-        return _done_page(name)
+        return _done_page(name, coach_whatsapp=coach_wa)
 
     _save_session(supabase, token, next_step, collected)
     return RedirectResponse(f"/onboard?token={token}&step={next_step}", status_code=303)
@@ -1017,7 +1038,9 @@ async def _finalize_onboarding(
     supabase: Any,
     token_row: dict,
     collected: dict,
-) -> None:
+) -> str | None:
+    """Finalize athlete onboarding. Returns the coach's WhatsApp number (if known) so
+    the done page can show a tap-to-open WhatsApp link."""
     """Create athlete row, store tokens, notify coach. Mirrors WhatsApp _complete_onboarding."""
     import inspect as _inspect
 
@@ -1188,3 +1211,4 @@ async def _finalize_onboarding(
                 logger.warning("[onboard] Could not notify coach: %s", exc)
 
     logger.info("[onboard] Web onboarding complete for athlete %s (%s)", athlete_id, name)
+    return coach_whatsapp  # Passed back so done page can show tap-to-open link
