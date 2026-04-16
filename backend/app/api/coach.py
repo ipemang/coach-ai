@@ -153,6 +153,122 @@ async def send_suggestion_to_athlete(
     return {"sent": True, "suggestion_id": suggestion_id}
 
 
+# ---------------------------------------------------------------------------
+# COA-57: Manual Oura + Strava sync endpoints
+# Called by the dashboard "Sync now" buttons on the athlete profile sidebar.
+# ---------------------------------------------------------------------------
+
+@router.post("/athletes/{athlete_id}/sync-oura")
+async def sync_oura_for_athlete(
+    athlete_id: str,
+    request: Request,
+):
+    """Fetch today's (or yesterday's) Oura data for a specific athlete and
+    write it into athletes.current_state. Returns the updated biometric fields."""
+    from datetime import date, timedelta
+    from app.services.oura_service import fetch_oura_daily, _merge_current_state
+
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    # Fetch Oura token for this athlete
+    try:
+        token_rows = supabase.table("oura_tokens").select("access_token").eq("athlete_id", athlete_id).execute()
+        if not token_rows.data:
+            raise HTTPException(status_code=404, detail="No Oura token found for this athlete")
+        access_token = token_rows.data[0]["access_token"]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not fetch Oura token: {exc}") from exc
+
+    # Try today first, fall back to yesterday if no data
+    today = date.today()
+    oura_data = None
+    for target in [today, today - timedelta(days=1)]:
+        try:
+            data = await fetch_oura_daily(access_token, target)
+            if data.get("oura_readiness_score") is not None:
+                oura_data = data
+                break
+            oura_data = data  # keep even if None scores — at least has sync_date
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail=f"Oura token rejected: {exc}") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Oura API error: {exc}") from exc
+
+    # Merge into current_state
+    try:
+        athlete_rows = supabase.table("athletes").select("current_state").eq("id", athlete_id).execute()
+        existing = (athlete_rows.data[0].get("current_state") or {}) if athlete_rows.data else {}
+        merged = _merge_current_state(existing, oura_data)
+        supabase.table("athletes").update({"current_state": merged}).eq("id", athlete_id).execute()
+        supabase.table("oura_tokens").update({
+            "last_synced_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+        }).eq("athlete_id", athlete_id).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not save Oura data: {exc}") from exc
+
+    logger.info("[sync-oura] Synced athlete %s: %s", athlete_id, oura_data)
+    return {"ok": True, "athlete_id": athlete_id, "oura": oura_data}
+
+
+@router.post("/athletes/{athlete_id}/sync-strava")
+async def sync_strava_for_athlete(
+    athlete_id: str,
+    request: Request,
+):
+    """Fetch recent Strava activities for a specific athlete and write into
+    athletes.current_state. Returns the updated strava fields."""
+    from app.services.strava_service import fetch_strava_weekly, _refresh_token_if_needed
+    import httpx
+
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    # Fetch Strava tokens
+    try:
+        token_rows = supabase.table("strava_tokens").select("*").eq("athlete_id", athlete_id).execute()
+        if not token_rows.data:
+            raise HTTPException(status_code=404, detail="No Strava token found for this athlete")
+        token_row = token_rows.data[0]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not fetch Strava token: {exc}") from exc
+
+    # Refresh token if needed
+    try:
+        async with httpx.AsyncClient() as client:
+            access_token = await _refresh_token_if_needed(client, supabase, athlete_id, token_row)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=f"Strava token rejected: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Strava token refresh failed: {exc}") from exc
+
+    # Fetch activities
+    try:
+        strava_data = await fetch_strava_weekly(access_token)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=f"Strava API rejected: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Strava API error: {exc}") from exc
+
+    # Merge into current_state
+    try:
+        athlete_rows = supabase.table("athletes").select("current_state").eq("id", athlete_id).execute()
+        existing = (athlete_rows.data[0].get("current_state") or {}) if athlete_rows.data else {}
+        merged = {**existing, **strava_data}
+        supabase.table("athletes").update({"current_state": merged}).eq("id", athlete_id).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not save Strava data: {exc}") from exc
+
+    logger.info("[sync-strava] Synced athlete %s: %s", athlete_id, strava_data)
+    return {"ok": True, "athlete_id": athlete_id, "strava": strava_data}
+
+
 @router.get("/checkins")
 async def list_checkins(
     request: Request,

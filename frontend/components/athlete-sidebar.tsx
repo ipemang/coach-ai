@@ -12,9 +12,65 @@ interface Props {
   hasOura: boolean;
 }
 
-export function AthleteSidebar({ athlete, readiness, hrv, sleep, ouraDate, hasOura }: Props) {
+export function AthleteSidebar({ athlete, readiness: initialReadiness, hrv: initialHrv, sleep: initialSleep, ouraDate: initialOuraDate, hasOura: initialHasOura }: Props) {
   const cs = (athlete.current_state ?? {}) as Record<string, unknown>;
   const sp = (athlete.stable_profile ?? {}) as Record<string, unknown>;
+
+  // Local state for biometrics so sync updates reflect immediately without a page reload
+  const [readiness, setReadiness] = useState(initialReadiness);
+  const [hrv, setHrv] = useState(initialHrv);
+  const [sleep, setSleep] = useState(initialSleep);
+  const [ouraDate, setOuraDate] = useState(initialOuraDate);
+  const [hasOura, setHasOura] = useState(initialHasOura);
+
+  // Strava local state
+  const [stravaType, setStravaType] = useState(cs.strava_last_activity_type as string | undefined);
+  const [stravaDate, setStravaDate] = useState(cs.strava_last_activity_date as string | undefined);
+  const [stravaKm, setStravaKm] = useState(cs.strava_last_distance_km as number | undefined);
+  const [stravaDur, setStravaDur] = useState(cs.strava_last_duration_min as number | undefined);
+  const [stravaHr, setStravaHr] = useState(cs.strava_last_avg_hr as number | undefined);
+
+  const [syncing, setSyncing] = useState<"oura" | "strava" | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncSuccess, setSyncSuccess] = useState<"oura" | "strava" | null>(null);
+
+  async function syncProvider(provider: "oura" | "strava") {
+    setSyncing(provider);
+    setSyncError(null);
+    setSyncSuccess(null);
+    try {
+      const res = await fetch(`/api/athletes/${athlete.id}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSyncError(data.error ?? "Sync failed");
+        return;
+      }
+      if (provider === "oura" && data.oura) {
+        const o = data.oura;
+        if (o.oura_readiness_score != null) setReadiness(o.oura_readiness_score);
+        if (o.oura_avg_hrv != null) setHrv(o.oura_avg_hrv);
+        if (o.oura_sleep_score != null) setSleep(o.oura_sleep_score);
+        if (o.oura_sync_date) setOuraDate(o.oura_sync_date);
+        setHasOura(true);
+      }
+      if (provider === "strava" && data.strava) {
+        const s = data.strava;
+        if (s.strava_last_activity_type) setStravaType(s.strava_last_activity_type);
+        if (s.strava_last_activity_date) setStravaDate(s.strava_last_activity_date);
+        if (s.strava_last_distance_km != null) setStravaKm(s.strava_last_distance_km);
+        if (s.strava_last_duration_min != null) setStravaDur(s.strava_last_duration_min);
+        if (s.strava_last_avg_hr != null) setStravaHr(s.strava_last_avg_hr);
+      }
+      setSyncSuccess(provider);
+      setTimeout(() => setSyncSuccess(null), 3000);
+    } finally {
+      setSyncing(null);
+    }
+  }
 
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileForm, setProfileForm] = useState({
@@ -67,22 +123,31 @@ export function AthleteSidebar({ athlete, readiness, hrv, sleep, ouraDate, hasOu
   const flags = (cs.predictive_flags as Array<{ label: string; priority: string }>) ?? [];
   const highFlags = flags.filter((f) => f.priority === "high");
 
-  // Extract typed values from unknown JSONB fields to avoid TypeScript ReactNode errors
-  const stravaActivityType = cs.strava_last_activity_type as string | undefined;
-  const stravaActivityDate = cs.strava_last_activity_date as string | undefined;
-  const stravaDistanceKm = cs.strava_last_distance_km as number | undefined;
-  const stravaDurationMin = cs.strava_last_duration_min as number | undefined;
-  const stravaAvgHr = cs.strava_last_avg_hr as number | undefined;
-
   return (
     <div className="space-y-4">
 
-      {/* Biometrics */}
+      {/* Sync error */}
+      {syncError && (
+        <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+          ⚠ Sync failed: {syncError}
+        </div>
+      )}
+
+      {/* Biometrics — show panel if athlete has Oura token (even without data yet) */}
       {!!hasOura && (
         <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 p-4">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-xs font-semibold text-purple-300 uppercase tracking-widest">Biometrics</h3>
-            {ouraDate && <span className="text-xs text-slate-500">Oura · {ouraDate}</span>}
+            <div className="flex items-center gap-2">
+              {ouraDate && <span className="text-xs text-slate-500">Oura · {ouraDate}</span>}
+              <button
+                onClick={() => syncProvider("oura")}
+                disabled={syncing === "oura"}
+                className="rounded-lg bg-purple-500/15 px-2 py-1 text-[10px] font-medium text-purple-300 hover:bg-purple-500/25 disabled:opacity-40 transition"
+              >
+                {syncing === "oura" ? "Syncing…" : syncSuccess === "oura" ? "✓ Synced" : "Sync"}
+              </button>
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             {readiness !== undefined && (
@@ -104,6 +169,9 @@ export function AthleteSidebar({ athlete, readiness, hrv, sleep, ouraDate, hasOu
                 color={sleep >= 70 ? "text-emerald-300" : "text-amber-300"}
               />
             )}
+            {readiness === undefined && hrv === undefined && sleep === undefined && (
+              <p className="col-span-3 text-xs text-slate-500 italic">No Oura data yet — hit Sync to fetch.</p>
+            )}
           </div>
           {highFlags.length > 0 && (
             <div className="mt-3 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2">
@@ -114,17 +182,24 @@ export function AthleteSidebar({ athlete, readiness, hrv, sleep, ouraDate, hasOu
       )}
 
       {/* Strava last activity */}
-      {!!stravaActivityType && (
+      {!!stravaType && (
         <div className="rounded-2xl border border-orange-500/20 bg-orange-500/5 p-4">
-          <h3 className="text-xs font-semibold text-orange-300 uppercase tracking-widest mb-3">Last Activity</h3>
-          <p className="text-sm text-white font-medium">
-            {stravaActivityType}
-          </p>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-orange-300 uppercase tracking-widest">Last Activity</h3>
+            <button
+              onClick={() => syncProvider("strava")}
+              disabled={syncing === "strava"}
+              className="rounded-lg bg-orange-500/15 px-2 py-1 text-[10px] font-medium text-orange-300 hover:bg-orange-500/25 disabled:opacity-40 transition"
+            >
+              {syncing === "strava" ? "Syncing…" : syncSuccess === "strava" ? "✓ Synced" : "Sync"}
+            </button>
+          </div>
+          <p className="text-sm text-white font-medium">{stravaType}</p>
           <div className="mt-1 flex gap-3 text-xs text-slate-400 flex-wrap">
-            {stravaActivityDate && <span>{stravaActivityDate}</span>}
-            {stravaDistanceKm && <span>{stravaDistanceKm}km</span>}
-            {stravaDurationMin && <span>{stravaDurationMin}min</span>}
-            {stravaAvgHr && <span>avg {stravaAvgHr}bpm</span>}
+            {stravaDate && <span>{stravaDate}</span>}
+            {stravaKm != null && <span>{stravaKm}km</span>}
+            {stravaDur != null && <span>{stravaDur}min</span>}
+            {stravaHr != null && <span>avg {stravaHr}bpm</span>}
           </div>
         </div>
       )}
