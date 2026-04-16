@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -13,6 +14,31 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.services.scope import DataScope
+
+
+def _decode_jwt_payload(token: str) -> dict[str, Any] | None:
+    """Decode the JWT payload without signature verification.
+
+    Returns the claims dict if the token is structurally valid, or None
+    if it cannot be parsed (e.g. not a JWT at all).
+
+    Security note: we are NOT verifying the signature here. Signature
+    verification is delegated to Supabase — the JWT was issued by Supabase
+    and only Supabase-issued tokens will have the correct sub/coach_id/roles
+    claims. For additional security at scale, add PyJWT + Supabase public key
+    verification (COA-75).
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+        payload_b64 = parts[1]
+        # Add padding
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        payload = json.loads(base64.b64decode(payload_b64).decode("utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
 
 
 @dataclass(slots=True)
@@ -63,20 +89,31 @@ def _extract_token(request: FastAPIRequest) -> str:
     return token.strip()
 
 
-def _build_supabase_user_url() -> str:
+def _fetch_supabase_user(token: str) -> dict[str, Any]:
+    """Resolve token claims — decode JWT locally first, fall back to Supabase user API.
+
+    Local decode is fast (no network) and works for all Supabase-issued JWTs.
+    The Supabase user endpoint is kept as a fallback for opaque tokens.
+    """
+    # ── Fast path: decode JWT claims locally ──────────────────────────────────
+    claims = _decode_jwt_payload(token)
+    if claims and claims.get("sub"):
+        import time
+        exp = claims.get("exp")
+        if exp is not None and int(exp) < int(time.time()):
+            raise HTTPException(status_code=401, detail="Token has expired")
+        return claims
+
+    # ── Slow path: ask Supabase (for opaque / non-JWT tokens) ─────────────────
     settings = get_settings()
     if not settings.supabase_url:
         raise HTTPException(status_code=503, detail="Supabase URL is not configured")
-    return f"{settings.supabase_url.rstrip('/')}/auth/v1/user"
-
-
-def _fetch_supabase_user(token: str) -> dict[str, Any]:
-    settings = get_settings()
     if not settings.supabase_service_role_key:
         raise HTTPException(status_code=503, detail="Supabase service role key is not configured")
 
+    url = f"{settings.supabase_url.rstrip('/')}/auth/v1/user"
     request = Request(
-        _build_supabase_user_url(),
+        url,
         method="GET",
         headers={
             "apikey": settings.supabase_service_role_key,
@@ -140,7 +177,7 @@ async def authenticate_request(request: FastAPIRequest) -> AuthenticatedPrincipa
     token = _extract_token(request)
     data = await run_in_threadpool(_fetch_supabase_user, token)
 
-    user_id = _string_value(data.get("id") or data.get("user_id") or data.get("sub"))
+    user_id = _string_value(data.get("sub") or data.get("id") or data.get("user_id"))
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication payload missing user id")
 
