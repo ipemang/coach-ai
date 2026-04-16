@@ -109,6 +109,10 @@ class MethodologyExtractionResult:
     status: str = "complete"
     warnings: list[str] = field(default_factory=list)
     missing_context: list[str] = field(default_factory=list)
+    # COA-71: token telemetry — populated on successful LLM calls, 0 on fallback
+    input_tokens: int = 0
+    output_tokens: int = 0
+    latency_ms: int = 0
 
 
 class MethodologyExtractor:
@@ -148,8 +152,8 @@ class MethodologyExtractor:
 
         try:
             user_prompt = self.build_user_prompt(request)
-            raw = self.llm_client.chat_completions(system=SYSTEM_PROMPT, user=user_prompt)
-            playbook = self._parse_json(raw)
+            llm_response = self.llm_client.chat_completions(system=SYSTEM_PROMPT, user=user_prompt)
+            playbook = self._parse_json(llm_response.content)
         except LLMClientError as exc:
             return self._build_fallback_result(
                 request=request,
@@ -170,11 +174,14 @@ class MethodologyExtractor:
         return MethodologyExtractionResult(
             playbook=playbook,
             provider=self.llm_client.config.provider,
-            model=self.llm_client.config.model,
+            model=llm_response.model,
             extracted_at=extracted_at,
             status="complete" if not missing_context else "incomplete",
             warnings=self._missing_context_warning(missing_context),
             missing_context=missing_context,
+            input_tokens=llm_response.input_tokens,
+            output_tokens=llm_response.output_tokens,
+            latency_ms=llm_response.latency_ms,
         )
 
     def _build_fallback_result(

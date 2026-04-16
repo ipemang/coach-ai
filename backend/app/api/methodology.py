@@ -11,6 +11,8 @@ from ..core.security import AuthenticatedPrincipal, require_roles, resolve_coach
 from ..core.config import get_settings
 from ..services.methodology_extractor import persist_methodology_extraction
 from ..services.methodology_extractor import MethodologyExtractionRequest, MethodologyExtractor
+from ..services.usage_logger import UsageLogger
+from ..services.llm_client import LLMResponse
 
 
 router = APIRouter()
@@ -75,6 +77,26 @@ def extract_methodology(
 
     try:
         result = extractor.extract(extraction_request)
+
+        # COA-71: passive token logging — fire-and-forget, non-fatal
+        if result.input_tokens or result.output_tokens:
+            supabase = getattr(request.app.state, "supabase_client", None)
+            if supabase:
+                UsageLogger.log_sync(
+                    supabase=supabase,
+                    response=LLMResponse(
+                        content="",  # not stored
+                        input_tokens=result.input_tokens,
+                        output_tokens=result.output_tokens,
+                        model=result.model,
+                        latency_ms=result.latency_ms,
+                    ),
+                    event_type="analysis",
+                    coach_id=payload.coach_id or getattr(principal, "coach_id", None),
+                    endpoint="/api/v1/methodology/extract-methodology",
+                    metadata={"sport": payload.sport, "event": payload.event},
+                )
+
         combined_transcript = extraction_request.combined_transcript()
         if payload.coach_id and combined_transcript:
             scope = resolve_coach_scope(

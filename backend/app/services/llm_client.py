@@ -1,9 +1,16 @@
-"""LLM client abstraction with provider switching via environment variables."""
+"""LLM client abstraction with provider switching via environment variables.
+
+COA-71: chat_completions now returns an LLMResponse dataclass that includes
+token usage alongside the content string. All existing callers that do
+`result = client.chat_completions(...)` and use `result` as a string will
+break — use `result.content` instead. A `chat` alias is provided for brevity.
+"""
 
 from __future__ import annotations
 
 import json
 import os
+import time
 
 from app.core.config import get_settings
 from dataclasses import dataclass, field
@@ -42,6 +49,28 @@ class LLMConfig:
         return os.getenv("LLM_BASE_URL_FALLBACK", "https://api.openai.com/v1").rstrip("/")
 
 
+@dataclass(slots=True)
+class LLMResponse:
+    """Returned by every LLMClient call.
+
+    Attributes:
+        content:       The model's text output.
+        input_tokens:  Prompt token count (from API usage field).
+        output_tokens: Completion token count.
+        model:         Model name echo'd from the response (or config fallback).
+        latency_ms:    Wall-clock time for the HTTP round-trip in milliseconds.
+    """
+    content: str
+    input_tokens: int
+    output_tokens: int
+    model: str
+    latency_ms: int
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+
 class LLMClientError(RuntimeError):
     pass
 
@@ -50,11 +79,16 @@ class LLMClient:
     def __init__(self, config: LLMConfig | None = None) -> None:
         self.config = config or LLMConfig()
 
-    def chat_completions(self, *, system: str, user: str) -> str:
+    def chat_completions(self, *, system: str, user: str) -> LLMResponse:
+        """Call the LLM and return an LLMResponse with content + token counts.
+
+        Raises LLMClientError on any failure.
+        """
         api_key = self.config.resolved_api_key()
         if not api_key:
             raise LLMClientError(
-                f"Missing API key for provider '{self.config.provider}'. Set GROQ_API_KEY or OPENAI_API_KEY (or LLM_API_KEY)."
+                f"Missing API key for provider '{self.config.provider}'. "
+                "Set GROQ_API_KEY or OPENAI_API_KEY (or LLM_API_KEY)."
             )
 
         url = f"{self.config.resolved_base_url()}/chat/completions"
@@ -77,14 +111,19 @@ class LLMClient:
             method="POST",
         )
 
+        t0 = time.monotonic()
         try:
             with urlopen(request, timeout=self.config.timeout_seconds) as response:
                 response_body = response.read().decode("utf-8")
         except HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace")
-            raise LLMClientError(f"LLM request failed: {exc.code} {exc.reason}: {error_body}") from exc
+            raise LLMClientError(
+                f"LLM request failed: {exc.code} {exc.reason}: {error_body}"
+            ) from exc
         except URLError as exc:
             raise LLMClientError(f"LLM request failed: {exc.reason}") from exc
+        finally:
+            latency_ms = int((time.monotonic() - t0) * 1000)
 
         try:
             data = json.loads(response_body)
@@ -100,7 +139,22 @@ class LLMClient:
         if not isinstance(content, str) or not content.strip():
             raise LLMClientError("LLM response did not contain message content")
 
-        return content
+        # Extract token counts — present in all OpenAI-compatible APIs
+        usage = data.get("usage") or {}
+        input_tokens = int(usage.get("prompt_tokens", 0))
+        output_tokens = int(usage.get("completion_tokens", 0))
+        model_echo = data.get("model", self.config.model)
+
+        return LLMResponse(
+            content=content,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model=model_echo,
+            latency_ms=latency_ms,
+        )
+
+    # Convenience alias
+    chat = chat_completions
 
 
-__all__ = ["LLMClient", "LLMClientError", "LLMConfig"]
+__all__ = ["LLMClient", "LLMClientError", "LLMConfig", "LLMResponse"]
