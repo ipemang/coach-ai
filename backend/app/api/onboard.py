@@ -1059,18 +1059,30 @@ async def _finalize_onboarding(
     organization_id = token_row.get("organization_id", "1")
 
     settings = get_settings()
-    if not coach_id:
-        try:
+
+    # Always look up the coach row when we have a coach_id so we get the
+    # latest whatsapp_number. If no coach_id on the token, find the first coach.
+    try:
+        if coach_id:
+            coach_rows = await _qr(supabase.table("coaches").select("id, whatsapp_number").eq("id", coach_id).limit(1))
+        else:
             coach_rows = await _qr(supabase.table("coaches").select("id, whatsapp_number").limit(1))
-            if coach_rows:
+        if coach_rows:
+            if not coach_id:
                 coach_id = coach_rows[0].get("id")
-                coach_whatsapp = coach_rows[0].get("whatsapp_number")
-        except Exception as exc:
-            logger.warning("[onboard] Could not fetch coach: %s", exc)
+            # whatsapp_number takes priority over anything on the token
+            db_whatsapp = coach_rows[0].get("whatsapp_number")
+            if db_whatsapp:
+                coach_whatsapp = db_whatsapp
+    except Exception as exc:
+        logger.warning("[onboard] Could not fetch coach whatsapp: %s", exc)
+
     if not coach_id:
         coach_id = getattr(settings, "coach_id", None)
     if not coach_whatsapp:
         coach_whatsapp = getattr(settings, "coach_whatsapp_number", None)
+    # Never fall back to the coach's personal phone_number — that's not the
+    # WhatsApp Business number athletes should be texting.
 
     # Build stable_profile
     stable_profile: dict[str, Any] = {}
