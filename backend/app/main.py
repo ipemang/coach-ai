@@ -19,6 +19,7 @@ from .api.webhooks import router as webhooks_router
 from .api.connect import router as connect_router
 from .api.onboard import router as onboard_router
 from .api.dashboard import router as dashboard_router
+from .api.athlete_portal import router as athlete_portal_router
 from .api.workouts import dashboard_router as workouts_dashboard_router
 from .api.workouts import plan_router as workouts_plan_router
 from .services import DataScope, get_settings
@@ -164,6 +165,7 @@ app.include_router(coach_router)
 app.include_router(dashboard_router)
 app.include_router(connect_router)
 app.include_router(onboard_router)
+app.include_router(athlete_portal_router)
 app.include_router(workouts_dashboard_router)
 app.include_router(workouts_plan_router)
 
