@@ -46,6 +46,14 @@ export interface Athlete {
   last_checkin_at?: string | null;
 }
 
+export interface PlanModificationPayload {
+  warranted: boolean;
+  workout_id?: string | null;
+  change_type: string;
+  change_value: string;
+  reasoning: string;
+}
+
 export interface Suggestion {
   id: string;
   athlete_id: string | null;
@@ -55,7 +63,20 @@ export interface Suggestion {
   coach_reply: string | null;
   created_at: string;
   updated_at: string;
+  // Raw incoming message from athlete
   athlete_message?: string | null;
+  // COA-64: AI pipeline fields
+  message_draft?: string | null;           // raw AI draft before persona
+  message_personalized?: string | null;    // after Interaction Agent
+  message_class?: string | null;           // check_in | plan_question | flag | noise
+  classification_confidence?: number | null;
+  message_reasoning?: string | null;       // why the AI drafted this response
+  plan_modification_payload?: PlanModificationPayload | null;
+  plan_modification_status?: "pending" | "approved" | "rejected" | null;
+  // COA-65: Coach decision tracking
+  coach_decision?: "approved" | "rejected" | "modified" | null;
+  coach_notes?: string | null;
+  coach_edited_payload?: string | null;    // coach-edited message text
 }
 
 export interface Coach {
