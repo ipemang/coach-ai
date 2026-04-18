@@ -593,12 +593,10 @@ async def _generate_ai_decision(
     Returns a dict with keys: reply, workout_adjustment, adjustment_reason, urgency, auto_send.
     Reasoning (adjustment_reason) is NEVER included in WhatsApp messages — stored in DB only.
     workout_context=True (COA-56) injects a mid-workout prompt modifier and bumps urgency floor to 'flag'.
+    Uses LLMClient so provider switches (Groq → OpenAI etc.) via env vars work automatically.
     """
-    settings = get_settings()
-    groq_api_key = getattr(settings, "groq_api_key", None)
-    if not groq_api_key:
-        logger.warning("[webhook] GROQ_API_KEY not set — using fallback decision")
-        return dict(_AI_DECISION_FALLBACK)
+    from app.services.llm_client import LLMClient
+    from starlette.concurrency import run_in_threadpool
 
     if supabase:
         system_prompt = await _build_system_prompt(athlete, supabase)
@@ -623,48 +621,43 @@ async def _generate_ai_decision(
     user_prompt = f'Athlete check-in message: "{text}"\n\nProduce your structured coaching decision as JSON:'
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {groq_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "llama-3.3-70b-versatile",
-                    "response_format": {"type": "json_object"},
-                    "messages": [
-                        {"role": "system", "content": full_system},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-            raw = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-            decision = json.loads(raw)
+        llm = LLMClient()
+        response = await run_in_threadpool(
+            llm.chat_completions,
+            system=full_system,
+            user=user_prompt,
+        )
+        raw = response.content.strip()
+        # Strip markdown code fences if model wraps output in ```json ... ```
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        decision = json.loads(raw)
 
-            # Safety overrides — enforce regardless of what the model returned
-            if decision.get("urgency") == "urgent":
-                decision["auto_send"] = False
-            if decision.get("workout_adjustment") is not None:
-                decision["auto_send"] = False
+        # Safety overrides — enforce regardless of what the model returned
+        if decision.get("urgency") == "urgent":
+            decision["auto_send"] = False
+        if decision.get("workout_adjustment") is not None:
+            decision["auto_send"] = False
 
-            # COA-56: Workout context floor — never auto-send mid-workout voice notes,
-            # and bump routine → flag so coach always sees real-time narration.
-            if workout_context:
-                if decision.get("urgency") == "routine":
-                    decision["urgency"] = "flag"
-                decision["auto_send"] = False
+        # COA-56: Workout context floor — never auto-send mid-workout voice notes,
+        # and bump routine → flag so coach always sees real-time narration.
+        if workout_context:
+            if decision.get("urgency") == "routine":
+                decision["urgency"] = "flag"
+            decision["auto_send"] = False
 
-            logger.info(
-                "[webhook] AI decision: urgency=%s auto_send=%s adjustment=%s workout_context=%s",
-                decision.get("urgency"),
-                decision.get("auto_send"),
-                "yes" if decision.get("workout_adjustment") else "no",
-                workout_context,
-            )
-            return decision
+        logger.info(
+            "[webhook] AI decision: urgency=%s auto_send=%s adjustment=%s workout_context=%s model=%s",
+            decision.get("urgency"),
+            decision.get("auto_send"),
+            "yes" if decision.get("workout_adjustment") else "no",
+            workout_context,
+            response.model,
+        )
+        return decision
 
     except json.JSONDecodeError as exc:
         logger.error("[webhook] AI decision JSON parse failed: %s", exc)
