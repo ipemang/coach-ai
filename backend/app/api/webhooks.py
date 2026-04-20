@@ -1214,6 +1214,23 @@ async def _handle_athlete_message(
     except Exception as exc:
         logger.error("[webhook] Failed to store check-in: %s", exc)
 
+    # COA-84: Pull-on-demand Strava sync — inject latest workout into athlete context
+    # before the AI pipeline runs. Gracefully skipped if no tokens or activity > 24h old.
+    try:
+        from app.services.workout_sync import WorkoutSyncService
+        strava_data = await WorkoutSyncService(supabase).fetch_latest(athlete.athlete_id)
+        if strava_data:
+            cs = athlete.current_state or {}
+            athlete.current_state = {**cs, **strava_data}
+            logger.info(
+                "[COA-84] Strava pull: %s %.1fkm for athlete=%s",
+                strava_data.get("strava_last_activity_type", "?"),
+                strava_data.get("strava_last_distance_km", 0.0),
+                athlete.athlete_id[:8],
+            )
+    except Exception as exc:
+        logger.warning("[COA-84] Strava pull-on-demand failed (non-fatal): %s", exc)
+
     # 3. Generate structured AI decision (COA-47 + COA-56 workout context)
     decision = await _generate_ai_decision(athlete, text, supabase, workout_context=workout_context)
     suggestion_text = decision.get("reply", "")
