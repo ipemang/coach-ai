@@ -209,6 +209,16 @@ export function SuggestionQueue({ suggestions: initial }: { suggestions: Suggest
     await callApi(id, action, finalMessage);
   }
 
+  async function handlePlanAction(id: string, planAction: "approved" | "rejected") {
+    const res = await fetch(`/api/suggestions/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan_action: planAction }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    // Suggestion stays in queue — message approval is a separate action
+  }
+
   return (
     <>
       {reviewing && (
@@ -216,6 +226,7 @@ export function SuggestionQueue({ suggestions: initial }: { suggestions: Suggest
           suggestion={reviewing}
           onClose={() => setReviewing(null)}
           onSubmit={handleModalSubmit}
+          onPlanAction={handlePlanAction}
         />
       )}
 

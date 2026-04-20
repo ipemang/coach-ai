@@ -7,6 +7,7 @@ interface Props {
   suggestion: Suggestion;
   onClose: () => void;
   onSubmit: (id: string, action: "approved" | "ignored" | "modified", finalMessage?: string) => Promise<void>;
+  onPlanAction?: (id: string, planAction: "approved" | "rejected") => Promise<void>;
 }
 
 const CLASS_LABELS: Record<string, { label: string; color: string }> = {
@@ -34,12 +35,18 @@ function ConfidencePips({ value }: { value: number }) {
   );
 }
 
-export function SuggestionReviewModal({ suggestion: s, onClose, onSubmit }: Props) {
+export function SuggestionReviewModal({ suggestion: s, onClose, onSubmit, onPlanAction }: Props) {
   const displayText = s.message_personalized ?? s.suggestion_text ?? "";
   const [editedMessage, setEditedMessage] = useState(displayText);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState<"approved" | "ignored" | "modified" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [planLoading, setPlanLoading] = useState<"approved" | "rejected" | null>(null);
+  const [planDone, setPlanDone] = useState<"approved" | "rejected" | null>(
+    s.plan_modification_status === "approved" || s.plan_modification_status === "rejected"
+      ? s.plan_modification_status
+      : null
+  );
 
   const hasChanges = editedMessage.trim() !== displayText.trim();
   const classInfo = s.message_class ? CLASS_LABELS[s.message_class] : null;
@@ -157,6 +164,50 @@ export function SuggestionReviewModal({ suggestion: s, onClose, onSubmit }: Prop
                   <p className="text-xs text-slate-400">{s.plan_modification_payload.reasoning}</p>
                 )}
               </div>
+              {onPlanAction && planDone === null && (
+                <div className="mt-2 flex gap-2">
+                  <button
+                    disabled={!!planLoading}
+                    onClick={async () => {
+                      setPlanLoading("approved");
+                      try {
+                        await onPlanAction(s.id, "approved");
+                        setPlanDone("approved");
+                      } catch {
+                        // error surfaced by parent if needed
+                      } finally {
+                        setPlanLoading(null);
+                      }
+                    }}
+                    className="flex-1 rounded-xl bg-amber-400/20 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-400/30 transition disabled:opacity-40"
+                  >
+                    {planLoading === "approved" ? "Applying…" : "✓ Apply change"}
+                  </button>
+                  <button
+                    disabled={!!planLoading}
+                    onClick={async () => {
+                      setPlanLoading("rejected");
+                      try {
+                        await onPlanAction(s.id, "rejected");
+                        setPlanDone("rejected");
+                      } catch {
+                        // error surfaced by parent if needed
+                      } finally {
+                        setPlanLoading(null);
+                      }
+                    }}
+                    className="rounded-xl bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-400 hover:bg-white/10 transition disabled:opacity-40"
+                  >
+                    {planLoading === "rejected" ? "…" : "✗ Reject"}
+                  </button>
+                </div>
+              )}
+              {planDone === "approved" && (
+                <p className="mt-1.5 text-xs text-emerald-400">✓ Workout updated</p>
+              )}
+              {planDone === "rejected" && (
+                <p className="mt-1.5 text-xs text-slate-500">Plan change rejected</p>
+              )}
             </div>
           )}
 

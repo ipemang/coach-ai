@@ -15,12 +15,54 @@ export async function PATCH(
 
   const { id } = await params;
   const body = await req.json();
-  const { action, coach_reply } = body as {
-    action: "approved" | "ignored" | "modified";
+  const { action, coach_reply, plan_action } = body as {
+    action?: "approved" | "ignored" | "modified";
     coach_reply?: string;
+    plan_action?: "approved" | "rejected";
   };
 
-  if (!["approved", "ignored", "modified"].includes(action)) {
+  // COA-65: Plan modification approval — independent of message approval
+  if (plan_action) {
+    if (!["approved", "rejected"].includes(plan_action)) {
+      return NextResponse.json({ error: "Invalid plan_action" }, { status: 400 });
+    }
+
+    // Update plan_modification_status in Supabase
+    const { error: pmError } = await supabase
+      .from("suggestions")
+      .update({ plan_modification_status: plan_action, updated_at: new Date().toISOString() })
+      .eq("id", id);
+
+    if (pmError) {
+      return NextResponse.json({ error: pmError.message }, { status: 500 });
+    }
+
+    // Call backend /decide to log + apply the workout change (non-fatal)
+    let decideLogged = false;
+    try {
+      const decideRes = await fetch(
+        `${BACKEND_URL}/api/v1/coach/suggestions/${id}/decide`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: plan_action,
+            decision_type: "plan_modification",
+          }),
+        }
+      );
+      decideLogged = decideRes.ok;
+      if (!decideRes.ok) {
+        console.warn("[suggestions] plan /decide call failed:", await decideRes.text());
+      }
+    } catch (err) {
+      console.warn("[suggestions] plan /decide error (non-fatal):", err);
+    }
+
+    return NextResponse.json({ ok: true, id, plan_modification_status: plan_action, decideLogged });
+  }
+
+  if (!action || !["approved", "ignored", "modified"].includes(action)) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 

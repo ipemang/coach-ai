@@ -790,6 +790,40 @@ async def record_coach_decision(
         "message_reasoning": suggestion.get("message_reasoning") or "",
     }
 
+    # COA-65: Plan modification decisions are independent from message approval.
+    # Update plan_modification_status and optionally apply the change to workouts.
+    if body.decision_type == "plan_modification":
+        pm_status = "approved" if body.action == "approved" else "rejected"
+        try:
+            supabase.table("suggestions").update(
+                {"plan_modification_status": pm_status}
+            ).eq("id", suggestion_id).execute()
+        except Exception as exc:
+            logger.warning("[COA-65] plan_modification_status update failed %s: %s", suggestion_id, exc)
+
+        if body.action == "approved":
+            _apply_plan_modification(supabase, suggestion)
+
+        athlete_id = str(suggestion.get("athlete_id") or "")
+        decision_id = log_coach_decision(
+            supabase=supabase,
+            coach_id=coach_id,
+            athlete_id=athlete_id,
+            suggestion_id=suggestion_id,
+            decision_type="plan_modification",
+            action=body.action,
+            original_ai_output=original_output,
+            final_output=original_output if body.action == "approved" else {},
+            rejection_reason=body.rejection_reason,
+        )
+        logger.info("[COA-65] Plan mod decision: suggestion=%s action=%s status=%s", suggestion_id, body.action, pm_status)
+        return {
+            "suggestion_id": suggestion_id,
+            "action": body.action,
+            "plan_modification_status": pm_status,
+            "decision_id": decision_id,
+        }
+
     if body.action == "modified":
         final_output = {
             "message_draft": body.final_message or original_output["message_draft"],
@@ -871,6 +905,36 @@ async def classify_athlete_message(
         "confidence": result.confidence,
         "reason": result.reason,
     }
+
+
+# ── COA-65 helpers ─────────────────────────────────────────────────────────────
+
+def _apply_plan_modification(supabase: Any, suggestion: dict) -> None:
+    """Apply an approved plan modification payload to the workouts table."""
+    payload = suggestion.get("plan_modification_payload") or {}
+    if not isinstance(payload, dict):
+        return
+    workout_id = payload.get("workout_id")
+    change_type = payload.get("change_type")
+    change_value = str(payload.get("change_value", ""))
+    if not (workout_id and change_type and change_value):
+        logger.warning("[COA-65] plan_modification_payload missing fields: %s", payload)
+        return
+    try:
+        if change_type == "reduce_duration":
+            digits = "".join(c for c in change_value if c.isdigit())
+            if digits:
+                supabase.table("workouts").update({"duration_min": int(digits)}).eq("id", workout_id).execute()
+        elif change_type == "swap_type":
+            supabase.table("workouts").update({"session_type": change_value}).eq("id", workout_id).execute()
+        elif change_type == "move_day":
+            supabase.table("workouts").update({"scheduled_date": change_value}).eq("id", workout_id).execute()
+        elif change_type == "remove":
+            supabase.table("workouts").update({"status": "removed"}).eq("id", workout_id).execute()
+        else:
+            logger.warning("[COA-65] Unknown change_type '%s' for workout %s", change_type, workout_id)
+    except Exception as exc:
+        logger.warning("[COA-65] Failed to apply plan mod (workout=%s type=%s): %s", workout_id, change_type, exc)
 
 
 # ── COA-64 helpers ─────────────────────────────────────────────────────────────
