@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import logging
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, BaseModel as _BaseModel, Field
 
+from app.core.config import get_settings
 from app.core.security import AuthenticatedPrincipal, require_roles, resolve_coach_scope
 from app.services.coach_workflow import CoachWorkflow
 
@@ -989,9 +992,6 @@ async def resend_plan_link(
     No auth required — called from the internal Next.js server, not the browser.
     Invalidates existing plan_access tokens for this athlete before issuing a new one.
     """
-    import secrets
-    from datetime import datetime, timedelta, timezone
-
     supabase = getattr(request.app.state, "supabase_client", None)
     if not supabase:
         raise HTTPException(status_code=503, detail="Database not available")
@@ -1039,6 +1039,94 @@ async def resend_plan_link(
     return {"sent": sent, "plan_url": plan_url, "athlete_id": athlete_id}
 
 
+# ── COA-78: Add athlete from dashboard ────────────────────────────────────────
+
+class AddAthleteRequest(_BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=120)
+    phone_number: str | None = None
+    email: str | None = None
+    expires_in_days: int = Field(default=30, ge=1, le=365)
+
+
+@router.post("/athletes/invite")
+async def add_athlete_invite(
+    body: AddAthleteRequest,
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+):
+    """COA-78: Coach adds a new athlete from the dashboard.
+
+    Creates an onboard invite token scoped to the coach, optionally sends a
+    WhatsApp invite if a phone number is provided, and returns the invite URL
+    so the coach can share it manually if WhatsApp isn't available.
+    """
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    scope = resolve_coach_scope(principal)
+    coach_id = str(scope.coach_id)
+
+    # Fetch coach's WhatsApp number for the token + the invite message
+    try:
+        coach_row = supabase.table("coaches").select("whatsapp_number").eq("id", coach_id).single().execute()
+        coach_whatsapp = (coach_row.data or {}).get("whatsapp_number") if coach_row.data else None
+    except Exception:
+        coach_whatsapp = None
+
+    settings = get_settings()
+    base_url = getattr(settings, "base_url", "https://coach-ai-production-a5aa.up.railway.app")
+
+    # Create the onboard invite token
+    token_str = secrets.token_urlsafe(32)
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=body.expires_in_days)).isoformat()
+
+    try:
+        supabase.table("athlete_connect_tokens").insert({
+            "token": token_str,
+            "purpose": "onboard",
+            "coach_id": coach_id,
+            "organization_id": str(scope.organization_id),
+            "coach_whatsapp_number": coach_whatsapp,
+            "expires_at": expires_at,
+        }).execute()
+    except Exception as exc:
+        logger.exception("[COA-78] Failed to create invite token for coach %s", coach_id)
+        raise HTTPException(status_code=500, detail="Failed to create invite token") from exc
+
+    invite_url = f"{base_url}/onboard?token={token_str}"
+    sent_whatsapp = False
+
+    # Send WhatsApp invite if phone number provided
+    phone = body.phone_number.strip() if body.phone_number else None
+    if phone and not phone.startswith("web:"):
+        whatsapp_client = getattr(request.app.state, "whatsapp_client", None)
+        if whatsapp_client:
+            try:
+                name = body.full_name.strip()
+                await whatsapp_client.send_message(
+                    to=phone,
+                    body=(
+                        f"Hi {name}! Your coach has invited you to join Coach.AI.\n\n"
+                        f"Complete your athlete profile here:\n{invite_url}\n\n"
+                        f"This link expires in {body.expires_in_days} days."
+                    ),
+                )
+                sent_whatsapp = True
+                logger.info("[COA-78] Sent WhatsApp invite to %s for coach %s", phone, coach_id)
+            except Exception as exc:
+                logger.warning("[COA-78] WhatsApp send failed: %s", exc)
+
+    logger.info("[COA-78] Invite created: coach=%s token=%s sent=%s", coach_id, token_str[:8], sent_whatsapp)
+    return {
+        "invite_url": invite_url,
+        "token": token_str,
+        "sent_whatsapp": sent_whatsapp,
+        "expires_at": expires_at,
+        "coach_id": coach_id,
+    }
+
+
 def _log_pipeline_usage(supabase, result, coach_id: str, athlete_id: str, principal) -> None:
     """Log token usage for all three pipeline stages (non-blocking)."""
     from app.services.llm_client import LLMResponse
@@ -1064,3 +1152,77 @@ def _log_pipeline_usage(supabase, result, coach_id: str, athlete_id: str, princi
                 athlete_id=athlete_id,
                 endpoint=f"/api/v1/coach/suggestions/generate#{stage}",
             )
+
+
+# ── COA-73: Video / frame analysis ────────────────────────────────────────────
+
+class VideoAnalysisRequest(_BaseModel):
+    frame_urls: list[str] = Field(..., min_length=1, max_length=4, description="1–4 public image URLs")
+    discipline: str = Field(..., min_length=1, description="run, bike, swim, or triathlon")
+    notes: str | None = Field(default=None, description="Coach notes to focus the analysis")
+
+
+@router.post("/athletes/{athlete_id}/analyze-video")
+async def analyze_athlete_video(
+    athlete_id: str,
+    body: VideoAnalysisRequest,
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+):
+    """COA-73: Analyze athlete technique from frame images using GPT-4o vision.
+
+    Accepts up to 4 frame image URLs extracted from a training video.
+    Returns structured technique feedback: form score, strengths, issues,
+    and actionable recommendations scoped to the athlete's discipline and profile.
+    """
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    scope = resolve_coach_scope(principal)
+
+    # Fetch athlete profile for context (non-fatal if missing)
+    athlete_profile: dict = {}
+    try:
+        row = supabase.table("athletes").select("full_name, stable_profile").eq("id", athlete_id).eq(
+            "coach_id", str(scope.coach_id)
+        ).single().execute()
+        if row.data:
+            athlete_profile = row.data.get("stable_profile") or {}
+            athlete_profile["_name"] = row.data.get("full_name", "")
+    except Exception as exc:
+        logger.warning("[COA-73] Could not fetch athlete %s profile: %s", athlete_id, exc)
+
+    from app.services.video_analysis import VideoAnalysisService
+    from starlette.concurrency import run_in_threadpool
+
+    try:
+        service = VideoAnalysisService()
+        result = await run_in_threadpool(
+            service.analyze_frames,
+            frame_urls=body.frame_urls,
+            discipline=body.discipline,
+            athlete_profile=athlete_profile,
+            coach_notes=body.notes,
+        )
+    except Exception as exc:
+        logger.exception("[COA-73] Video analysis failed for athlete %s", athlete_id)
+        raise HTTPException(status_code=502, detail=f"Video analysis failed: {exc}") from exc
+
+    logger.info(
+        "[COA-73] athlete=%s discipline=%s score=%d frames=%d latency=%dms",
+        athlete_id, result.discipline, result.form_score, result.frame_count, result.latency_ms,
+    )
+
+    return {
+        "athlete_id": athlete_id,
+        "discipline": result.discipline,
+        "form_score": result.form_score,
+        "strengths": result.strengths,
+        "issues": result.issues,
+        "recommendations": result.recommendations,
+        "summary": result.raw_analysis,
+        "frame_count": result.frame_count,
+        "latency_ms": result.latency_ms,
+        "model": result.model,
+    }

@@ -79,8 +79,17 @@ class LLMClient:
     def __init__(self, config: LLMConfig | None = None) -> None:
         self.config = config or LLMConfig()
 
-    def chat_completions(self, *, system: str, user: str) -> LLMResponse:
+    def chat_completions(
+        self,
+        *,
+        system: str,
+        user: str,
+        image_urls: list[str] | None = None,
+    ) -> LLMResponse:
         """Call the LLM and return an LLMResponse with content + token counts.
+
+        Pass image_urls to use the vision API (OpenAI-compatible multimodal format).
+        Max 4 images recommended for cost control.
 
         Raises LLMClientError on any failure.
         """
@@ -91,14 +100,26 @@ class LLMClient:
                 "Set GROQ_API_KEY or OPENAI_API_KEY (or LLM_API_KEY)."
             )
 
+        # Build user content — plain text or multimodal (text + images)
+        if image_urls:
+            user_content: str | list = [{"type": "text", "text": user}] + [
+                {"type": "image_url", "image_url": {"url": url, "detail": "high"}}
+                for url in image_urls[:4]  # hard cap at 4 frames
+            ]
+            # Vision requires a model that supports it; default to gpt-4o for OpenAI
+            vision_model = os.getenv("VISION_MODEL", "gpt-4o" if self.config.provider == "openai" else self.config.model)
+        else:
+            user_content = user
+            vision_model = self.config.model
+
         url = f"{self.config.resolved_base_url()}/chat/completions"
         payload = {
-            "model": self.config.model,
+            "model": vision_model,
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": "user", "content": user_content},
             ],
         }
         request = Request(
