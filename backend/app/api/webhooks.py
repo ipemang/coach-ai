@@ -315,7 +315,7 @@ async def _build_biometric_trend(athlete: "AthleteRecord", supabase: Any) -> str
     return "\n".join(lines)
 
 
-async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
+async def _build_system_prompt(athlete: AthleteRecord, supabase: Any, query_text: str = "") -> str:
     """Build a rich system prompt using athlete profile, current state, and coach methodology (COA-25)."""
     coach_persona = ""
     coach_rules = ""
@@ -526,7 +526,7 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
     except Exception as exc:
         logger.warning("[webhook] Biometric trend context failed: %s", exc)
 
-    # COA-83: Inject rolling athlete memory summary
+    # COA-83: Inject rolling athlete memory summary (Tier 1)
     try:
         from app.services.memory_service import MemoryService
         memory_summary = MemoryService(supabase).get_summary(athlete.athlete_id)
@@ -534,6 +534,33 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
             prompt_parts.append(f"\n\n## Athlete Memory\n{memory_summary}")
     except Exception as exc:
         logger.warning("[webhook] Memory summary injection failed: %s", exc)
+
+    # COA-87: Two-tier RAG — Tier 1 (coach athlete notes) + Tier 2 (knowledge base search)
+    try:
+        from app.services.document_retrieval import DocumentRetrievalService
+        from starlette.concurrency import run_in_threadpool as _pool
+        retrieval = DocumentRetrievalService(supabase)
+
+        # Tier 1: coach's notes on this specific athlete — always injected
+        notes_block = await _pool(
+            retrieval.get_coach_athlete_notes,
+            athlete.coach_id,
+            athlete.athlete_id,
+        )
+        if notes_block:
+            prompt_parts.append(f"\n\n{notes_block}")
+
+        # Tier 2: semantic search over coach's approved knowledge base
+        if query_text:
+            kb_block = await _pool(
+                retrieval.retrieve_knowledge,
+                athlete.coach_id,
+                query_text,
+            )
+            if kb_block:
+                prompt_parts.append(f"\n\n{kb_block}")
+    except Exception as exc:
+        logger.warning("[webhook] RAG injection failed (non-fatal): %s", exc)
 
     prompt = "".join(prompt_parts)
     logger.info(
@@ -608,7 +635,7 @@ async def _generate_ai_decision(
     from starlette.concurrency import run_in_threadpool
 
     if supabase:
-        system_prompt = await _build_system_prompt(athlete, supabase)
+        system_prompt = await _build_system_prompt(athlete, supabase, query_text=text)
     else:
         system_prompt = (
             f"You are an expert endurance sports coach AI. "

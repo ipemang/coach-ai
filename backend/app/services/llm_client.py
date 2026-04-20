@@ -174,6 +174,53 @@ class LLMClient:
             latency_ms=latency_ms,
         )
 
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Embed a list of texts using OpenAI text-embedding-3-small (1536 dims).
+
+        Always uses OpenAI regardless of LLM_PROVIDER — Groq has no embedding API.
+        Batches up to 100 texts per call. Returns parallel list of embedding vectors.
+
+        Raises LLMClientError on failure.
+        """
+        if not texts:
+            return []
+
+        import os as _os
+        api_key = (_os.getenv("OPENAI_API_KEY") or _os.getenv("LLM_API_KEY", "")).strip()
+        if not api_key:
+            raise LLMClientError("Missing OPENAI_API_KEY — required for embeddings")
+
+        base_url = _os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+        model = _os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+        results: list[list[float]] = []
+
+        # Process in batches of 100
+        for i in range(0, len(texts), 100):
+            batch = texts[i : i + 100]
+            payload = {"model": model, "input": batch}
+            request = Request(
+                f"{base_url}/embeddings",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            try:
+                with urlopen(request, timeout=30.0) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+            except HTTPError as exc:
+                err = exc.read().decode("utf-8", errors="replace")
+                raise LLMClientError(f"Embedding request failed: {exc.code}: {err}") from exc
+            except URLError as exc:
+                raise LLMClientError(f"Embedding request failed: {exc.reason}") from exc
+
+            items = sorted(data.get("data", []), key=lambda x: x["index"])
+            results.extend(item["embedding"] for item in items)
+
+        return results
+
     # Convenience alias
     chat = chat_completions
 
