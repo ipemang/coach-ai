@@ -228,27 +228,47 @@ def _format_memory_states(states: list[dict]) -> str:
 # ── Reasoning engine — dual-output generation ─────────────────────────────────
 
 _REASONING_SYSTEM = """You are an AI reasoning engine for an endurance sports coaching platform.
-Your role: reason about an athlete's situation and generate two outputs for the coach to review.
+Your role: reason holistically about an athlete's situation and generate structured coaching output.
 
 You have NO personality — you are a pure reasoning machine. The coach's persona layer will
 wrap your output before anything reaches the athlete. Write in clear, neutral English.
 
 ALWAYS respond with valid JSON matching this exact schema:
-{{
+{
   "message_draft": "<what to say to the athlete — warm, specific, actionable. 2-4 sentences.>",
   "message_reasoning": "<why this message — 1-2 sentences for the coach>",
-  "plan_modification": {{
+  "plan_modification": {
     "warranted": true | false,
     "workout_id": "<uuid of the specific workout to modify, or null>",
     "change_type": "reduce_duration | swap_type | move_day | remove | increase_intensity | reduce_intensity",
     "change_value": "<specific value, e.g. '45 min instead of 90' or 'easy Z2 run instead of tempo'>",
     "reasoning": "<evidence-based reason referencing biometrics or history>"
-  }} | null
-}}
+  } | null,
+  "recommendations": [
+    {
+      "category": "<nutrition | injury | recovery | form | mental | race_strategy | equipment>",
+      "insight": "<specific observation from the athlete's message or data>",
+      "suggestion": "<concrete, actionable coaching recommendation>",
+      "priority": "<high | medium | low>"
+    }
+  ],
+  "athlete_flags": ["<urgent signal for coach attention, e.g. 'athlete reporting left knee pain'>"]
+}
 
-Only set plan_modification to non-null when the message content genuinely warrants a training change.
-Do not propose modifications for noise, general check-ins without red flags, or plan questions that
-just need a text answer."""
+RECOMMENDATIONS RULES:
+- Include a recommendation only when the message or data gives you something specific to work with
+- 0-4 recommendations maximum — quality over quantity
+- categories: nutrition (fueling, hydration, race-day), injury (pain, red flags, rest),
+  recovery (sleep, HRV, fatigue, stress), form (technique, biomechanics, efficiency),
+  mental (motivation, anxiety, mindset, confidence), race_strategy (pacing, goal setting, splits),
+  equipment (gear, bike fit, shoes, nutrition products)
+- athlete_flags: only for urgent items needing immediate coach attention (injury, distress,
+  extreme biometric signal). Empty list [] is the norm — do not manufacture flags.
+
+PLAN MODIFICATION RULES:
+- Only set plan_modification to non-null when the message content genuinely warrants a training change
+- Do not propose modifications for noise, general check-ins without red flags, or plan questions that
+  just need a text answer"""
 
 
 @dataclass
@@ -261,10 +281,21 @@ class PlanModificationProposal:
 
 
 @dataclass
+class CoachingRecommendation:
+    """COA-80: A single holistic coaching recommendation beyond plan scheduling."""
+    category: str   # nutrition | injury | recovery | form | mental | race_strategy | equipment
+    insight: str
+    suggestion: str
+    priority: str   # high | medium | low
+
+
+@dataclass
 class SuggestionOutput:
     message_draft: str
     message_reasoning: str
     plan_modification: PlanModificationProposal | None
+    recommendations: list[CoachingRecommendation]     # COA-80
+    athlete_flags: list[str]                           # COA-80: urgent signals for coach
     raw_ai_output: dict
     input_tokens: int = 0
     output_tokens: int = 0
@@ -309,10 +340,30 @@ def generate_suggestion(
                 reasoning=str(plan_mod_raw.get("reasoning") or ""),
             )
 
+        # COA-80: Parse holistic recommendations
+        recommendations: list[CoachingRecommendation] = []
+        valid_categories = {"nutrition", "injury", "recovery", "form", "mental", "race_strategy", "equipment"}
+        for rec_raw in data.get("recommendations") or []:
+            if not isinstance(rec_raw, dict):
+                continue
+            cat = str(rec_raw.get("category") or "recovery")
+            if cat not in valid_categories:
+                cat = "recovery"
+            recommendations.append(CoachingRecommendation(
+                category=cat,
+                insight=str(rec_raw.get("insight") or ""),
+                suggestion=str(rec_raw.get("suggestion") or ""),
+                priority=str(rec_raw.get("priority") or "medium"),
+            ))
+
+        athlete_flags = [str(f) for f in (data.get("athlete_flags") or []) if f]
+
         return SuggestionOutput(
             message_draft=str(data.get("message_draft") or ""),
             message_reasoning=str(data.get("message_reasoning") or ""),
             plan_modification=plan_mod,
+            recommendations=recommendations,
+            athlete_flags=athlete_flags,
             raw_ai_output=data,
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
@@ -499,6 +550,8 @@ class PipelineResult:
     message_draft_personalized: str         # after Interaction Agent
     message_reasoning: str
     plan_modification: PlanModificationProposal | None
+    recommendations: list[CoachingRecommendation]     # COA-80
+    athlete_flags: list[str]                           # COA-80
     raw_ai_output: dict
     # Token telemetry
     classifier_tokens_in: int = 0
@@ -548,6 +601,8 @@ def run_pipeline(
             message_draft_personalized="",
             message_reasoning="Message classified as noise — no coach action required.",
             plan_modification=None,
+            recommendations=[],
+            athlete_flags=[],
             raw_ai_output={},
             classifier_tokens_in=classification.input_tokens,
             classifier_tokens_out=classification.output_tokens,
@@ -592,6 +647,8 @@ def run_pipeline(
         message_draft_personalized=personalized_msg,
         message_reasoning=suggestion.message_reasoning,
         plan_modification=suggestion.plan_modification,
+        recommendations=suggestion.recommendations,
+        athlete_flags=suggestion.athlete_flags,
         raw_ai_output=suggestion.raw_ai_output,
         classifier_tokens_in=classification.input_tokens,
         classifier_tokens_out=classification.output_tokens,
@@ -640,4 +697,5 @@ __all__ = [
     "run_pipeline",
     "PipelineResult",
     "PlanModificationProposal",
+    "CoachingRecommendation",
 ]

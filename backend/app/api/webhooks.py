@@ -526,6 +526,15 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any) -> str:
     except Exception as exc:
         logger.warning("[webhook] Biometric trend context failed: %s", exc)
 
+    # COA-83: Inject rolling athlete memory summary
+    try:
+        from app.services.memory_service import MemoryService
+        memory_summary = MemoryService(supabase).get_summary(athlete.athlete_id)
+        if memory_summary:
+            prompt_parts.append(f"\n\n## Athlete Memory\n{memory_summary}")
+    except Exception as exc:
+        logger.warning("[webhook] Memory summary injection failed: %s", exc)
+
     prompt = "".join(prompt_parts)
     logger.info(
         "[webhook] Built system prompt: %d chars, %d profile fields, %d state fields",
@@ -1408,6 +1417,31 @@ async def _handle_athlete_message(
             "[webhook] Failed to persist check-in memory state for athlete=%s: %s",
             athlete.athlete_id, exc,
         )
+
+    # COA-83: Append memory event + fire-and-forget summary refresh (non-blocking)
+    try:
+        from app.services.memory_service import MemoryService
+        from starlette.concurrency import run_in_threadpool
+
+        mem = MemoryService(supabase)
+        await run_in_threadpool(
+            mem.append_event,
+            athlete.athlete_id,
+            "message",
+            text[:2000],
+            {"suggestion_id": suggestion_id, "urgency": urgency, "is_voice": is_voice},
+        )
+
+        async def _refresh_bg() -> None:
+            try:
+                await run_in_threadpool(mem.refresh_summary, athlete.athlete_id)
+            except Exception as _exc:
+                logger.warning("[memory] Background refresh failed for athlete=%s: %s", athlete.athlete_id[:8], _exc)
+
+        import asyncio
+        asyncio.ensure_future(_refresh_bg())
+    except Exception as exc:
+        logger.warning("[memory] Memory pipeline failed for athlete=%s: %s", athlete.athlete_id[:8], exc)
 
     logger.info(
         "[webhook] Athlete check-in processed: athlete=%s checkin_id=%s suggestion_id=%s",
