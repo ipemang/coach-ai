@@ -915,6 +915,66 @@ def _persist_suggestion(
     return None
 
 
+@router.post("/athletes/{athlete_id}/resend-plan-link")
+async def resend_plan_link(
+    athlete_id: str,
+    request: Request,
+):
+    """Regenerate a plan_access token and resend the /my-plan link via WhatsApp.
+
+    No auth required — called from the internal Next.js server, not the browser.
+    Invalidates existing plan_access tokens for this athlete before issuing a new one.
+    """
+    import secrets
+    from datetime import datetime, timedelta, timezone
+
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    rows = supabase.table("athletes").select("id, full_name, phone_number").eq("id", athlete_id).limit(1).execute()
+    if not rows.data:
+        raise HTTPException(status_code=404, detail="Athlete not found")
+    athlete = rows.data[0]
+    phone: str = athlete.get("phone_number") or ""
+
+    # Invalidate any live plan_access tokens so old links stop working
+    supabase.table("athlete_connect_tokens").update({
+        "used_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("athlete_id", athlete_id).eq("purpose", "plan_access").is_("used_at", "null").execute()
+
+    plan_token = secrets.token_urlsafe(32)
+    supabase.table("athlete_connect_tokens").insert({
+        "athlete_id": athlete_id,
+        "token": plan_token,
+        "purpose": "plan_access",
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
+    }).execute()
+
+    base_url = "https://coach-ai-production-a5aa.up.railway.app"
+    plan_url = f"{base_url}/my-plan?token={plan_token}"
+
+    sent = False
+    if phone and not phone.startswith("web:"):
+        whatsapp_client = getattr(request.app.state, "whatsapp_client", None)
+        if whatsapp_client:
+            try:
+                await whatsapp_client.send_message(
+                    to=phone,
+                    body=(
+                        f"📋 Here's your updated training plan link:\n"
+                        f"{plan_url}\n\n"
+                        "Bookmark this — it's your personal plan page."
+                    ),
+                )
+                sent = True
+            except Exception as exc:
+                logger.warning("[resend_plan_link] WhatsApp send failed for %s: %s", athlete_id, exc)
+
+    logger.info("[resend_plan_link] athlete=%s sent=%s", athlete_id, sent)
+    return {"sent": sent, "plan_url": plan_url, "athlete_id": athlete_id}
+
+
 def _log_pipeline_usage(supabase, result, coach_id: str, athlete_id: str, principal) -> None:
     """Log token usage for all three pipeline stages (non-blocking)."""
     from app.services.llm_client import LLMResponse

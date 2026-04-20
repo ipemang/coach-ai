@@ -35,7 +35,29 @@ function BiometricPill({ label, value, unit = "" }: { label: string; value: stri
 
 function AthleteCard({ athlete }: { athlete: Athlete }) {
   const [expanded, setExpanded] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendDone, setResendDone] = useState<"sent" | "copied" | null>(null);
   const cs: CurrentState = athlete.current_state ?? {};
+
+  async function handleResendPlanLink() {
+    setResending(true);
+    setResendDone(null);
+    try {
+      const res = await fetch(`/api/athletes/${athlete.id}/resend-plan-link`, { method: "POST" });
+      const data = await res.json();
+      if (data.sent) {
+        setResendDone("sent");
+      } else if (data.plan_url) {
+        await navigator.clipboard.writeText(data.plan_url);
+        setResendDone("copied");
+      }
+    } catch {
+      // silent — button resets
+    } finally {
+      setResending(false);
+      setTimeout(() => setResendDone(null), 3000);
+    }
+  }
 
   const readiness = cs.oura_readiness_score ?? cs.last_readiness_score;
   const hrv = cs.oura_avg_hrv ?? cs.last_hrv;
@@ -108,6 +130,19 @@ function AthleteCard({ athlete }: { athlete: Athlete }) {
           className="text-xs text-slate-500 hover:text-sky-400 transition"
         >
           {expanded ? "▲ Less" : "▼ More"}
+        </button>
+        <button
+          onClick={handleResendPlanLink}
+          disabled={resending}
+          className="rounded-lg bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-500/20 transition disabled:opacity-40"
+        >
+          {resending
+            ? "Sending…"
+            : resendDone === "sent"
+            ? "✓ Sent"
+            : resendDone === "copied"
+            ? "✓ Copied"
+            : "📋 Plan link"}
         </button>
         <Link
           href={`/dashboard/athletes/${athlete.id}`}
