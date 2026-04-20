@@ -96,10 +96,11 @@ export async function PATCH(
           (suggestion.athletes as { phone_number?: string } | null)?.phone_number;
 
         // Priority: coach_reply (edited) → message_personalized (AI persona) → suggestion_text (fallback)
+        const s = suggestion as Record<string, unknown>;
         const messageText =
-          (suggestion as Record<string, unknown>).coach_reply as string |
-          (suggestion as Record<string, unknown>).message_personalized as string |
-          (suggestion as Record<string, unknown>).suggestion_text as string |
+          (s.coach_reply as string | null) ||
+          (s.message_personalized as string | null) ||
+          (s.suggestion_text as string | null) ||
           null;
 
         if (phone && messageText && !phone.startsWith("web:")) {
