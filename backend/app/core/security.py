@@ -48,6 +48,7 @@ class AuthenticatedPrincipal:
     roles: frozenset[str] = frozenset({"authenticated"})
     organization_id: str | None = None
     coach_id: str | None = None
+    athlete_id: str | None = None  # COA-93: set when role="athlete"
     raw_claims: dict[str, Any] = field(default_factory=dict)
     access_token: str | None = None
 
@@ -143,7 +144,8 @@ def _fetch_supabase_user(token: str) -> dict[str, Any]:
     return parsed
 
 
-def _extract_scope_claims(data: dict[str, Any]) -> tuple[str | None, str | None]:
+def _extract_scope_claims(data: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    """Returns (organization_id, coach_id, athlete_id)."""
     for container_name in ("app_metadata", "user_metadata"):
         container = data.get(container_name)
         if not isinstance(container, dict):
@@ -155,12 +157,14 @@ def _extract_scope_claims(data: dict[str, Any]) -> tuple[str | None, str | None]
             or container.get("orgId")
         )
         coach_id = _string_value(container.get("coach_id") or container.get("coachId"))
-        if organization_id or coach_id:
-            return organization_id, coach_id
+        athlete_id = _string_value(container.get("athlete_id") or container.get("athleteId"))
+        if organization_id or coach_id or athlete_id:
+            return organization_id, coach_id, athlete_id
 
     organization_id = _string_value(data.get("organization_id") or data.get("organizationId") or data.get("org_id") or data.get("orgId"))
     coach_id = _string_value(data.get("coach_id") or data.get("coachId"))
-    return organization_id, coach_id
+    athlete_id = _string_value(data.get("athlete_id") or data.get("athleteId"))
+    return organization_id, coach_id, athlete_id
 
 
 def _extract_roles(data: dict[str, Any]) -> frozenset[str]:
@@ -181,13 +185,14 @@ async def authenticate_request(request: FastAPIRequest) -> AuthenticatedPrincipa
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication payload missing user id")
 
-    organization_id, coach_id = _extract_scope_claims(data)
+    organization_id, coach_id, athlete_id = _extract_scope_claims(data)
     principal = AuthenticatedPrincipal(
         user_id=user_id,
         email=_string_value(data.get("email")),
         roles=_extract_roles(data),
         organization_id=organization_id,
         coach_id=coach_id,
+        athlete_id=athlete_id,  # COA-93
         raw_claims=data,
         access_token=token,
     )
@@ -232,6 +237,27 @@ def resolve_coach_scope(
         raise HTTPException(status_code=403, detail="Coach cannot access another coach record")
 
     return DataScope(organization_id=principal.organization_id, coach_id=principal.coach_id)
+
+
+def resolve_athlete_scope(principal: AuthenticatedPrincipal) -> tuple[str, str]:
+    """Return (athlete_id, coach_id) for an authenticated athlete principal.
+
+    Raises 403 if the principal is not an athlete or claims are missing.
+    COA-93.
+    """
+    if not principal.has_role("athlete"):
+        raise HTTPException(status_code=403, detail="Athlete access required")
+    if not principal.athlete_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Athlete scope not configured — complete account linking first",
+        )
+    if not principal.coach_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Athlete has no coach association in JWT claims",
+        )
+    return principal.athlete_id, principal.coach_id
 
 
 def verify_whatsapp_signature(request: FastAPIRequest, raw_body: bytes | None = None) -> None:

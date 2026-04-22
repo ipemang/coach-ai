@@ -8,7 +8,7 @@
 
 Coach.AI is a B2B SaaS platform for endurance sports coaches (triathlon, running, cycling). The AI augments the coach's workflow — it never replaces the coach. The coach reviews and approves every AI-generated message before it reaches an athlete. Tagline: "Your athletes. Your voice. Your AI."
 
-Founder: Felipe Deidan (Deloitte consultant, triathlete, mountaineer). Test coach: Felipe. Test athlete: Patrick.
+Founder: Felipe Deidan (Deloitte consultant, triathlete, mountaineer). Test coach: Felipe. Test athlete: Patrick (WhatsApp test account — not a team member).
 
 The product is live on Railway (production). Active development happens in this repo (`~/coach-ai`). The workspace folder (`~/Documents/Claude/Projects/Coach.AI`) is where documents, specs, and deliverables are saved.
 
@@ -52,15 +52,32 @@ The product is live on Railway (production). Active development happens in this 
 
 ## Active Priorities (as of April 2026)
 
-Shipped: COA-65 (suggestion review UI), COA-74 (athlete portal), COA-62 auth pages (signup, forgot-password, reset-password).
+Shipped: COA-65 (suggestion review UI), COA-74 (athlete portal), COA-62 auth pages + JWT hook, COA-88 (edit plan mod), COA-89 (athlete soft-delete), COA-90 (document reingest), COA-91 (webhook latency), COA-92 (usage logging).
 
-Next up:
-1. **COA-75** — Resend plan link button. Unblocks self-service for coaches.
-2. **COA-78** — Add athlete from dashboard. Core onboarding workflow.
-3. **COA-76** — Athlete detail page. Most-used screen once real athletes are on.
-4. **COA-77** — Workout editor. Coaches need full plan management from the UI.
-5. **COA-62 (remaining)** — Wire JWT `coach_id` claims so RLS activates in production.
-6. **COA-73** — Video analysis (V1.1, post-validation).
+**Felipe owns all work — full stack. Patrick (Pedrick) is no longer on the project (removed 2026-04-22).**
+
+### Phase 1 — Athlete Auth Foundation (backend first, blocks everything else)
+1. **COA-93** 🔴 — Athlete auth infrastructure (accounts, invite tokens, JWT claims, RLS)
+2. **COA-94** 🔴 — Athlete onboarding API (5-step endpoints + AI profile generation)
+3. **COA-95** 🟠 — Athlete file storage (upload/list/delete + coach visibility)
+4. **COA-100** 🔴 — Coach auth completion (/auth/callback, middleware, email invites)
+
+### Phase 2 — Athlete Experience (frontend, after Phase 1)
+5. **COA-96** 🟠 — Athlete join flow (invite validation, account creation)
+6. **COA-97** 🟠 — Athlete onboarding flow (5-step UI + AI profile reveal)
+7. **COA-98** 🟠 — Athlete dashboard (replaces /my-plan)
+
+### Phase 3 — Public Web
+8. **COA-99** 🟠 — Public landing page (coach path + athlete path)
+
+### Previously Patrick's (now Felipe's, lower priority than Phase 1–3)
+- **COA-75** — Resend plan link button
+- **COA-78** — Add athlete from dashboard (partially superseded by COA-93/96)
+- **COA-76** — Athlete detail page (coach-side view)
+- **COA-77** — Workout editor
+
+### Deferred
+- **COA-73** — Video analysis (V1.1, post-validation)
 
 ---
 
@@ -72,7 +89,7 @@ Next up:
 - **AI:** OpenAI GPT-4o-mini via `LLMClient` (provider-agnostic — LLM_PROVIDER env var)
 - **Messaging:** Meta WhatsApp Cloud API
 - **Auth (coach):** Supabase JWT with custom claims (coach_id, organization_id) — RLS activates once COA-62 ships JWT claims
-- **Auth (athlete):** Token-based only — `athlete_connect_tokens` table, purpose=`plan_access`
+- **Auth (athlete):** Supabase JWT with `role="athlete"` claims (COA-93) — migrating from token-based. Old `athlete_connect_tokens` table kept for 30-day backward compatibility with `/my-plan?token=...`
 - **Architecture:** Poke dual-layer — ClassifierAgent → ReasoningAgent → InteractionAgent
 
 ### Migration Systems
@@ -113,9 +130,9 @@ Retros are filed at `~/Documents/Claude/Projects/Coach.AI/retros/retros.md`. Eac
 
 1. **Read this file in full before starting any task.** Do not skip this even for quick tasks.
 2. **Never overwrite a file without reading its current contents first.** Use Read before Edit or Write.
-3. **Never hardcode LLM provider or model.** Always use `LLMClient` which reads `LLM_PROVIDER` and `LLM_MODEL` from env vars. (Root cause: webhooks.py was hardcoded to Groq — Patrick couldn't receive replies for days.)
+3. **Never hardcode LLM provider or model.** Always use `LLMClient` which reads `LLM_PROVIDER` and `LLM_MODEL` from env vars. (Root cause: webhooks.py was hardcoded to Groq — test athlete couldn't receive replies for days.)
 4. **Never run `npm run build` from `~/coach-ai` root.** Frontend builds must run from `~/coach-ai/frontend/`. (Root cause: monorepo — `package.json` lives in `frontend/`.)
-5. **Phone number matching must handle variants.** The system uses `_phone_variants()` to normalize numbers. Never assume a bare number matches — check with variants. (Root cause: Patrick's record had `web:...` as the phone number, not his real number.)
+5. **Phone number matching must handle variants.** The system uses `_phone_variants()` to normalize numbers. Never assume a bare number matches — check with variants. (Root cause: test athlete record had `web:...` as the phone number, not the real number.)
 6. **Coach WhatsApp number in the DB must match the real number.** The `coaches` table `whatsapp_number` field is how the webhook identifies incoming messages as coach messages. (Root cause: coaches table had the business inbox number instead of Felipe's real number.)
 7. **All AI pipeline routes must use `run_in_threadpool` for sync LLMClient calls.** FastAPI routes are async; calling a sync client directly blocks the event loop.
 8. **Run the output quality gate before delivering any outbound content.** Emails, documents, proposals, vision docs — all of it. Even quick ones.
@@ -141,5 +158,9 @@ Retros are filed at `~/Documents/Claude/Projects/Coach.AI/retros/retros.md`. Eac
 ## Personas in This Project
 
 - **Aria** — Senior full-stack AI engineer and solutions architect. Active in all technical sessions. Loaded via the `coachai-aria-persona` skill. Always signs off responses with "— Aria".
-- **Felipe** — Founder. Non-technical. Explain every architectural decision in plain English alongside the spec. No jargon without definition.
-- **Patrick** — Test athlete. His experience with the athlete portal (/my-plan) is the primary QA signal.
+- **Felipe** — Founder. Non-technical. Explain every architectural decision in plain English alongside the spec. No jargon without definition. Owns all work — backend and frontend — as of 2026-04-22.
+- **Patrick** — Test athlete (WhatsApp test account only). His experience with the athlete portal is the primary QA signal for the athlete-facing product. Not a team member.
+
+## Work Division
+
+Felipe owns everything. There is no separate frontend developer. Build backend and frontend equally. Do not defer or skip any ticket because it is "frontend work."

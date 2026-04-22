@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     strava_client_id: Optional[str] = None
     strava_client_secret: Optional[str] = None
     strava_redirect_uri: Optional[str] = None
+    # COA-93: Frontend base URL for invite links
+    frontend_url: str = "https://coach-ai-frontend-production.up.railway.app"
 
     model_config = SettingsConfigDict(
         case_sensitive=False,

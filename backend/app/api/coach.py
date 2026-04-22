@@ -154,7 +154,6 @@ async def send_suggestion_to_athlete(
     supabase = getattr(request.app.state, "supabase_client", None)
     if supabase:
         try:
-            from datetime import datetime, timezone
             supabase.table("suggestions").update({
                 "sent_at": datetime.now(timezone.utc).isoformat(),
             }).eq("id", suggestion_id).execute()
@@ -278,6 +277,7 @@ async def save_coach_methodology(
 class OnboardingAthleteEntry(_BaseModel):
     full_name: str
     whatsapp_number: str
+    email: str | None = None  # COA-93: optional email — triggers invite token generation
 
 
 class OnboardingAthletesRequest(_BaseModel):
@@ -291,6 +291,9 @@ async def invite_onboarding_athletes(
     principal: AuthenticatedPrincipal = Depends(require_roles("authenticated")),
 ):
     """Step 3 of coach onboarding. Creates stub athlete rows and queues WhatsApp invites.
+
+    If an athlete entry includes an email address, a personalized invite token is
+    automatically generated and (if WhatsApp is available) sent to the athlete's phone.
 
     Non-fatal: if individual athlete creation fails, we log and skip rather than
     aborting the entire batch, so the coach always lands on Step 4.
@@ -314,14 +317,22 @@ async def invite_onboarding_athletes(
         logger.exception("[onboarding/athletes] Failed to look up coach row")
         raise HTTPException(status_code=500, detail="Database error") from exc
 
+    import secrets as _secrets
+    from app.core.config import get_settings as _get_settings
+
+    settings = _get_settings()
+    frontend_base = settings.frontend_url
+    whatsapp_client = getattr(request.app.state, "whatsapp_client", None)
+
     results: list[dict] = []
     for entry in body.athletes[:3]:  # cap at 3 during onboarding
         name = entry.full_name.strip()
         phone = entry.whatsapp_number.strip()
         if not name or not phone:
             continue
+        email = (entry.email or "").strip() or None
         try:
-            result = supabase.table("athletes").insert({
+            insert_payload: dict = {
                 "full_name": name,
                 "phone_number": phone,
                 "whatsapp_number": phone,
@@ -329,18 +340,110 @@ async def invite_onboarding_athletes(
                 "organization_id": org_id,
                 "status": "invited",
                 "current_state": {},
-            }).execute()
-            if result.data:
-                athlete_id = result.data[0]["id"]
-                results.append({"athlete_id": athlete_id, "name": name, "invited": True})
-                logger.info("[onboarding/athletes] Created athlete %s for coach %s", athlete_id, coach_id)
-            else:
+            }
+            if email:
+                insert_payload["email"] = email
+
+            result = supabase.table("athletes").insert(insert_payload).execute()
+            if not result.data:
                 results.append({"name": name, "invited": False, "reason": "insert returned no data"})
+                continue
+
+            athlete_id = result.data[0]["id"]
+            invite_url: str | None = None
+            invite_token: str | None = None
+            whatsapp_sent = False
+
+            # COA-93: generate invite token if email was provided
+            if email:
+                try:
+                    raw_token = _secrets.token_hex(32)
+                    expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+                    supabase.table("athlete_invite_tokens").insert({
+                        "token": raw_token,
+                        "coach_id": coach_id,
+                        "athlete_id": athlete_id,
+                        "email": email,
+                        "expires_at": expires_at,
+                    }).execute()
+                    invite_token = raw_token
+                    invite_url = f"{frontend_base.rstrip('/')}/athlete/join?token={raw_token}"
+
+                    # Send invite via WhatsApp if phone is real
+                    if not phone.startswith("web:") and whatsapp_client:
+                        try:
+                            msg = (
+                                f"Hi {name} 👋\n\n"
+                                f"You've been invited to join Coach.AI — your personal training platform.\n\n"
+                                f"Create your account here (link valid 7 days):\n{invite_url}"
+                            )
+                            import asyncio
+                            asyncio.ensure_future(whatsapp_client.send_message(to=phone, body=msg))
+                            whatsapp_sent = True
+                        except Exception:
+                            pass
+                except Exception as ie:
+                    logger.warning("[onboarding/athletes] Could not generate invite for %s: %s", name, ie)
+
+            results.append({
+                "athlete_id": athlete_id,
+                "name": name,
+                "invited": True,
+                "invite_url": invite_url,
+                "whatsapp_sent": whatsapp_sent,
+            })
+            logger.info("[onboarding/athletes] Created athlete %s for coach %s", athlete_id, coach_id)
         except Exception as exc:
             logger.warning("[onboarding/athletes] Could not create athlete %s: %s", name, exc)
             results.append({"name": name, "invited": False, "reason": str(exc)})
 
+    # COA-100: mark coach onboarding complete now that Step 3 is done
+    try:
+        supabase.table("coaches").update({"onboarding_complete": True}).eq("id", coach_id).execute()
+        logger.info("[onboarding/athletes] Marked coach %s onboarding_complete=true", coach_id)
+    except Exception:
+        pass  # non-fatal
+
     return {"athletes": results, "total_invited": sum(1 for r in results if r.get("invited"))}
+
+
+# ---------------------------------------------------------------------------
+# COA-100: Coach onboarding status endpoint
+# ---------------------------------------------------------------------------
+
+@router.get("/onboarding/status")
+async def get_onboarding_status(
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("authenticated")),
+):
+    """Returns the coach's onboarding completion state.
+
+    Called by /auth/callback after email confirmation to determine where to redirect:
+    - onboarding_complete=false  → /dashboard/onboarding (Steps 1-3)
+    - onboarding_complete=true   → /dashboard
+    - no coach row found         → /dashboard/onboarding (first login)
+    """
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        row = supabase.table("coaches").select(
+            "id, full_name, onboarding_complete"
+        ).eq("auth_user_id", principal.user_id).single().execute()
+    except Exception:
+        # No coach row yet — first login after email confirmation
+        return {"has_coach_row": False, "onboarding_complete": False, "coach_id": None}
+
+    if not row.data:
+        return {"has_coach_row": False, "onboarding_complete": False, "coach_id": None}
+
+    return {
+        "has_coach_row": True,
+        "onboarding_complete": row.data.get("onboarding_complete", False),
+        "coach_id": row.data.get("id"),
+        "full_name": row.data.get("full_name"),
+    }
 
 
 @router.post("/athletes/{athlete_id}/sync-oura")
