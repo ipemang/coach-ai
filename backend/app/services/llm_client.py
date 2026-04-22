@@ -71,6 +71,20 @@ class LLMResponse:
         return self.input_tokens + self.output_tokens
 
 
+@dataclass(slots=True)
+class EmbedResponse:
+    """Returned by LLMClient.embed().
+
+    Attributes:
+        embeddings:   Parallel list of 1536-dim embedding vectors.
+        total_tokens: Total tokens consumed across all batches (from API usage field).
+        model:        Embedding model name used.
+    """
+    embeddings: list[list[float]]
+    total_tokens: int
+    model: str = "text-embedding-3-small"
+
+
 class LLMClientError(RuntimeError):
     pass
 
@@ -174,16 +188,16 @@ class LLMClient:
             latency_ms=latency_ms,
         )
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str]) -> EmbedResponse:
         """Embed a list of texts using OpenAI text-embedding-3-small (1536 dims).
 
         Always uses OpenAI regardless of LLM_PROVIDER — Groq has no embedding API.
-        Batches up to 100 texts per call. Returns parallel list of embedding vectors.
+        Batches up to 100 texts per call. Returns EmbedResponse with embeddings + token count.
 
         Raises LLMClientError on failure.
         """
         if not texts:
-            return []
+            return EmbedResponse(embeddings=[], total_tokens=0)
 
         import os as _os
         api_key = (_os.getenv("OPENAI_API_KEY") or _os.getenv("LLM_API_KEY", "")).strip()
@@ -193,6 +207,7 @@ class LLMClient:
         base_url = _os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
         model = _os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
         results: list[list[float]] = []
+        total_tokens = 0
 
         # Process in batches of 100
         for i in range(0, len(texts), 100):
@@ -216,13 +231,15 @@ class LLMClient:
             except URLError as exc:
                 raise LLMClientError(f"Embedding request failed: {exc.reason}") from exc
 
+            usage = data.get("usage") or {}
+            total_tokens += int(usage.get("total_tokens", 0))
             items = sorted(data.get("data", []), key=lambda x: x["index"])
             results.extend(item["embedding"] for item in items)
 
-        return results
+        return EmbedResponse(embeddings=results, total_tokens=total_tokens, model=model)
 
     # Convenience alias
     chat = chat_completions
 
 
-__all__ = ["LLMClient", "LLMClientError", "LLMConfig", "LLMResponse"]
+__all__ = ["LLMClient", "LLMClientError", "LLMConfig", "LLMResponse", "EmbedResponse"]

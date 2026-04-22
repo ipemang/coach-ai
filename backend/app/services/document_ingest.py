@@ -13,7 +13,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from app.services.llm_client import LLMClient, LLMClientError
+from app.services.llm_client import LLMClient, LLMClientError, LLMResponse
+from app.services.usage_logger import UsageLogger
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,23 @@ class DocumentIngestService:
 
         # 3. Embed (batched)
         try:
-            embeddings = self._llm.embed(chunks)
+            embed_resp = self._llm.embed(chunks)
+            embeddings = embed_resp.embeddings
+            # COA-92: Log embedding token usage (non-fatal)
+            UsageLogger.log_sync(
+                supabase=self._db,
+                response=LLMResponse(
+                    content="",
+                    input_tokens=embed_resp.total_tokens,
+                    output_tokens=0,
+                    model=embed_resp.model,
+                    latency_ms=0,
+                ),
+                event_type="document_embed",
+                coach_id=coach_id,
+                endpoint="/api/v1/coach/documents",
+                metadata={"document_id": document_id, "chunk_count": len(chunks)},
+            )
         except LLMClientError as exc:
             raise RuntimeError(f"Embedding failed: {exc}") from exc
 

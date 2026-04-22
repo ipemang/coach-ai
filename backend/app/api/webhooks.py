@@ -1,11 +1,13 @@
 """Webhook routes for athlete check-in flow."""
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import logging
 import os
 import secrets
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -122,7 +124,8 @@ async def _find_athlete_by_phone(supabase_client: Any, phone_number: str) -> Ath
     logger.info("[webhook] Looking up athlete by phone variants: %s", [_mask_phone(v) for v in variants])
     for value in variants:
         rows = await _query_rows(
-            supabase_client.table("athletes").select("*").eq("phone_number", value)
+            # COA-89: exclude archived athletes (archived_at IS NULL means active)
+            supabase_client.table("athletes").select("*").eq("phone_number", value).is_("archived_at", "null")
         )
         if rows:
             row = rows[0]
@@ -317,6 +320,7 @@ async def _build_biometric_trend(athlete: "AthleteRecord", supabase: Any) -> str
 
 async def _build_system_prompt(athlete: AthleteRecord, supabase: Any, query_text: str = "") -> str:
     """Build a rich system prompt using athlete profile, current state, and coach methodology (COA-25)."""
+    _t0 = time.monotonic()
     coach_persona = ""
     coach_rules = ""
     try:
@@ -551,21 +555,29 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any, query_text
             prompt_parts.append(f"\n\n{notes_block}")
 
         # Tier 2: semantic search over coach's approved knowledge base
+        # COA-91: 3s timeout — RAG embed must not blow Meta's 20s webhook deadline
         if query_text:
-            kb_block = await _pool(
-                retrieval.retrieve_knowledge,
-                athlete.coach_id,
-                query_text,
-            )
+            try:
+                kb_block = await asyncio.wait_for(
+                    _pool(retrieval.retrieve_knowledge, athlete.coach_id, query_text),
+                    timeout=3.0,
+                )
+            except asyncio.TimeoutError:
+                kb_block = ""
+                logger.warning(
+                    "[COA-91] RAG knowledge retrieval timed out (3s) — skipping for athlete=%s",
+                    athlete.athlete_id[:8],
+                )
             if kb_block:
                 prompt_parts.append(f"\n\n{kb_block}")
     except Exception as exc:
         logger.warning("[webhook] RAG injection failed (non-fatal): %s", exc)
 
     prompt = "".join(prompt_parts)
+    _build_ms = int((time.monotonic() - _t0) * 1000)
     logger.info(
-        "[webhook] Built system prompt: %d chars, %d profile fields, %d state fields",
-        len(prompt), len(athlete_context_parts), len(state_parts),
+        "[COA-91] Built system prompt: %d chars, %d profile fields, %d state fields, latency=%dms",
+        len(prompt), len(athlete_context_parts), len(state_parts), _build_ms,
     )
     return prompt
 
@@ -1202,6 +1214,7 @@ async def _handle_athlete_message(
     wa_msg_id: str | None,
     is_voice: bool = False,
 ) -> WhatsAppWebhookResponse:
+    _handler_t0 = time.monotonic()
     # COA-56: Detect workout context before ack — affects both message wording and AI routing
     workout_context = is_voice and _detect_workout_context(text)
     if workout_context:
@@ -1241,22 +1254,24 @@ async def _handle_athlete_message(
     except Exception as exc:
         logger.error("[webhook] Failed to store check-in: %s", exc)
 
-    # COA-84: Pull-on-demand Strava sync — inject latest workout into athlete context
-    # before the AI pipeline runs. Gracefully skipped if no tokens or activity > 24h old.
-    try:
-        from app.services.workout_sync import WorkoutSyncService
-        strava_data = await WorkoutSyncService(supabase).fetch_latest(athlete.athlete_id)
-        if strava_data:
-            cs = athlete.current_state or {}
-            athlete.current_state = {**cs, **strava_data}
-            logger.info(
-                "[COA-84] Strava pull: %s %.1fkm for athlete=%s",
-                strava_data.get("strava_last_activity_type", "?"),
-                strava_data.get("strava_last_distance_km", 0.0),
-                athlete.athlete_id[:8],
-            )
-    except Exception as exc:
-        logger.warning("[COA-84] Strava pull-on-demand failed (non-fatal): %s", exc)
+    # COA-84 + COA-91: Strava sync is now fire-and-forget — it was on the critical path
+    # (up to 5s) and risked hitting Meta's 20s webhook timeout. Data is written to DB
+    # and will be available in athlete.current_state on the next message.
+    async def _strava_bg() -> None:
+        try:
+            from app.services.workout_sync import WorkoutSyncService
+            strava_data = await WorkoutSyncService(supabase).fetch_latest(athlete.athlete_id)
+            if strava_data:
+                logger.info(
+                    "[COA-84] Background Strava sync: %s %.1fkm for athlete=%s",
+                    strava_data.get("strava_last_activity_type", "?"),
+                    strava_data.get("strava_last_distance_km", 0.0),
+                    athlete.athlete_id[:8],
+                )
+        except Exception as exc:
+            logger.warning("[COA-84] Background Strava sync failed (non-fatal): %s", exc)
+
+    asyncio.ensure_future(_strava_bg())
 
     # 3. Generate structured AI decision (COA-47 + COA-56 workout context)
     decision = await _generate_ai_decision(athlete, text, supabase, workout_context=workout_context)
@@ -1487,9 +1502,10 @@ async def _handle_athlete_message(
     except Exception as exc:
         logger.warning("[memory] Memory pipeline failed for athlete=%s: %s", athlete.athlete_id[:8], exc)
 
+    _handler_ms = int((time.monotonic() - _handler_t0) * 1000)
     logger.info(
-        "[webhook] Athlete check-in processed: athlete=%s checkin_id=%s suggestion_id=%s",
-        athlete.athlete_id, checkin_id, suggestion_id,
+        "[COA-91] Athlete check-in processed: athlete=%s checkin_id=%s suggestion_id=%s total_latency=%dms",
+        athlete.athlete_id, checkin_id, suggestion_id, _handler_ms,
     )
     return WhatsAppWebhookResponse(
         status="processed",

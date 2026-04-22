@@ -14,7 +14,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.services.llm_client import LLMClient
+from app.services.llm_client import LLMClient, LLMResponse
+from app.services.usage_logger import UsageLogger
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,15 @@ class MemoryService:
             self._db.table("athletes").update({
                 "memory_summary": summary,
             }).eq("id", athlete_id).execute()
+
+            # COA-92: Log token usage for memory refresh (non-fatal)
+            UsageLogger.log_sync(
+                supabase=self._db,
+                response=response,
+                event_type="memory_refresh",
+                athlete_id=athlete_id,
+                endpoint="background/memory_service",
+            )
 
             logger.info(
                 "[memory] Refreshed summary for athlete=%s — %d chars, %d tokens used",

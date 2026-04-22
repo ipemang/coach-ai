@@ -12,7 +12,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.services.llm_client import LLMClient
+from app.services.llm_client import LLMClient, LLMResponse
+from app.services.usage_logger import UsageLogger
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +75,24 @@ class DocumentRetrievalService:
 
         # Embed the query
         try:
-            vectors = self._llm.embed([query_text.strip()[:1000]])
-            if not vectors:
+            embed_resp = self._llm.embed([query_text.strip()[:1000]])
+            if not embed_resp.embeddings:
                 return ""
-            query_embedding = vectors[0]
+            query_embedding = embed_resp.embeddings[0]
+            # COA-92: Log embed token usage (non-fatal)
+            UsageLogger.log_sync(
+                supabase=self._db,
+                response=LLMResponse(
+                    content="",
+                    input_tokens=embed_resp.total_tokens,
+                    output_tokens=0,
+                    model=embed_resp.model,
+                    latency_ms=0,
+                ),
+                event_type="rag_embed",
+                coach_id=coach_id,
+                endpoint="webhook/whatsapp",
+            )
         except Exception as exc:
             logger.warning("[retrieval] Failed to embed query: %s", exc)
             return ""

@@ -886,6 +886,79 @@ async def record_coach_decision(
     }
 
 
+class EditPlanModRequest(_BaseModel):
+    change_type: str = Field(..., description="reduce_duration | swap_type | move_day | remove")
+    change_value: str = Field(..., description="New value — minutes, session type, ISO date, or 'remove'")
+    reasoning: str | None = Field(default=None, description="Why the coach is changing this")
+
+
+@router.patch("/suggestions/{suggestion_id}/edit-plan-mod")
+async def edit_plan_modification(
+    suggestion_id: str,
+    body: EditPlanModRequest,
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+):
+    """COA-88: Edit the AI-proposed plan modification payload before approving.
+
+    On first edit, the original AI payload is preserved in plan_modification_original
+    for traceability. Subsequent edits update plan_modification_payload in place
+    without overwriting the original.
+    """
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    scope = resolve_coach_scope(principal)
+    coach_id = str(scope.coach_id)
+
+    # Fetch suggestion + verify coach ownership
+    try:
+        row = supabase.table("suggestions").select("*").eq(
+            "id", suggestion_id
+        ).eq("coach_id", coach_id).single().execute()
+        if not row.data:
+            raise HTTPException(status_code=404, detail="Suggestion not found")
+        suggestion = row.data
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Database error") from exc
+
+    existing_payload = suggestion.get("plan_modification_payload") or {}
+
+    # Build updated payload — preserve workout_id and other AI fields, overwrite editable ones
+    updated_payload = {
+        **existing_payload,
+        "change_type": body.change_type,
+        "change_value": body.change_value,
+    }
+    if body.reasoning:
+        updated_payload["coach_reasoning"] = body.reasoning
+
+    update: dict = {"plan_modification_payload": updated_payload}
+
+    # Preserve original AI payload on first edit only — never overwrite again
+    if not suggestion.get("plan_modification_original"):
+        update["plan_modification_original"] = existing_payload
+
+    try:
+        supabase.table("suggestions").update(update).eq("id", suggestion_id).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    original = update.get("plan_modification_original") or suggestion.get("plan_modification_original")
+    logger.info(
+        "[COA-88] Plan mod edited: suggestion=%s change_type=%s change_value=%s coach=%s",
+        suggestion_id[:8], body.change_type, body.change_value, coach_id[:8],
+    )
+    return {
+        "suggestion_id": suggestion_id,
+        "plan_modification_payload": updated_payload,
+        "plan_modification_original": original,
+    }
+
+
 @router.post("/suggestions/classify")
 async def classify_athlete_message(
     body: GenerateSuggestionRequest,
@@ -1037,6 +1110,79 @@ async def resend_plan_link(
 
     logger.info("[resend_plan_link] athlete=%s sent=%s", athlete_id, sent)
     return {"sent": sent, "plan_url": plan_url, "athlete_id": athlete_id}
+
+
+# ── COA-89: Soft-delete athlete ───────────────────────────────────────────────
+
+@router.delete("/athletes/{athlete_id}", status_code=200)
+async def archive_athlete(
+    athlete_id: str,
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+):
+    """COA-89: Soft-delete an athlete — sets archived_at, expires tokens, removes OAuth tokens.
+
+    The athlete row is NOT hard-deleted. Archived athletes are excluded from
+    all active webhook lookups and dashboard queries. The coach can still view
+    historical data but the athlete cannot receive messages or access /my-plan.
+    """
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    scope = resolve_coach_scope(principal)
+    coach_id = str(scope.coach_id)
+
+    # Verify athlete belongs to this coach
+    try:
+        row = supabase.table("athletes").select("id, full_name").eq(
+            "id", athlete_id
+        ).eq("coach_id", coach_id).single().execute()
+        if not row.data:
+            raise HTTPException(status_code=404, detail="Athlete not found")
+        athlete_name = row.data.get("full_name", "Unknown")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Database error") from exc
+
+    archived_at = datetime.now(timezone.utc).isoformat()
+
+    # 1. Soft-delete: stamp archived_at
+    try:
+        supabase.table("athletes").update({
+            "archived_at": archived_at,
+        }).eq("id", athlete_id).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Archive failed: {exc}") from exc
+
+    # 2. Expire all active connect tokens so old links stop working
+    try:
+        supabase.table("athlete_connect_tokens").update({
+            "used_at": archived_at,
+        }).eq("athlete_id", athlete_id).is_("used_at", "null").execute()
+    except Exception as exc:
+        logger.warning("[COA-89] Failed to expire tokens for athlete=%s: %s", athlete_id[:8], exc)
+
+    # 3. Remove Strava OAuth tokens
+    try:
+        supabase.table("strava_tokens").delete().eq("athlete_id", athlete_id).execute()
+    except Exception as exc:
+        logger.warning("[COA-89] Failed to delete Strava tokens for athlete=%s: %s", athlete_id[:8], exc)
+
+    # 4. Remove Oura tokens
+    try:
+        supabase.table("oura_tokens").delete().eq("athlete_id", athlete_id).execute()
+    except Exception as exc:
+        logger.warning("[COA-89] Failed to delete Oura tokens for athlete=%s: %s", athlete_id[:8], exc)
+
+    logger.info("[COA-89] Archived athlete=%s name=%s coach=%s", athlete_id[:8], athlete_name, coach_id[:8])
+    return {
+        "archived": True,
+        "athlete_id": athlete_id,
+        "athlete_name": athlete_name,
+        "archived_at": archived_at,
+    }
 
 
 # ── COA-78: Add athlete from dashboard ────────────────────────────────────────

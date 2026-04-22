@@ -243,6 +243,95 @@ async def patch_document(
     )
 
 
+@router.post("/documents/{document_id}/reingest", response_model=DocumentOut, status_code=202)
+async def reingest_document(
+    document_id: str,
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+):
+    """COA-90: Delete chunks and re-embed an existing document from its stored file.
+
+    Useful after categorisation changes or failed ingestion. The stored file in
+    Supabase Storage is not re-uploaded — chunks are rebuilt from the existing bytes.
+    Returns 202 Accepted immediately; re-ingestion runs in the background.
+    """
+    coach_id = _get_coach_id(principal)
+    supabase = _supabase(request)
+
+    # Verify ownership + fetch metadata
+    try:
+        result = supabase.table("coach_documents").select("*").eq(
+            "id", document_id
+        ).eq("coach_id", coach_id).limit(1).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Document not found")
+        doc = result.data[0]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    file_url = doc.get("file_url") or ""
+    file_type = doc.get("file_type") or "txt"
+    if not file_url:
+        raise HTTPException(status_code=422, detail="Document has no stored file — cannot reingest")
+
+    # Download stored file from Supabase Storage
+    storage_path = file_url.replace("coach-documents/", "", 1)
+    try:
+        file_bytes = supabase.storage.from_("coach-documents").download(storage_path)
+    except Exception as exc:
+        logger.error("[kb] Storage download failed for reingest document=%s: %s", document_id[:8], exc)
+        raise HTTPException(status_code=500, detail="Failed to retrieve stored file")
+
+    if not file_bytes:
+        raise HTTPException(status_code=422, detail="Stored file is empty — cannot reingest")
+
+    # Delete existing chunks (chunks cascade from coach_documents but we delete explicitly
+    # so the new ingest starts from a clean slate even before the status update lands)
+    try:
+        supabase.table("coach_document_chunks").delete().eq("document_id", document_id).execute()
+    except Exception as exc:
+        logger.warning("[kb] Failed to delete existing chunks for document=%s: %s", document_id[:8], exc)
+
+    # Reset status → pending so the UI shows the re-ingestion is in progress
+    try:
+        supabase.table("coach_documents").update({
+            "status": "pending",
+            "chunk_count": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", document_id).execute()
+    except Exception as exc:
+        logger.warning("[kb] Failed to reset document status for document=%s: %s", document_id[:8], exc)
+
+    # Trigger background re-ingestion
+    async def _reingest_bg() -> None:
+        from app.services.document_ingest import DocumentIngestService
+        try:
+            svc = DocumentIngestService(supabase)
+            count = await run_in_threadpool(svc.ingest, document_id, file_bytes, file_type, coach_id)
+            logger.info("[kb] Re-ingestion complete: document=%s chunks=%d", document_id[:8], count)
+        except Exception as exc:
+            logger.error("[kb] Background re-ingestion failed for document=%s: %s", document_id[:8], exc)
+
+    import asyncio as _asyncio
+    _asyncio.ensure_future(_reingest_bg())
+
+    logger.info("[COA-90] Triggered re-ingestion for document=%s coach=%s", document_id[:8], coach_id[:8])
+    return DocumentOut(
+        id=doc["id"],
+        filename=doc["filename"],
+        original_filename=doc["original_filename"],
+        file_type=doc["file_type"],
+        category=doc.get("category"),
+        ai_accessible=doc.get("ai_accessible", False),
+        status="pending",
+        size_bytes=doc.get("size_bytes"),
+        chunk_count=None,
+        created_at=str(doc.get("created_at") or ""),
+    )
+
+
 @router.delete("/documents/{document_id}", status_code=204)
 async def delete_document(
     document_id: str,
