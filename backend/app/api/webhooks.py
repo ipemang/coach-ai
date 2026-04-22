@@ -1497,7 +1497,6 @@ async def _handle_athlete_message(
             except Exception as _exc:
                 logger.warning("[memory] Background refresh failed for athlete=%s: %s", athlete.athlete_id[:8], _exc)
 
-        import asyncio
         asyncio.ensure_future(_refresh_bg())
     except Exception as exc:
         logger.warning("[memory] Memory pipeline failed for athlete=%s: %s", athlete.athlete_id[:8], exc)
