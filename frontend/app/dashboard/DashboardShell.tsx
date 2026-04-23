@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createBrowserSupabase } from "@/app/lib/supabase";
 import type { Athlete, Suggestion } from "@/app/lib/types";
 
@@ -299,7 +300,7 @@ function Greeting({ athleteCount }: { athleteCount: number }) {
 
 // ─── Athlete Card ─────────────────────────────────────────────────────────────
 
-function AthleteCard({ athlete, onOpen }: { athlete: EnrichedAthlete; onOpen: (a: EnrichedAthlete) => void; }) {
+function AthleteCard({ athlete, href }: { athlete: EnrichedAthlete; href: string; }) {
   const profile = getProfile(athlete);
   const pending = athlete.pending_suggestions ?? 0;
   const tone: "aegean" | "terra" | "ochre" | "linen" = pending > 0 ? "terra" : "aegean";
@@ -307,7 +308,8 @@ function AthleteCard({ athlete, onOpen }: { athlete: EnrichedAthlete; onOpen: (a
   const weekData = useMemo(() => buildWeekData(), []);
 
   return (
-    <article className="tessera ca-rise" style={{ padding: 0, cursor: "pointer" }} onClick={() => onOpen(athlete)}>
+    <Link href={href} style={{ textDecoration: "none", display: "block" }}>
+    <article className="tessera ca-rise" style={{ padding: 0, cursor: "pointer" }}>
       {/* Top band */}
       <div style={{ padding: "18px 20px 14px 20px", display: "flex", gap: 14, alignItems: "flex-start" }}>
         <Portrait initials={getInitials(athlete.full_name)} size={52} tone={tone} />
@@ -363,6 +365,7 @@ function AthleteCard({ athlete, onOpen }: { athlete: EnrichedAthlete; onOpen: (a
         }
       </div>
     </article>
+    </Link>
   );
 }
 
@@ -939,7 +942,7 @@ export default function DashboardShell({
                 <AthleteCard
                   key={a.id}
                   athlete={a}
-                  onOpen={(athlete) => router.push(`/dashboard/athletes/${athlete.id}`)}
+                  href={`/dashboard/athletes/${a.id}`}
                 />
               ))}
               {filteredAthletes.length === 0 && (
