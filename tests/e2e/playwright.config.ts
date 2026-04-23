@@ -5,7 +5,7 @@ import * as path from "path";
 // Load .env from this directory
 dotenv.config({ path: path.join(__dirname, ".env") });
 
-const BASE_URL = process.env.FRONTEND_URL ?? "http://localhost:3000";
+const BASE_URL = (process.env.FRONTEND_URL ?? "http://localhost:3000").replace(/\/+$/, "");
 
 export default defineConfig({
   testDir: "./specs",

@@ -29,7 +29,7 @@ import {
 // Requires SUPABASE_ANON_KEY (the public key, NOT the service_role key).
 
 async function getCoachToken(): Promise<string> {
-  const url = process.env.SUPABASE_URL;
+  const url = (process.env.SUPABASE_URL ?? "").replace(/\/+$/, "");
   const anonKey = process.env.SUPABASE_ANON_KEY;  // must be the anon/public key
 
   if (!url || !anonKey) {

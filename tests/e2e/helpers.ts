@@ -141,8 +141,13 @@ export async function assertDbRow(
 
 // ── Test data ─────────────────────────────────────────────────────────────────
 
+// Strip trailing slashes so ${URL}/path never produces double-slash URLs
+function stripSlash(s: string | undefined): string {
+  return (s ?? "").replace(/\/+$/, "");
+}
+
 export const TEST_ATHLETE_EMAIL = process.env.TEST_ATHLETE_EMAIL ?? "";
 export const TEST_ATHLETE_NAME = process.env.TEST_ATHLETE_NAME ?? "Test Athlete";
 export const TEST_ATHLETE_PASSWORD =
   process.env.TEST_ATHLETE_PASSWORD ?? "TestAthlete123!";
-export const BACKEND_URL = process.env.BACKEND_URL ?? "";
+export const BACKEND_URL = stripSlash(process.env.BACKEND_URL);
