@@ -5,6 +5,7 @@ import { AthleteSuggestions } from "@/components/athlete-suggestions";
 import { AthleteWeeklyPlan } from "@/components/athlete-weekly-plan";
 import { AthleteSidebar } from "@/components/athlete-sidebar";
 import { AthleteHistory } from "@/components/athlete-history";
+import { ResendPlanButton } from "@/components/resend-plan-button";
 import Link from "next/link";
 
 function getSupabase() {
@@ -130,7 +131,7 @@ export default async function AthleteProfilePage({
               <span>Member since {new Date(athlete.created_at).toLocaleDateString("en-US", { month: "short", year: "numeric" })}</span>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             {hasOura && (
               <span className="rounded-full bg-purple-500/15 px-3 py-1.5 text-purple-300">💍 Oura</span>
             )}
@@ -148,6 +149,7 @@ export default async function AthleteProfilePage({
                 {raceDate ? ` · ${raceDate}` : ""}
               </span>
             )}
+            <ResendPlanButton athleteId={id} />
           </div>
         </div>
       </div>
