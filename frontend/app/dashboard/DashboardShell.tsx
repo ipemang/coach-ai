@@ -922,6 +922,13 @@ export default function DashboardShell({
               )}
             </button>
           ))}
+          <Link
+            href="/dashboard/workouts"
+            className="ca-tab"
+            style={{ textDecoration: "none" }}
+          >
+            Training plans
+          </Link>
           <div style={{ flex: 1 }} />
           {tab === "roster" && (
             <div style={{ display: "flex", gap: 6, paddingBottom: 8 }}>

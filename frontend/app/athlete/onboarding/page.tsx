@@ -2,16 +2,7 @@
 
 /**
  * COA-97: Athlete onboarding flow — 5 steps.
- *
- * Steps:
- *   1. Identity   — date of birth, gender, fitness level
- *   2. Sports     — primary sport, secondary sports, years training, weekly hours
- *   3. Goals      — target event, goal description, success definition, previous bests
- *   4. History    — injury history, medical notes, current limiters
- *   5. Done       — POST /complete triggers AI profile generation; show the result
- *
- * Requires: athlete Supabase session with athlete_id in JWT (set after /auth/callback link-account + refresh).
- * Redirects to /athlete/dashboard when complete.
+ * Identity → Sports → Goals → Health history → Done
  */
 
 import { Suspense, useEffect, useState } from "react";
@@ -19,143 +10,169 @@ import { useRouter } from "next/navigation";
 import { createBrowserSupabase } from "@/app/lib/supabase";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
-
-// ── Styles ────────────────────────────────────────────────────────────────────
-
-const S = {
-  page: {
-    minHeight: "100vh",
-    background: "#0f1117",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-    padding: "24px 16px",
-  } as React.CSSProperties,
-  card: {
-    background: "#1a1d2e",
-    border: "1px solid #2a2d3e",
-    borderRadius: "20px",
-    padding: "44px",
-    width: "100%",
-    maxWidth: "520px",
-  } as React.CSSProperties,
-  label: {
-    display: "block",
-    fontSize: "13px",
-    fontWeight: 500,
-    color: "#9ca3af",
-    marginBottom: "6px",
-  } as React.CSSProperties,
-  input: {
-    width: "100%",
-    padding: "10px 14px",
-    background: "#0f1117",
-    border: "1px solid #2a2d3e",
-    borderRadius: "8px",
-    color: "#fff",
-    fontSize: "14px",
-    boxSizing: "border-box" as const,
-    outline: "none",
-  } as React.CSSProperties,
-  textarea: {
-    width: "100%",
-    padding: "12px 14px",
-    background: "#0f1117",
-    border: "1px solid #2a2d3e",
-    borderRadius: "8px",
-    color: "#fff",
-    fontSize: "14px",
-    boxSizing: "border-box" as const,
-    outline: "none",
-    resize: "vertical" as const,
-    lineHeight: 1.6,
-  } as React.CSSProperties,
-  select: {
-    width: "100%",
-    padding: "10px 14px",
-    background: "#0f1117",
-    border: "1px solid #2a2d3e",
-    borderRadius: "8px",
-    color: "#fff",
-    fontSize: "14px",
-    boxSizing: "border-box" as const,
-    outline: "none",
-    appearance: "none" as const,
-  } as React.CSSProperties,
-  primaryBtn: (disabled?: boolean): React.CSSProperties => ({
-    width: "100%",
-    padding: "12px",
-    background: disabled ? "#374151" : "linear-gradient(135deg, #6c63ff, #4f46e5)",
-    border: "none",
-    borderRadius: "8px",
-    color: "#fff",
-    fontSize: "14px",
-    fontWeight: 600,
-    cursor: disabled ? "not-allowed" : "pointer",
-    marginTop: "8px",
-  }),
-  ghostBtn: {
-    width: "100%",
-    padding: "11px",
-    background: "transparent",
-    border: "1px solid #2a2d3e",
-    borderRadius: "8px",
-    color: "#6b7280",
-    fontSize: "14px",
-    fontWeight: 500,
-    cursor: "pointer",
-    marginTop: "8px",
-  } as React.CSSProperties,
-  error: {
-    background: "#3b1219",
-    color: "#f87171",
-    border: "1px solid #7f1d1d",
-    borderRadius: "8px",
-    padding: "10px 14px",
-    fontSize: "13px",
-    marginTop: "4px",
-  } as React.CSSProperties,
-};
-
 const TOTAL_STEPS = 4;
-
-function ProgressBar({ step }: { step: number }) {
-  return (
-    <div style={{ marginBottom: "32px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
-        {Array.from({ length: TOTAL_STEPS }, (_, i) => i + 1).map((s) => (
-          <div key={s} style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1 }}>
-            <div style={{
-              width: "26px", height: "26px", borderRadius: "50%",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: "11px", fontWeight: 700,
-              background: s < step ? "#4f46e5" : s === step ? "linear-gradient(135deg, #6c63ff, #4f46e5)" : "#1e2235",
-              border: s <= step ? "none" : "1px solid #2a2d3e",
-              color: s <= step ? "#fff" : "#4b5563",
-            }}>
-              {s < step ? "✓" : s}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div style={{ display: "flex" }}>
-        {Array.from({ length: TOTAL_STEPS - 1 }, (_, i) => i + 1).map((i) => (
-          <div key={i} style={{
-            flex: 1,
-            height: "2px",
-            background: i < step ? "#4f46e5" : "#1e2235",
-            margin: "0 4px",
-          }} />
-        ))}
-      </div>
-    </div>
-  );
-}
+const STEP_LABELS = ["Your info", "Sport profile", "Goals", "Health history"];
 
 const SPORTS = ["Triathlon", "Running", "Cycling", "Swimming", "Duathlon", "Trail Running", "Mountain Biking"];
 const DISTANCES = ["5K", "10K", "Half Marathon", "Marathon", "Sprint Triathlon", "Olympic Triathlon", "70.3 Half Ironman", "Full Ironman", "Other"];
 const FITNESS_LEVELS = ["Beginner", "Intermediate", "Advanced", "Elite"];
+
+// ── Shared styles ──────────────────────────────────────────────────────────────
+
+const inputSt: React.CSSProperties = {
+  width: "100%",
+  padding: "9px 12px",
+  background: "var(--parchment)",
+  border: "1px solid var(--rule)",
+  borderRadius: 2,
+  fontSize: 13,
+  color: "var(--ink)",
+  fontFamily: "var(--body)",
+  outline: "none",
+  boxSizing: "border-box",
+};
+
+const textareaSt: React.CSSProperties = {
+  ...inputSt,
+  resize: "vertical",
+  lineHeight: 1.6,
+};
+
+const selectSt: React.CSSProperties = {
+  ...inputSt,
+  appearance: "none",
+  cursor: "pointer",
+};
+
+function FieldLabel({ children, optional }: { children: React.ReactNode; optional?: boolean }) {
+  return (
+    <label
+      style={{
+        display: "block",
+        marginBottom: 5,
+        fontSize: 10,
+        fontFamily: "var(--mono)",
+        letterSpacing: "0.12em",
+        textTransform: "uppercase",
+        color: "var(--ink-mute)",
+      }}
+    >
+      {children}
+      {optional && (
+        <span style={{ marginLeft: 6, color: "var(--rule)", textTransform: "none", letterSpacing: 0, fontSize: 11, fontFamily: "var(--body)" }}>
+          optional
+        </span>
+      )}
+    </label>
+  );
+}
+
+function ErrorBanner({ msg }: { msg: string }) {
+  return (
+    <div
+      style={{
+        padding: "0.625rem 0.875rem",
+        background: "var(--terracotta-soft)",
+        border: "1px solid oklch(0.75 0.10 45)",
+        borderRadius: 2,
+        fontSize: 12,
+        color: "var(--terracotta-deep)",
+      }}
+    >
+      {msg}
+    </div>
+  );
+}
+
+function ToggleChip({
+  label,
+  active,
+  onClick,
+  small,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  small?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: small ? "4px 11px" : "6px 14px",
+        borderRadius: 2,
+        fontSize: small ? 11 : 12,
+        fontFamily: "var(--body)",
+        fontWeight: active ? 600 : 400,
+        cursor: "pointer",
+        border: `1px solid ${active ? "var(--aegean-deep)" : "var(--rule)"}`,
+        background: active ? "var(--aegean-wash)" : "var(--parchment)",
+        color: active ? "var(--aegean-deep)" : "var(--ink-soft)",
+        transition: "all 140ms",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ── Progress bar ──────────────────────────────────────────────────────────────
+
+function ProgressBar({ step }: { step: number }) {
+  return (
+    <div style={{ marginBottom: "2rem" }}>
+      {/* Step dots */}
+      <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
+        {Array.from({ length: TOTAL_STEPS }, (_, i) => i + 1).map((s, i) => (
+          <div key={s} style={{ display: "flex", alignItems: "center", flex: 1 }}>
+            <div
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 2,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 11,
+                fontFamily: "var(--mono)",
+                fontWeight: 700,
+                background: s < step ? "var(--aegean-deep)" : s === step ? "var(--terracotta)" : "var(--linen-deep)",
+                border: `1px solid ${s < step ? "var(--aegean-deep)" : s === step ? "var(--terracotta)" : "var(--rule)"}`,
+                color: s <= step ? "oklch(0.97 0.01 50)" : "var(--ink-mute)",
+                flexShrink: 0,
+              }}
+            >
+              {s < step ? "✓" : s}
+            </div>
+            {i < TOTAL_STEPS - 1 && (
+              <div
+                style={{
+                  flex: 1,
+                  height: 1,
+                  background: s < step ? "var(--aegean-deep)" : "var(--rule)",
+                  margin: "0 4px",
+                }}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+      {/* Step label */}
+      <p
+        className="ca-mono"
+        style={{
+          marginTop: 10,
+          fontSize: 10.5,
+          color: "var(--terracotta-deep)",
+          letterSpacing: "0.10em",
+        }}
+      >
+        Step {step} of {TOTAL_STEPS} — {STEP_LABELS[step - 1]}
+      </p>
+    </div>
+  );
+}
 
 // ── Step 1: Identity ──────────────────────────────────────────────────────────
 
@@ -178,42 +195,44 @@ function StepIdentity({ onNext }: { onNext: (d: object) => Promise<void> }) {
   }
 
   return (
-    <form onSubmit={submit} style={{ display: "grid", gap: "18px" }}>
+    <form onSubmit={submit} style={{ display: "grid", gap: "1.125rem" }}>
       <div>
-        <label style={S.label}>Date of birth <span style={{ color: "#4b5563" }}>(optional)</span></label>
-        <input type="date" value={dob} onChange={(e) => setDob(e.target.value)} style={S.input} />
+        <FieldLabel optional>Date of birth</FieldLabel>
+        <input type="date" value={dob} onChange={(e) => setDob(e.target.value)} style={inputSt} />
       </div>
+
       <div>
-        <label style={S.label}>Gender <span style={{ color: "#4b5563" }}>(optional)</span></label>
-        <select value={gender} onChange={(e) => setGender(e.target.value)} style={S.select}>
+        <FieldLabel optional>Gender</FieldLabel>
+        <select value={gender} onChange={(e) => setGender(e.target.value)} style={selectSt}>
           <option value="">Prefer not to say</option>
           <option value="male">Male</option>
           <option value="female">Female</option>
           <option value="non_binary">Non-binary</option>
         </select>
       </div>
+
       <div>
-        <label style={S.label}>Current fitness level *</label>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <FieldLabel>Current fitness level</FieldLabel>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
           {FITNESS_LEVELS.map((level) => (
-            <button
-              key={level} type="button"
+            <ToggleChip
+              key={level}
+              label={level}
+              active={fitnessLevel === level}
               onClick={() => setFitnessLevel(level)}
-              style={{
-                padding: "7px 16px", borderRadius: "20px", fontSize: "13px", fontWeight: 500,
-                cursor: "pointer",
-                border: fitnessLevel === level ? "1px solid #6c63ff" : "1px solid #2a2d3e",
-                background: fitnessLevel === level ? "rgba(108,99,255,0.15)" : "#0f1117",
-                color: fitnessLevel === level ? "#a5b4fc" : "#6b7280",
-              }}
-            >
-              {level}
-            </button>
+            />
           ))}
         </div>
       </div>
-      {error && <div style={S.error}>{error}</div>}
-      <button type="submit" disabled={loading || !fitnessLevel} style={S.primaryBtn(loading || !fitnessLevel)}>
+
+      {error && <ErrorBanner msg={error} />}
+
+      <button
+        type="submit"
+        disabled={loading || !fitnessLevel}
+        className="ca-btn ca-btn-primary"
+        style={{ width: "100%", justifyContent: "center", padding: "11px", fontSize: 13, marginTop: 4, opacity: loading || !fitnessLevel ? 0.5 : 1 }}
+      >
         {loading ? "Saving…" : "Continue →"}
       </button>
     </form>
@@ -252,56 +271,38 @@ function StepSports({ onNext, onBack }: { onNext: (d: object) => Promise<void>; 
   }
 
   return (
-    <form onSubmit={submit} style={{ display: "grid", gap: "20px" }}>
+    <form onSubmit={submit} style={{ display: "grid", gap: "1.25rem" }}>
       <div>
-        <label style={S.label}>Primary sport *</label>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <FieldLabel>Primary sport</FieldLabel>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
           {SPORTS.map((s) => (
-            <button key={s} type="button" onClick={() => setPrimarySport(s)}
-              style={{
-                padding: "7px 14px", borderRadius: "20px", fontSize: "13px", fontWeight: 500, cursor: "pointer",
-                border: primarySport === s ? "1px solid #6c63ff" : "1px solid #2a2d3e",
-                background: primarySport === s ? "rgba(108,99,255,0.15)" : "#0f1117",
-                color: primarySport === s ? "#a5b4fc" : "#6b7280",
-              }}
-            >{s}</button>
+            <ToggleChip key={s} label={s} active={primarySport === s} onClick={() => setPrimarySport(s)} />
           ))}
         </div>
       </div>
+
       <div>
-        <label style={S.label}>Other sports you train <span style={{ color: "#4b5563" }}>(optional)</span></label>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <FieldLabel optional>Other sports you train</FieldLabel>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
           {SPORTS.filter((s) => s !== primarySport).map((s) => (
-            <button key={s} type="button" onClick={() => toggleSecondary(s)}
-              style={{
-                padding: "6px 12px", borderRadius: "20px", fontSize: "12px", fontWeight: 500, cursor: "pointer",
-                border: secondary.includes(s) ? "1px solid #4b5563" : "1px solid #1e2235",
-                background: secondary.includes(s) ? "#1e2235" : "transparent",
-                color: secondary.includes(s) ? "#9ca3af" : "#4b5563",
-              }}
-            >{s}</button>
+            <ToggleChip key={s} label={s} active={secondary.includes(s)} onClick={() => toggleSecondary(s)} small />
           ))}
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
         <div>
-          <label style={S.label}>Years training</label>
-          <input type="number" min="0" max="50" value={years} onChange={(e) => setYears(e.target.value)}
-            placeholder="e.g. 3" style={S.input} />
+          <FieldLabel optional>Years training</FieldLabel>
+          <input type="number" min="0" max="50" value={years} onChange={(e) => setYears(e.target.value)} placeholder="e.g. 3" style={inputSt} />
         </div>
         <div>
-          <label style={S.label}>Weekly hours</label>
-          <input type="number" min="0" max="40" step="0.5" value={hours} onChange={(e) => setHours(e.target.value)}
-            placeholder="e.g. 10" style={S.input} />
+          <FieldLabel optional>Weekly hours</FieldLabel>
+          <input type="number" min="0" max="40" step="0.5" value={hours} onChange={(e) => setHours(e.target.value)} placeholder="e.g. 10" style={inputSt} />
         </div>
       </div>
-      {error && <div style={S.error}>{error}</div>}
-      <div style={{ display: "grid", gap: "8px" }}>
-        <button type="submit" disabled={loading} style={S.primaryBtn(loading)}>
-          {loading ? "Saving…" : "Continue →"}
-        </button>
-        <button type="button" onClick={onBack} style={S.ghostBtn}>← Back</button>
-      </div>
+
+      {error && <ErrorBanner msg={error} />}
+      <NavButtons onBack={onBack} loading={loading} label="Continue →" />
     </form>
   );
 }
@@ -338,50 +339,43 @@ function StepGoals({ onNext, onBack }: { onNext: (d: object) => Promise<void>; o
   }
 
   return (
-    <form onSubmit={submit} style={{ display: "grid", gap: "18px" }}>
+    <form onSubmit={submit} style={{ display: "grid", gap: "1.125rem" }}>
       <div>
-        <label style={S.label}>Target event <span style={{ color: "#4b5563" }}>(optional)</span></label>
-        <input type="text" value={eventName} onChange={(e) => setEventName(e.target.value)}
-          placeholder="e.g. Miami 70.3, Boston Marathon" style={S.input} />
+        <FieldLabel optional>Target event</FieldLabel>
+        <input type="text" value={eventName} onChange={(e) => setEventName(e.target.value)} placeholder="e.g. Miami 70.3, Boston Marathon" style={inputSt} />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
         <div>
-          <label style={S.label}>Event date</label>
-          <input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} style={S.input} />
+          <FieldLabel optional>Event date</FieldLabel>
+          <input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} style={inputSt} />
         </div>
         <div>
-          <label style={S.label}>Distance</label>
-          <select value={eventDistance} onChange={(e) => setEventDistance(e.target.value)} style={S.select}>
+          <FieldLabel optional>Distance</FieldLabel>
+          <select value={eventDistance} onChange={(e) => setEventDistance(e.target.value)} style={selectSt}>
             <option value="">Select…</option>
             {DISTANCES.map((d) => <option key={d} value={d}>{d}</option>)}
           </select>
         </div>
       </div>
+
       <div>
-        <label style={S.label}>Your main goal *</label>
-        <textarea value={goal} onChange={(e) => setGoal(e.target.value)} rows={3}
-          placeholder="e.g. Finish my first half ironman under 6 hours"
-          style={S.textarea} />
+        <FieldLabel>Your main goal</FieldLabel>
+        <textarea value={goal} onChange={(e) => setGoal(e.target.value)} rows={3} placeholder="e.g. Finish my first half ironman under 6 hours" style={textareaSt} />
       </div>
+
       <div>
-        <label style={S.label}>How will you know you succeeded? <span style={{ color: "#4b5563" }}>(optional)</span></label>
-        <textarea value={success} onChange={(e) => setSuccess(e.target.value)} rows={2}
-          placeholder="e.g. Cross the finish line feeling strong, not just survive it"
-          style={S.textarea} />
+        <FieldLabel optional>How will you know you succeeded?</FieldLabel>
+        <textarea value={success} onChange={(e) => setSuccess(e.target.value)} rows={2} placeholder="e.g. Cross the finish line feeling strong, not just survive it" style={textareaSt} />
       </div>
+
       <div>
-        <label style={S.label}>Personal bests / past race times <span style={{ color: "#4b5563" }}>(optional)</span></label>
-        <textarea value={bests} onChange={(e) => setBests(e.target.value)} rows={2}
-          placeholder="e.g. 5K: 22 min, 70.3: 5:45"
-          style={S.textarea} />
+        <FieldLabel optional>Personal bests / past race times</FieldLabel>
+        <textarea value={bests} onChange={(e) => setBests(e.target.value)} rows={2} placeholder="e.g. 5K: 22 min, 70.3: 5:45" style={textareaSt} />
       </div>
-      {error && <div style={S.error}>{error}</div>}
-      <div style={{ display: "grid", gap: "8px" }}>
-        <button type="submit" disabled={loading} style={S.primaryBtn(loading)}>
-          {loading ? "Saving…" : "Continue →"}
-        </button>
-        <button type="button" onClick={onBack} style={S.ghostBtn}>← Back</button>
-      </div>
+
+      {error && <ErrorBanner msg={error} />}
+      <NavButtons onBack={onBack} loading={loading} label="Continue →" />
     </form>
   );
 }
@@ -399,11 +393,7 @@ function StepHistory({ onNext, onBack }: { onNext: (d: object) => Promise<void>;
     e.preventDefault();
     setLoading(true); setError(null);
     try {
-      await onNext({
-        injury_history: injuries || null,
-        medical_notes: medical || null,
-        current_limiters: limiters || null,
-      });
+      await onNext({ injury_history: injuries || null, medical_notes: medical || null, current_limiters: limiters || null });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
       setLoading(false);
@@ -411,35 +401,28 @@ function StepHistory({ onNext, onBack }: { onNext: (d: object) => Promise<void>;
   }
 
   return (
-    <form onSubmit={submit} style={{ display: "grid", gap: "18px" }}>
-      <p style={{ color: "#6b7280", fontSize: "13px", margin: 0, lineHeight: 1.6 }}>
-        This information helps your coach and AI understand your body. All fields are optional — share only what you're comfortable with.
+    <form onSubmit={submit} style={{ display: "grid", gap: "1.125rem" }}>
+      <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: 0, lineHeight: 1.65 }}>
+        This helps your coach and AI understand your body. All fields are optional — share only what you&apos;re comfortable with.
       </p>
+
       <div>
-        <label style={S.label}>Injury history <span style={{ color: "#4b5563" }}>(optional)</span></label>
-        <textarea value={injuries} onChange={(e) => setInjuries(e.target.value)} rows={3}
-          placeholder="e.g. Right IT band flares up above 15K. Had a stress fracture in 2023, fully healed."
-          style={S.textarea} />
+        <FieldLabel optional>Injury history</FieldLabel>
+        <textarea value={injuries} onChange={(e) => setInjuries(e.target.value)} rows={3} placeholder="e.g. Right IT band flares up above 15K. Had a stress fracture in 2023, fully healed." style={textareaSt} />
       </div>
+
       <div>
-        <label style={S.label}>Medical notes <span style={{ color: "#4b5563" }}>(optional)</span></label>
-        <textarea value={medical} onChange={(e) => setMedical(e.target.value)} rows={2}
-          placeholder="e.g. Asthma — use inhaler before hard sessions. No other conditions."
-          style={S.textarea} />
+        <FieldLabel optional>Medical notes</FieldLabel>
+        <textarea value={medical} onChange={(e) => setMedical(e.target.value)} rows={2} placeholder="e.g. Asthma — use inhaler before hard sessions." style={textareaSt} />
       </div>
+
       <div>
-        <label style={S.label}>What's currently limiting your performance? <span style={{ color: "#4b5563" }}>(optional)</span></label>
-        <textarea value={limiters} onChange={(e) => setLimiters(e.target.value)} rows={2}
-          placeholder="e.g. Poor swim technique, low overall weekly volume, work schedule limits morning training"
-          style={S.textarea} />
+        <FieldLabel optional>What&apos;s currently limiting your performance?</FieldLabel>
+        <textarea value={limiters} onChange={(e) => setLimiters(e.target.value)} rows={2} placeholder="e.g. Poor swim technique, limited morning training time" style={textareaSt} />
       </div>
-      {error && <div style={S.error}>{error}</div>}
-      <div style={{ display: "grid", gap: "8px" }}>
-        <button type="submit" disabled={loading} style={S.primaryBtn(loading)}>
-          {loading ? "Saving…" : "Generate my profile →"}
-        </button>
-        <button type="button" onClick={onBack} style={S.ghostBtn}>← Back</button>
-      </div>
+
+      {error && <ErrorBanner msg={error} />}
+      <NavButtons onBack={onBack} loading={loading} label="Generate my profile →" />
     </form>
   );
 }
@@ -452,37 +435,63 @@ function StepDone({ athleteName, aiProfile }: { athleteName: string; aiProfile: 
 
   return (
     <div style={{ textAlign: "center" }}>
-      <div style={{ fontSize: "52px", marginBottom: "16px" }}>🎉</div>
-      <h2 style={{ color: "#fff", fontSize: "22px", fontWeight: 700, margin: "0 0 8px" }}>
+      <p style={{ fontSize: 52, margin: "0 0 16px" }}>🎉</p>
+      <h2
+        className="ca-display"
+        style={{ fontSize: 24, color: "var(--ink)", margin: "0 0 8px" }}
+      >
         You&apos;re all set, {firstName}!
       </h2>
-      <p style={{ color: "#6b7280", fontSize: "14px", margin: "0 0 28px", lineHeight: 1.6 }}>
-        Your AI training profile has been generated. Your coach can now see exactly who you are and tailor your plan accordingly.
+      <p
+        style={{
+          fontSize: 13,
+          color: "var(--ink-soft)",
+          lineHeight: 1.65,
+          margin: "0 0 24px",
+        }}
+      >
+        Your AI training profile has been generated. Your coach can now
+        tailor your plan to exactly who you are.
       </p>
 
-      {/* AI Profile card */}
-      <div style={{
-        background: "rgba(79,70,229,0.08)",
-        border: "1px solid rgba(79,70,229,0.25)",
-        borderRadius: "12px",
-        padding: "20px",
-        marginBottom: "28px",
-        textAlign: "left",
-      }}>
-        <p style={{ color: "#6c63ff", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 10px" }}>
+      {/* AI profile card */}
+      <div
+        style={{
+          padding: "1rem 1.25rem",
+          background: "var(--aegean-wash)",
+          border: "1px solid var(--aegean-soft)",
+          borderLeft: "3px solid var(--aegean-deep)",
+          borderRadius: 2,
+          textAlign: "left",
+          marginBottom: "1.75rem",
+        }}
+      >
+        <p
+          className="ca-eyebrow ca-eyebrow-aegean"
+          style={{ fontSize: 9.5, marginBottom: 8 }}
+        >
           ⚡ Your AI profile
         </p>
-        <p style={{ color: "#c4c9d4", fontSize: "14px", lineHeight: 1.7, margin: 0 }}>
+        <p
+          style={{
+            fontSize: 13,
+            color: "var(--ink-soft)",
+            lineHeight: 1.7,
+            margin: 0,
+          }}
+        >
           {aiProfile}
         </p>
       </div>
 
       <button
         onClick={() => router.push("/athlete/dashboard")}
+        className="ca-btn ca-btn-primary"
         style={{
-          ...S.primaryBtn(false),
-          fontSize: "15px",
-          padding: "14px",
+          width: "100%",
+          justifyContent: "center",
+          padding: "12px",
+          fontSize: 14,
         }}
       >
         Go to my dashboard →
@@ -491,9 +500,66 @@ function StepDone({ athleteName, aiProfile }: { athleteName: string; aiProfile: 
   );
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
+// ── Generating screen ─────────────────────────────────────────────────────────
 
-const STEP_LABELS = ["Your info", "Sport profile", "Goals", "Health history"];
+function GeneratingScreen() {
+  return (
+    <div
+      className="mosaic-bg"
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div style={{ textAlign: "center" }}>
+        <div
+          className="ca-avatar"
+          style={{ width: 52, height: 52, fontSize: 22, margin: "0 auto 16px" }}
+        >
+          <span>⚡</span>
+        </div>
+        <h2
+          className="ca-display"
+          style={{ fontSize: 20, color: "var(--ink)", margin: "0 0 8px" }}
+        >
+          Generating your AI profile…
+        </h2>
+        <p className="ca-mono" style={{ fontSize: 11, color: "var(--ink-mute)" }}>
+          This takes about 10 seconds
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Nav buttons ───────────────────────────────────────────────────────────────
+
+function NavButtons({ onBack, loading, label }: { onBack: () => void; loading: boolean; label: string }) {
+  return (
+    <div style={{ display: "grid", gap: 8, marginTop: 4 }}>
+      <button
+        type="submit"
+        disabled={loading}
+        className="ca-btn ca-btn-primary"
+        style={{ width: "100%", justifyContent: "center", padding: "11px", fontSize: 13, opacity: loading ? 0.5 : 1 }}
+      >
+        {loading ? "Saving…" : label}
+      </button>
+      <button
+        type="button"
+        onClick={onBack}
+        className="ca-btn ca-btn-ghost"
+        style={{ width: "100%", justifyContent: "center", padding: "10px", fontSize: 13 }}
+      >
+        ← Back
+      </button>
+    </div>
+  );
+}
+
+// ── Page orchestrator ─────────────────────────────────────────────────────────
 
 function OnboardingInner() {
   const router = useRouter();
@@ -516,16 +582,17 @@ function OnboardingInner() {
     return data.user?.user_metadata?.full_name ?? data.user?.email ?? "";
   }
 
-  // Check if already complete on mount
   useEffect(() => {
-    getToken().then((token) =>
-      fetch(`${BACKEND}/api/v1/athlete/onboarding/status`, {
-        headers: { Authorization: `Bearer ${token}` },
+    getToken()
+      .then((token) =>
+        fetch(`${BACKEND}/api/v1/athlete/onboarding/status`, { headers: { Authorization: `Bearer ${token}` } })
+      )
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.onboarding_complete) router.replace("/athlete/dashboard");
+        if (data.full_name) setAthleteName(data.full_name);
       })
-    ).then((r) => r.json()).then((data) => {
-      if (data.onboarding_complete) router.replace("/athlete/dashboard");
-      if (data.full_name) setAthleteName(data.full_name);
-    }).catch(() => {});
+      .catch(() => {});
   }, [router]);
 
   async function post(endpoint: string, body: object) {
@@ -571,49 +638,41 @@ function OnboardingInner() {
     }
   }
 
-  // Generating profile loading screen
-  if (completing) {
-    return (
-      <div style={S.page}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{
-            width: "52px", height: "52px", borderRadius: "14px",
-            background: "linear-gradient(135deg, #6c63ff, #4f46e5)",
-            margin: "0 auto 20px",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: "26px",
-          }}>⚡</div>
-          <h2 style={{ color: "#fff", fontSize: "18px", fontWeight: 700, margin: "0 0 10px" }}>
-            Generating your AI profile…
-          </h2>
-          <p style={{ color: "#6b7280", fontSize: "14px" }}>This takes about 10 seconds</p>
-        </div>
-      </div>
-    );
-  }
+  if (completing) return <GeneratingScreen />;
 
   return (
-    <div style={S.page}>
-      <style>{`select option { background: #1a1d2e; color: #fff; }`}</style>
-      <div style={S.card}>
+    <div
+      className="mosaic-bg"
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1.5rem",
+      }}
+    >
+      <style>{`select option { background: var(--parchment); color: var(--ink); }`}</style>
+      <div
+        className="ca-panel"
+        style={{ width: "100%", maxWidth: step === 5 ? 480 : 520, padding: "2.5rem 2rem" }}
+      >
         {/* Header */}
-        <div style={{ marginBottom: "28px", textAlign: "center" }}>
-          <div style={{
-            width: "44px", height: "44px", borderRadius: "11px",
-            background: "linear-gradient(135deg, #6c63ff, #4f46e5)",
-            margin: "0 auto 14px",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: "22px",
-          }}>⚡</div>
-          <h1 style={{ color: "#fff", fontSize: "20px", fontWeight: 700, margin: "0 0 4px" }}>
-            {step < 5 ? "Set up your athlete profile" : "Welcome to Coach.AI"}
-          </h1>
-          {step < 5 && (
-            <p style={{ color: "#6b7280", fontSize: "13px", margin: 0 }}>
-              Step {step} of {TOTAL_STEPS} — {STEP_LABELS[step - 1]}
-            </p>
-          )}
-        </div>
+        {step < 5 && (
+          <div style={{ textAlign: "center", marginBottom: "1.75rem" }}>
+            <div
+              className="ca-avatar"
+              style={{ width: 44, height: 44, fontSize: 18, margin: "0 auto 14px" }}
+            >
+              <span>C</span>
+            </div>
+            <h1
+              className="ca-display"
+              style={{ fontSize: 22, color: "var(--ink)", margin: "0 0 4px" }}
+            >
+              Set up your athlete profile
+            </h1>
+          </div>
+        )}
 
         {step < 5 && <ProgressBar step={step} />}
 
@@ -629,11 +688,21 @@ function OnboardingInner() {
 
 export default function AthleteOnboardingPage() {
   return (
-    <Suspense fallback={
-      <div style={{ minHeight: "100vh", background: "#0f1117", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <p style={{ color: "#6b7280", fontFamily: "sans-serif", fontSize: "14px" }}>Loading…</p>
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div
+          className="mosaic-bg"
+          style={{
+            minHeight: "100vh",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <p className="ca-eyebrow" style={{ fontSize: 11 }}>Loading…</p>
+        </div>
+      }
+    >
       <OnboardingInner />
     </Suspense>
   );
