@@ -50,20 +50,8 @@ DO $$ BEGIN
 END $$;
 
 -- ── messages table ───────────────────────────────────────────────────────────
-
-DO $$ BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies WHERE tablename = 'messages' AND policyname = 'athlete_read_own_messages'
-  ) THEN
-    CREATE POLICY "athlete_read_own_messages" ON public.messages
-      FOR SELECT
-      USING (
-        athlete_id IN (
-          SELECT id FROM public.athletes WHERE auth_user_id = auth.uid()
-        )
-      );
-  END IF;
-END $$;
+-- NOTE: No 'messages' table exists — athlete chat goes via WhatsApp (not Supabase).
+-- Policy will be added if a messages table is created in the future.
 
 -- ── athlete_checkins table ───────────────────────────────────────────────────
 

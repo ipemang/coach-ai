@@ -17,12 +17,22 @@ export default function LoginPage() {
     setError(null);
 
     const supabase = createBrowserSupabase();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
       setError(error.message);
       setLoading(false);
     } else {
+      // Route athletes to their dashboard, coaches to the coach dashboard
+      const token = data.session?.access_token ?? "";
+      try {
+        const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+        const claims = JSON.parse(window.atob(b64 + "==".slice((b64.length % 4) || 4)));
+        if (claims.role === "athlete" || claims.athlete_id) {
+          router.push("/athlete/dashboard");
+          return;
+        }
+      } catch { /* fall through to coach dashboard */ }
       router.push("/dashboard");
       router.refresh();
     }
