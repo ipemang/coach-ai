@@ -1,6 +1,16 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+/** Decode a Supabase JWT and return true if the payload has athlete claims. */
+function jwtIsAthlete(accessToken: string): boolean {
+  try {
+    const payload = JSON.parse(atob(accessToken.split(".")[1]));
+    return !!payload.athlete_id || payload.role === "athlete";
+  } catch {
+    return false;
+  }
+}
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
@@ -25,23 +35,36 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh session — must not call supabase.auth.getUser() before this
+  // Verify session server-side (must come before any auth checks)
   const { data: { user } } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
 
-  // Protect all /dashboard routes
+  // ── Protect coach dashboard ──────────────────────────────────────────────
   if (pathname.startsWith("/dashboard") && !user) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     return NextResponse.redirect(loginUrl);
   }
 
-  // Redirect logged-in users away from login page
+  // ── Protect athlete routes ───────────────────────────────────────────────
+  if (
+    (pathname.startsWith("/athlete/dashboard") ||
+      pathname.startsWith("/athlete/onboarding")) &&
+    !user
+  ) {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    return NextResponse.redirect(loginUrl);
+  }
+
+  // ── Redirect already-logged-in users away from /login ───────────────────
   if (pathname === "/login" && user) {
-    const dashboardUrl = request.nextUrl.clone();
-    dashboardUrl.pathname = "/dashboard";
-    return NextResponse.redirect(dashboardUrl);
+    const { data: { session } } = await supabase.auth.getSession();
+    const athlete = session ? jwtIsAthlete(session.access_token) : false;
+    const dest = request.nextUrl.clone();
+    dest.pathname = athlete ? "/athlete/dashboard" : "/dashboard";
+    return NextResponse.redirect(dest);
   }
 
   return supabaseResponse;

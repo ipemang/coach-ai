@@ -52,32 +52,41 @@ The product is live on Railway (production). Active development happens in this 
 
 ## Active Priorities (as of April 2026)
 
-Shipped: COA-65 (suggestion review UI), COA-74 (athlete portal), COA-62 auth pages + JWT hook, COA-88 (edit plan mod), COA-89 (athlete soft-delete), COA-90 (document reingest), COA-91 (webhook latency), COA-92 (usage logging).
-
 **Felipe owns all work — full stack. Patrick (Pedrick) is no longer on the project (removed 2026-04-22).**
 
-### Phase 1 — Athlete Auth Foundation (backend first, blocks everything else)
-1. **COA-93** 🔴 — Athlete auth infrastructure (accounts, invite tokens, JWT claims, RLS)
-2. **COA-94** 🔴 — Athlete onboarding API (5-step endpoints + AI profile generation)
-3. **COA-95** 🟠 — Athlete file storage (upload/list/delete + coach visibility)
-4. **COA-100** 🔴 — Coach auth completion (/auth/callback, middleware, email invites)
+### ✅ Shipped (all code committed, deployed to Railway production)
+- COA-65 — Suggestion review UI
+- COA-74 — Athlete portal (/my-plan, token-based, old flow)
+- COA-62 — Auth pages + JWT hook + RLS
+- COA-88 — Edit plan modal
+- COA-89 — Athlete soft-delete
+- COA-90 — Document reingest
+- COA-91 — Webhook latency
+- COA-92 — Usage logging
+- COA-75 — Resend plan link button (`resend-plan-button.tsx`)
+- COA-78 — Add athlete from dashboard (InviteModal in DashboardShell → send-invite API)
+- COA-76 — Athlete detail page redesign (`/dashboard/athletes/[id]` + mosaic components)
+- COA-77 — Workout editor redesign (`/dashboard/workouts` mosaic)
+- COA-93 — Athlete auth infrastructure (Supabase accounts, invite tokens, JWT claims, RLS)
+- COA-94 — Athlete onboarding API (5-step endpoints + AI profile generation)
+- COA-95 — Athlete file storage (upload/list/delete + coach visibility)
+- COA-96 — Athlete join flow (`/athlete/join` mosaic, invite validation, Supabase signUp)
+- COA-97 — Athlete onboarding flow (`/athlete/onboarding` 5-step mosaic UI + AI profile reveal)
+- COA-98 — Athlete dashboard (`/athlete/dashboard` mosaic, plan + files tabs)
+- COA-99 — Public landing page (`/` mosaic, coach + athlete paths)
+- COA-100 — Coach auth completion (/auth/callback, middleware JWT routing, email invites)
 
-### Phase 2 — Athlete Experience (frontend, after Phase 1)
-5. **COA-96** 🟠 — Athlete join flow (invite validation, account creation)
-6. **COA-97** 🟠 — Athlete onboarding flow (5-step UI + AI profile reveal)
-7. **COA-98** 🟠 — Athlete dashboard (replaces /my-plan)
+### 🔴 Next: End-to-End Production Testing
+The entire athlete auth + onboarding flow has never been tested in Railway production.
+Test checklist: `~/Documents/Claude/Projects/Coach.AI/production-test-athlete-auth.md`
+Tests A–K must pass before the flow is considered live.
 
-### Phase 3 — Public Web
-8. **COA-99** 🟠 — Public landing page (coach path + athlete path)
-
-### Previously Patrick's (now Felipe's, lower priority than Phase 1–3)
-- **COA-75** — Resend plan link button
-- **COA-78** — Add athlete from dashboard (partially superseded by COA-93/96)
-- **COA-76** — Athlete detail page (coach-side view)
-- **COA-77** — Workout editor
+### Known gaps (not yet ticketed)
+- **`/my-plan` page** still uses old dark theme — backward-compat page (30-day window), low priority
+- **Athlete routes middleware protection** — ✅ Fixed 2026-04-23 (middleware now routes athletes correctly and protects `/athlete/dashboard` + `/athlete/onboarding`)
 
 ### Deferred
-- **COA-73** — Video analysis (V1.1, post-validation)
+- COA-73 — Video analysis (V1.1, post-validation)
 
 ---
 
