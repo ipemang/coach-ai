@@ -39,10 +39,10 @@ export async function getInviteToken(
 
   while (Date.now() < deadline) {
     const { data, error } = await sb
-      .from("athlete_connect_tokens")
+      .from("athlete_invite_tokens")
       .select("token, created_at")
-      .eq("athlete_email", athleteEmail.toLowerCase().trim())
-      .is("linked_at", null)
+      .eq("email", athleteEmail.toLowerCase().trim())
+      .is("used_at", null)
       .order("created_at", { ascending: false })
       .limit(1)
       .single();

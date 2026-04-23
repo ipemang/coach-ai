@@ -1,7 +1,8 @@
 """COA-93: Athlete authentication — invite generation, validation, and account linking.
 
 Endpoints:
-  POST  /api/v1/coach/athletes/{athlete_id}/invite   — coach generates a personalized invite link
+  POST  /api/v1/athlete/auth/send-invite              — coach sends invite (creates athlete + token in one call)
+  POST  /api/v1/coach/athletes/{athlete_id}/invite    — coach re-invites an existing athlete by ID
   GET   /api/v1/athlete/auth/validate-invite          — public, validates token before signup
   POST  /api/v1/athlete/auth/link-account             — athlete JWT, links Supabase account to row
 """
@@ -42,10 +43,159 @@ class ValidateInviteResponse(BaseModel):
     error: Optional[str] = None
 
 
+class SendInviteRequest(BaseModel):
+    full_name: str
+    email: str
+    phone_number: Optional[str] = None
+
+
+class SendInviteResponse(BaseModel):
+    message: str
+    athlete_id: str
+    invite_url: str
+
+
 class LinkAccountResponse(BaseModel):
     linked: bool
     athlete_id: str
     coach_id: str
+
+
+# ── Endpoint: coach sends a new invite (create athlete + token in one call) ───
+
+@router.post(
+    "/api/v1/athlete/auth/send-invite",
+    response_model=SendInviteResponse,
+    summary="Coach sends an athlete invite from the dashboard (COA-78 / COA-93)",
+)
+async def send_athlete_invite(
+    body: SendInviteRequest,
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach", "admin")),
+):
+    """Called by the InviteModal in the coach dashboard.
+
+    If no athlete row with this email exists for this coach, one is created.
+    If a row already exists (re-invite), a fresh token is generated.
+
+    On success the athlete receives their invite URL via WhatsApp (if a phone
+    number was provided). Email delivery can be added by wiring an SMTP/Resend
+    provider to INVITE_EMAIL_FROM / RESEND_API_KEY env vars.
+    """
+    from datetime import timedelta
+    from app.core.config import get_settings
+
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    scope = resolve_coach_scope(principal)
+    email = body.email.lower().strip()
+    name = body.full_name.strip()
+    phone = (body.phone_number or "").strip() or None
+
+    if not email:
+        raise HTTPException(status_code=422, detail="Email address is required")
+    if not name:
+        raise HTTPException(status_code=422, detail="Full name is required")
+
+    # ── Find or create athlete row ─────────────────────────────────────────────
+    athlete_id: str
+    try:
+        existing = supabase.table("athletes").select("id").eq(
+            "email", email
+        ).eq("coach_id", scope.coach_id).limit(1).execute()
+
+        if existing.data:
+            athlete_id = existing.data[0]["id"]
+            logger.info("[send-invite] Re-inviting existing athlete %s", athlete_id[:8])
+        else:
+            insert_payload: dict = {
+                "full_name": name,
+                "email": email,
+                "coach_id": scope.coach_id,
+                "organization_id": scope.organization_id,
+                "status": "invited",
+                "current_state": {},
+            }
+            if phone:
+                insert_payload["phone_number"] = phone
+                insert_payload["whatsapp_number"] = phone
+
+            result = supabase.table("athletes").insert(insert_payload).execute()
+            if not result.data:
+                raise HTTPException(status_code=500, detail="Failed to create athlete record")
+            athlete_id = result.data[0]["id"]
+            logger.info("[send-invite] Created athlete row %s for coach %s", athlete_id[:8], scope.coach_id[:8])
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("[send-invite] DB error finding/creating athlete for %s", email)
+        raise HTTPException(status_code=500, detail="Database error") from exc
+
+    # ── Invalidate old unused tokens ───────────────────────────────────────────
+    try:
+        supabase.table("athlete_invite_tokens").update(
+            {"used_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("athlete_id", athlete_id).is_("used_at", "null").execute()
+    except Exception:
+        pass
+
+    # ── Generate fresh invite token ────────────────────────────────────────────
+    raw_token = secrets.token_hex(32)
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+
+    try:
+        supabase.table("athlete_invite_tokens").insert({
+            "token": raw_token,
+            "coach_id": scope.coach_id,
+            "athlete_id": athlete_id,
+            "email": email,
+            "expires_at": expires_at,
+        }).execute()
+    except Exception as exc:
+        logger.exception("[send-invite] Failed to insert invite token for %s", email)
+        raise HTTPException(status_code=500, detail="Could not create invite token") from exc
+
+    settings = get_settings()
+    invite_url = f"{settings.frontend_url.rstrip('/')}/athlete/join?token={raw_token}"
+
+    # ── Load coach name ────────────────────────────────────────────────────────
+    try:
+        coach_row = supabase.table("coaches").select("full_name").eq(
+            "id", scope.coach_id
+        ).single().execute()
+        coach_name = (coach_row.data or {}).get("full_name", "Your coach")
+    except Exception:
+        coach_name = "Your coach"
+
+    # ── WhatsApp invite (if phone provided) ────────────────────────────────────
+    whatsapp_client = getattr(request.app.state, "whatsapp_client", None)
+    if phone and not phone.startswith("web:") and whatsapp_client:
+        try:
+            message = (
+                f"Hi {name} 👋\n\n"
+                f"{coach_name} has invited you to join Coach.AI — your personal training platform.\n\n"
+                f"Create your account here (link valid 7 days):\n{invite_url}\n\n"
+                f"Once you sign up you'll see your training plan and can chat with your AI coach."
+            )
+            import asyncio
+            asyncio.ensure_future(whatsapp_client.send_message(to=phone, body=message))
+            logger.info("[send-invite] Queued WhatsApp invite to athlete %s", athlete_id[:8])
+        except Exception:
+            logger.warning("[send-invite] WhatsApp send failed for athlete %s", athlete_id[:8], exc_info=True)
+
+    logger.info(
+        "[send-invite] Invite sent for athlete %s by coach %s (url=%s…)",
+        athlete_id[:8], scope.coach_id[:8], invite_url[:60],
+    )
+
+    return SendInviteResponse(
+        message=f"Invite sent to {email}",
+        athlete_id=athlete_id,
+        invite_url=invite_url,
+    )
 
 
 # ── Endpoint: coach generates invite for a specific athlete ───────────────────
