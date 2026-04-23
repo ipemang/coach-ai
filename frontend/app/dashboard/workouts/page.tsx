@@ -1,22 +1,41 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 
 const SESSION_TYPES = [
-  { value: "run", label: "Run" },
-  { value: "bike", label: "Bike" },
-  { value: "swim", label: "Swim" },
-  { value: "brick", label: "Brick" },
-  { value: "strength", label: "Strength" },
-  { value: "recovery", label: "Recovery" },
-  { value: "rest", label: "Rest Day" },
-  { value: "other", label: "Other" },
+  { value: "Easy Run",       label: "Easy Run",       color: "aegean" },
+  { value: "Tempo Run",      label: "Tempo Run",      color: "terra" },
+  { value: "Interval Run",   label: "Interval Run",   color: "terra" },
+  { value: "Long Run",       label: "Long Run",       color: "aegean" },
+  { value: "Easy Ride",      label: "Easy Ride",      color: "ochre" },
+  { value: "Tempo Ride",     label: "Tempo Ride",     color: "ochre" },
+  { value: "Interval Ride",  label: "Interval Ride",  color: "ochre" },
+  { value: "Long Ride",      label: "Long Ride",      color: "ochre" },
+  { value: "Swim Easy",      label: "Swim Easy",      color: "aegean" },
+  { value: "Swim Threshold", label: "Swim Threshold", color: "aegean" },
+  { value: "Swim CSS",       label: "Swim CSS",       color: "aegean" },
+  { value: "Strength",       label: "Strength",       color: "olive" },
+  { value: "Recovery",       label: "Recovery",       color: "olive" },
+  { value: "Rest",           label: "Rest",           color: "none" },
+  { value: "Brick",          label: "Brick",          color: "terra" },
+  { value: "Race",           label: "Race",           color: "terra" },
 ];
 
-const SESSION_COLORS: Record<string, string> = {
-  run: "#3b82f6", bike: "#f59e0b", swim: "#06b6d4",
-  brick: "#8b5cf6", strength: "#ef4444", recovery: "#10b981",
-  rest: "#6b7280", other: "#9ca3af",
+const COLOR_CHIP: Record<string, string> = {
+  aegean: "ca-chip ca-chip-aegean",
+  terra:  "ca-chip ca-chip-terra",
+  ochre:  "ca-chip ca-chip-ochre",
+  olive:  "ca-chip ca-chip-olive",
+  none:   "ca-chip",
+};
+
+const STATUS_COLORS: Record<string, { bg: string; border: string }> = {
+  completed:  { bg: "var(--aegean-wash)",      border: "var(--aegean-soft)" },
+  missed:     { bg: "var(--terracotta-soft)",  border: "oklch(0.75 0.10 45)" },
+  prescribed: { bg: "var(--linen)",            border: "var(--rule)" },
+  pending:    { bg: "var(--parchment)",         border: "var(--rule-soft)" },
+  sent:       { bg: "var(--aegean-wash)",      border: "var(--aegean-soft)" },
 };
 
 type Workout = {
@@ -37,8 +56,10 @@ type Athlete = { id: string; full_name: string };
 
 function getWeekDates(offset: number): Date[] {
   const today = new Date();
+  const dow = today.getDay();
+  const diffToMon = dow === 0 ? -6 : 1 - dow;
   const monday = new Date(today);
-  monday.setDate(today.getDate() - today.getDay() + 1 + offset * 7);
+  monday.setDate(today.getDate() + diffToMon + offset * 7);
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
@@ -58,15 +79,24 @@ export default function WorkoutsPage() {
   const [selectedAthlete, setSelectedAthlete] = useState<string>("");
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showForm, setShowForm] = useState<string | null>(null); // date string
+  const [showForm, setShowForm] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<Workout | null>(null);
   const [saving, setSaving] = useState(false);
 
   const weekDates = getWeekDates(weekOffset);
   const weekStart = isoDate(weekDates[0]);
   const weekEnd = isoDate(weekDates[6]);
+  const todayStr = isoDate(new Date());
 
-  // Load athletes
+  const weekLabel = `${weekDates[0].toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  })} – ${weekDates[6].toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })}`;
+
   useEffect(() => {
     fetch("/api/athletes")
       .then((r) => r.json())
@@ -76,19 +106,23 @@ export default function WorkoutsPage() {
         if (list.length > 0 && !selectedAthlete) setSelectedAthlete(list[0].id);
       })
       .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadWorkouts = useCallback(() => {
     if (!selectedAthlete) return;
     setLoading(true);
-    fetch(`/api/workouts?athlete_id=${selectedAthlete}&week_start=${weekStart}&week_end=${weekEnd}`)
+    fetch(
+      `/api/workouts?athlete_id=${selectedAthlete}&week_start=${weekStart}&week_end=${weekEnd}`
+    )
       .then((r) => r.json())
       .then((d) => setWorkouts(d.workouts ?? []))
       .finally(() => setLoading(false));
   }, [selectedAthlete, weekStart, weekEnd]);
 
-  useEffect(() => { loadWorkouts(); }, [loadWorkouts]);
+  useEffect(() => {
+    loadWorkouts();
+  }, [loadWorkouts]);
 
   async function handleDelete(id: string) {
     if (!confirm("Delete this workout?")) return;
@@ -115,43 +149,163 @@ export default function WorkoutsPage() {
     loadWorkouts();
   }
 
-  const weekLabel = `${weekDates[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${weekDates[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
-  const todayStr = isoDate(new Date());
+  function openAdd(date: string) {
+    setEditTarget(null);
+    setShowForm(date);
+  }
+
+  function openEdit(w: Workout) {
+    setEditTarget(w);
+    setShowForm(w.scheduled_date);
+  }
+
+  async function handleSave(payload: Record<string, unknown>) {
+    setSaving(true);
+    try {
+      if (editTarget) {
+        await fetch(`/api/workouts/${editTarget.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await fetch("/api/workouts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...payload,
+            athlete_id: selectedAthlete,
+            scheduled_date: showForm,
+          }),
+        });
+      }
+      setShowForm(null);
+      setEditTarget(null);
+      loadWorkouts();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const sessionChipClass = (type: string) => {
+    const meta = SESSION_TYPES.find((s) => s.value === type);
+    return COLOR_CHIP[meta?.color ?? "none"];
+  };
 
   return (
-    <main style={{ minHeight: "100vh", background: "#0f1117", color: "#e0e0e0", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
-      {/* Nav */}
-      <nav style={{ background: "#1a1d2e", borderBottom: "1px solid #2a2d3e", padding: "14px 24px", display: "flex", alignItems: "center", gap: "24px" }}>
-        <span style={{ color: "#6c63ff", fontWeight: 700, fontSize: "16px" }}>Coach.AI</span>
-        <a href="/dashboard" style={{ color: "#9ca3af", fontSize: "14px", textDecoration: "none" }}>Dashboard</a>
-        <span style={{ color: "#fff", fontSize: "14px", fontWeight: 600 }}>Training Plans</span>
-      </nav>
+    <main className="mosaic-bg" style={{ minHeight: "100vh", padding: "2rem 1.5rem" }}>
+      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
 
-      <div style={{ maxWidth: "1100px", margin: "0 auto", padding: "32px 24px" }}>
-        {/* Header row */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px", flexWrap: "wrap", gap: "12px" }}>
+        {/* Back */}
+        <Link
+          href="/dashboard"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            color: "var(--aegean-deep)",
+            fontSize: 13,
+            fontFamily: "var(--mono)",
+            letterSpacing: "0.06em",
+            textDecoration: "none",
+            marginBottom: "1.25rem",
+            opacity: 0.8,
+          }}
+        >
+          ← Dashboard
+        </Link>
+
+        {/* Header bar */}
+        <div
+          className="ca-panel"
+          style={{
+            padding: "1rem 1.5rem",
+            marginBottom: "1.25rem",
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "0.875rem",
+          }}
+        >
           <div>
-            <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#fff", margin: 0 }}>Weekly Training Plan</h1>
-            <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>Build and manage workouts per athlete</p>
+            <p className="ca-eyebrow ca-eyebrow-terra" style={{ marginBottom: 3 }}>
+              Training Plans
+            </p>
+            <h1
+              className="ca-display"
+              style={{ fontSize: 24, color: "var(--ink)", margin: 0 }}
+            >
+              Weekly Workout Editor
+            </h1>
           </div>
-          <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: "0.75rem",
+            }}
+          >
             {/* Athlete selector */}
             <select
               value={selectedAthlete}
               onChange={(e) => setSelectedAthlete(e.target.value)}
-              style={{ background: "#1a1d2e", border: "1px solid #2a2d3e", color: "#fff", padding: "8px 12px", borderRadius: "8px", fontSize: "14px" }}
+              style={{
+                padding: "7px 12px",
+                background: "var(--parchment)",
+                border: "1px solid var(--rule)",
+                borderRadius: 2,
+                fontSize: 13,
+                color: "var(--ink)",
+                fontFamily: "var(--body)",
+                cursor: "pointer",
+                outline: "none",
+              }}
             >
               {athletes.map((a) => (
-                <option key={a.id} value={a.id}>{a.full_name}</option>
+                <option key={a.id} value={a.id}>
+                  {a.full_name}
+                </option>
               ))}
             </select>
+
             {/* Week nav */}
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <button onClick={() => setWeekOffset((o) => o - 1)} style={navBtnStyle}>←</button>
-              <span style={{ fontSize: "13px", color: "#9ca3af", minWidth: "180px", textAlign: "center" }}>{weekLabel}</span>
-              <button onClick={() => setWeekOffset((o) => o + 1)} style={navBtnStyle}>→</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button
+                onClick={() => setWeekOffset((o) => o - 1)}
+                className="ca-btn"
+                style={{ padding: "5px 11px", fontSize: 14 }}
+              >
+                ←
+              </button>
+              <span
+                className="ca-mono"
+                style={{
+                  fontSize: 11,
+                  color: "var(--ink-soft)",
+                  minWidth: 170,
+                  textAlign: "center",
+                }}
+              >
+                {weekLabel}
+              </span>
+              <button
+                onClick={() => setWeekOffset((o) => o + 1)}
+                className="ca-btn"
+                style={{ padding: "5px 11px", fontSize: 14 }}
+              >
+                →
+              </button>
               {weekOffset !== 0 && (
-                <button onClick={() => setWeekOffset(0)} style={{ ...navBtnStyle, fontSize: "11px", padding: "4px 10px" }}>Today</button>
+                <button
+                  onClick={() => setWeekOffset(0)}
+                  className="ca-btn ca-btn-ghost"
+                  style={{ padding: "5px 10px", fontSize: 11 }}
+                >
+                  Today
+                </button>
               )}
             </div>
           </div>
@@ -159,9 +313,26 @@ export default function WorkoutsPage() {
 
         {/* 7-day grid */}
         {loading ? (
-          <div style={{ textAlign: "center", padding: "60px", color: "#6b7280" }}>Loading workouts…</div>
+          <div
+            style={{
+              textAlign: "center",
+              padding: "60px",
+              color: "var(--ink-mute)",
+              fontFamily: "var(--mono)",
+              letterSpacing: "0.08em",
+              fontSize: 12,
+            }}
+          >
+            Loading workouts…
+          </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "8px" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(7, 1fr)",
+              gap: "0.5rem",
+            }}
+          >
             {weekDates.map((date, i) => {
               const ds = isoDate(date);
               const isToday = ds === todayStr;
@@ -170,144 +341,324 @@ export default function WorkoutsPage() {
               const regular = dayWorkouts.filter((w) => w.source !== "ai_adjustment");
 
               return (
-                <div key={ds} style={{
-                  background: "#1a1d2e",
-                  border: isToday ? "1.5px solid #6c63ff" : "1px solid #2a2d3e",
-                  borderRadius: "10px",
-                  padding: "12px",
-                  minHeight: "200px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "6px",
-                }}>
+                <div
+                  key={ds}
+                  style={{
+                    background: isToday ? "oklch(0.96 0.015 42 / 0.35)" : "var(--linen)",
+                    border: isToday
+                      ? "1px solid var(--terracotta)"
+                      : "1px solid var(--rule)",
+                    borderRadius: 2,
+                    padding: "0.625rem 0.75rem",
+                    minHeight: 180,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.375rem",
+                  }}
+                >
                   {/* Day header */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      marginBottom: 4,
+                    }}
+                  >
                     <div>
-                      <span style={{ fontSize: "11px", fontWeight: 700, color: isToday ? "#6c63ff" : "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>{DAY_LABELS[i]}</span>
-                      <span style={{ display: "block", fontSize: "13px", color: isToday ? "#fff" : "#9ca3af", fontWeight: isToday ? 600 : 400 }}>
-                        {date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      <span
+                        className="ca-mono"
+                        style={{
+                          display: "block",
+                          fontSize: 10,
+                          fontWeight: 700,
+                          letterSpacing: "0.14em",
+                          color: isToday ? "var(--terracotta-deep)" : "var(--ink-mute)",
+                        }}
+                      >
+                        {DAY_LABELS[i]}
+                      </span>
+                      <span
+                        className="ca-mono"
+                        style={{
+                          fontSize: 11,
+                          color: isToday ? "var(--ink)" : "var(--ink-soft)",
+                          fontWeight: isToday ? 600 : 400,
+                        }}
+                      >
+                        {date.toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                        })}
                       </span>
                     </div>
                     <button
-                      onClick={() => { setShowForm(ds); setEditTarget(null); }}
+                      onClick={() => openAdd(ds)}
                       title="Add workout"
-                      style={{ background: "none", border: "1px solid #2a2d3e", color: "#6b7280", borderRadius: "6px", width: "24px", height: "24px", cursor: "pointer", fontSize: "16px", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
-                    >+</button>
+                      style={{
+                        background: "none",
+                        border: "1px solid var(--rule-soft)",
+                        color: "var(--ink-mute)",
+                        borderRadius: 2,
+                        width: 20,
+                        height: 20,
+                        cursor: "pointer",
+                        fontSize: 14,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: 0,
+                        lineHeight: 1,
+                        flexShrink: 0,
+                        transition: "border-color 140ms, color 140ms",
+                      }}
+                      onMouseOver={(e) => {
+                        (e.currentTarget as HTMLElement).style.color = "var(--aegean-deep)";
+                        (e.currentTarget as HTMLElement).style.borderColor = "var(--aegean-soft)";
+                      }}
+                      onMouseOut={(e) => {
+                        (e.currentTarget as HTMLElement).style.color = "var(--ink-mute)";
+                        (e.currentTarget as HTMLElement).style.borderColor = "var(--rule-soft)";
+                      }}
+                    >
+                      +
+                    </button>
                   </div>
 
-                  {/* AI adjustments (distinct style) */}
+                  {/* AI adjustments */}
                   {aiAdjustments.map((w) => (
-                    <div key={w.id} style={{ background: "#2d1f6e", border: "1px solid #4c3aad", borderRadius: "7px", padding: "8px", fontSize: "12px" }}>
-                      <div style={{ color: "#a78bfa", fontWeight: 600, fontSize: "10px", marginBottom: "3px" }}>⚡ AI ADJUSTMENT</div>
-                      <div style={{ color: "#c4b5fd", fontWeight: 600 }}>{w.title || SESSION_TYPES.find(s => s.value === w.session_type)?.label}</div>
-                      {w.duration_min && <div style={{ color: "#8b7dd8" }}>{w.duration_min}min{w.distance_km ? ` · ${w.distance_km}km` : ""}</div>}
-                      <div style={{ display: "flex", gap: "4px", marginTop: "6px" }}>
-                        <button onClick={() => handleApproveAI(w)} style={{ ...smallBtnStyle, background: "#4c3aad", color: "#c4b5fd" }}>Approve</button>
-                        <button onClick={() => handleDelete(w.id)} style={{ ...smallBtnStyle, background: "#3d1515", color: "#f87171" }}>Dismiss</button>
+                    <div
+                      key={w.id}
+                      style={{
+                        padding: "0.5rem 0.625rem",
+                        background: "var(--ochre-soft)",
+                        border: "1px solid oklch(0.80 0.08 80)",
+                        borderRadius: 2,
+                      }}
+                    >
+                      <p
+                        className="ca-eyebrow ca-eyebrow-terra"
+                        style={{ fontSize: 8.5, marginBottom: 2 }}
+                      >
+                        ⚡ AI Adjustment
+                      </p>
+                      <p
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "var(--ink)",
+                          margin: "0 0 3px",
+                        }}
+                      >
+                        {w.title || w.session_type}
+                      </p>
+                      {w.duration_min && (
+                        <p
+                          className="ca-mono"
+                          style={{ fontSize: 10, color: "var(--ink-mute)", margin: "0 0 5px" }}
+                        >
+                          {w.duration_min}min{w.distance_km ? ` · ${w.distance_km}km` : ""}
+                        </p>
+                      )}
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <TinyBtn onClick={() => handleApproveAI(w)} color="var(--aegean-deep)">
+                          Approve
+                        </TinyBtn>
+                        <TinyBtn onClick={() => handleDelete(w.id)} color="var(--terracotta)">
+                          Dismiss
+                        </TinyBtn>
                       </div>
                     </div>
                   ))}
 
                   {/* Regular workouts */}
-                  {regular.map((w) => (
-                    <div
-                      key={w.id}
+                  {regular.map((w) => {
+                    const ss = STATUS_COLORS[w.status] ?? STATUS_COLORS.prescribed;
+                    return (
+                      <div
+                        key={w.id}
+                        style={{
+                          padding: "0.5rem 0.625rem",
+                          background: ss.bg,
+                          border: `1px solid ${ss.border}`,
+                          borderRadius: 2,
+                          opacity: w.status === "missed" ? 0.6 : 1,
+                        }}
+                      >
+                        <span
+                          className={sessionChipClass(w.session_type)}
+                          style={{
+                            fontSize: 9,
+                            padding: "1px 5px",
+                            marginBottom: 3,
+                            display: "inline-block",
+                          }}
+                        >
+                          {w.session_type}
+                        </span>
+
+                        {w.title && (
+                          <p
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: "var(--ink)",
+                              margin: "2px 0",
+                            }}
+                          >
+                            {w.title}
+                          </p>
+                        )}
+
+                        <p
+                          className="ca-mono"
+                          style={{ fontSize: 9.5, color: "var(--ink-mute)", margin: 0 }}
+                        >
+                          {[
+                            w.duration_min && `${w.duration_min}min`,
+                            w.distance_km && `${w.distance_km}km`,
+                            w.hr_zone && `Z${w.hr_zone}`,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+
+                        {w.coaching_notes && (
+                          <p
+                            style={{
+                              fontSize: 10,
+                              color: "var(--ink-mute)",
+                              marginTop: 4,
+                              paddingTop: 4,
+                              borderTop: "1px dashed var(--rule-soft)",
+                              fontStyle: "italic",
+                            }}
+                          >
+                            {w.coaching_notes.slice(0, 70)}
+                            {w.coaching_notes.length > 70 ? "…" : ""}
+                          </p>
+                        )}
+
+                        <div style={{ display: "flex", gap: 4, marginTop: 5, flexWrap: "wrap" }}>
+                          <TinyBtn
+                            onClick={() => handleStatusToggle(w)}
+                            color={w.status === "completed" ? "var(--ink-mute)" : "var(--aegean-deep)"}
+                          >
+                            {w.status === "completed" ? "Undo" : "Done"}
+                          </TinyBtn>
+                          <TinyBtn onClick={() => openEdit(w)} color="var(--aegean-deep)">
+                            Edit
+                          </TinyBtn>
+                          <TinyBtn onClick={() => handleDelete(w.id)} color="var(--terracotta)">
+                            ✕
+                          </TinyBtn>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Empty */}
+                  {dayWorkouts.length === 0 && (
+                    <p
                       style={{
-                        background: `${SESSION_COLORS[w.session_type] || "#6b7280"}18`,
-                        border: `1px solid ${SESSION_COLORS[w.session_type] || "#6b7280"}40`,
-                        borderRadius: "7px",
-                        padding: "8px",
-                        fontSize: "12px",
-                        opacity: w.status === "missed" ? 0.5 : 1,
+                        margin: "auto 0 0",
+                        paddingTop: 12,
+                        fontSize: 11,
+                        color: "var(--rule)",
+                        textAlign: "center",
+                        fontStyle: "italic",
+                        fontFamily: "var(--body)",
                       }}
                     >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <span style={{ color: SESSION_COLORS[w.session_type] || "#9ca3af", fontWeight: 700, fontSize: "10px", textTransform: "uppercase" }}>
-                          {SESSION_TYPES.find(s => s.value === w.session_type)?.label}
-                        </span>
-                        {w.status === "completed" && <span style={{ color: "#10b981", fontSize: "10px" }}>✓</span>}
-                      </div>
-                      {w.title && <div style={{ color: "#e0e0e0", fontWeight: 600, marginTop: "2px" }}>{w.title}</div>}
-                      {(w.duration_min || w.distance_km) && (
-                        <div style={{ color: "#9ca3af", marginTop: "2px" }}>
-                          {[w.duration_min && `${w.duration_min}min`, w.distance_km && `${w.distance_km}km`].filter(Boolean).join(" · ")}
-                        </div>
-                      )}
-                      {w.hr_zone && <div style={{ color: "#9ca3af" }}>Zone {w.hr_zone}</div>}
-                      {w.coaching_notes && (
-                        <div style={{ color: "#6b7280", marginTop: "4px", fontSize: "11px", borderTop: "1px solid #2a2d3e", paddingTop: "4px" }}>
-                          {w.coaching_notes.slice(0, 80)}{w.coaching_notes.length > 80 ? "…" : ""}
-                        </div>
-                      )}
-                      <div style={{ display: "flex", gap: "4px", marginTop: "6px" }}>
-                        <button onClick={() => handleStatusToggle(w)} style={{ ...smallBtnStyle, background: w.status === "completed" ? "#374151" : "#064e3b", color: w.status === "completed" ? "#9ca3af" : "#6ee7b7" }}>
-                          {w.status === "completed" ? "Undo" : "Done"}
-                        </button>
-                        <button onClick={() => { setEditTarget(w); setShowForm(ds); }} style={{ ...smallBtnStyle, background: "#1e3a5f", color: "#60a5fa" }}>Edit</button>
-                        <button onClick={() => handleDelete(w.id)} style={{ ...smallBtnStyle, background: "#3d1515", color: "#f87171" }}>✕</button>
-                      </div>
-                    </div>
-                  ))}
-
-                  {dayWorkouts.length === 0 && (
-                    <div style={{ color: "#374151", fontSize: "12px", textAlign: "center", marginTop: "auto", paddingTop: "16px" }}>Rest</div>
+                      Rest
+                    </p>
                   )}
                 </div>
               );
             })}
           </div>
         )}
+
+        {/* Footer ornament */}
+        <div className="ca-ornament" style={{ marginTop: "2.5rem", paddingBottom: "1rem" }}>
+          · · ·
+        </div>
       </div>
 
-      {/* Workout form modal */}
+      {/* Workout modal */}
       {showForm && (
-        <WorkoutFormModal
+        <WorkoutModal
           date={showForm}
-          athleteId={selectedAthlete}
           workout={editTarget}
           saving={saving}
-          onClose={() => { setShowForm(null); setEditTarget(null); }}
-          onSave={async (payload) => {
-            setSaving(true);
-            try {
-              if (editTarget) {
-                await fetch(`/api/workouts/${editTarget.id}`, {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(payload),
-                });
-              } else {
-                await fetch("/api/workouts", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ ...payload, athlete_id: selectedAthlete, scheduled_date: showForm }),
-                });
-              }
-              setShowForm(null);
-              setEditTarget(null);
-              loadWorkouts();
-            } finally {
-              setSaving(false);
-            }
+          onClose={() => {
+            setShowForm(null);
+            setEditTarget(null);
           }}
+          onSave={handleSave}
         />
       )}
     </main>
   );
 }
 
-// ---- Inline form modal ----
+// ── Tiny action button ─────────────────────────────────────────────────────
 
-function WorkoutFormModal({ date, workout, saving, onClose, onSave }: {
+function TinyBtn({
+  onClick,
+  color,
+  children,
+}: {
+  onClick: () => void;
+  color: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: "none",
+        border: "1px solid var(--rule-soft)",
+        borderRadius: 2,
+        padding: "1px 7px",
+        fontSize: 9.5,
+        fontFamily: "var(--mono)",
+        letterSpacing: "0.06em",
+        cursor: "pointer",
+        color: "var(--ink-mute)",
+        transition: "color 140ms, border-color 140ms",
+      }}
+      onMouseOver={(e) => {
+        (e.currentTarget as HTMLElement).style.color = color;
+        (e.currentTarget as HTMLElement).style.borderColor = color;
+      }}
+      onMouseOut={(e) => {
+        (e.currentTarget as HTMLElement).style.color = "var(--ink-mute)";
+        (e.currentTarget as HTMLElement).style.borderColor = "var(--rule-soft)";
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ── Workout modal ──────────────────────────────────────────────────────────
+
+function WorkoutModal({
+  date,
+  workout,
+  saving,
+  onClose,
+  onSave,
+}: {
   date: string;
-  athleteId: string;
   workout: Workout | null;
   saving: boolean;
   onClose: () => void;
   onSave: (payload: Record<string, unknown>) => void;
 }) {
   const [form, setForm] = useState({
-    session_type: workout?.session_type ?? "run",
+    session_type: workout?.session_type ?? "Easy Run",
     title: workout?.title ?? "",
     duration_min: workout?.duration_min?.toString() ?? "",
     distance_km: workout?.distance_km?.toString() ?? "",
@@ -319,74 +670,194 @@ function WorkoutFormModal({ date, workout, saving, onClose, onSave }: {
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
+  const inputSt: React.CSSProperties = {
+    padding: "7px 10px",
+    background: "var(--parchment)",
+    border: "1px solid var(--rule)",
+    borderRadius: 2,
+    fontSize: 13,
+    color: "var(--ink)",
+    fontFamily: "var(--body)",
+    width: "100%",
+    boxSizing: "border-box",
+    outline: "none",
+  };
+
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-      <div style={{ background: "#1a1d2e", border: "1px solid #2a2d3e", borderRadius: "16px", padding: "32px", width: "100%", maxWidth: "480px", fontFamily: "inherit" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
-          <h2 style={{ color: "#fff", fontSize: "16px", fontWeight: 700, margin: 0 }}>
-            {workout ? "Edit Workout" : `New Workout — ${date}`}
-          </h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "#6b7280", cursor: "pointer", fontSize: "18px" }}>✕</button>
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "oklch(0.25 0.02 60 / 0.55)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 200,
+        padding: "1rem",
+      }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        className="ca-panel ca-rise"
+        style={{
+          width: "100%",
+          maxWidth: 480,
+          padding: "1.5rem",
+          background: "var(--parchment)",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: "1.25rem",
+          }}
+        >
+          <div>
+            <p
+              className="ca-eyebrow ca-eyebrow-terra"
+              style={{ marginBottom: 2 }}
+            >
+              {workout ? "Edit Workout" : "New Workout"}
+            </p>
+            <p
+              className="ca-mono"
+              style={{ fontSize: 11, color: "var(--ink-mute)", margin: 0 }}
+            >
+              {date}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="ca-btn ca-btn-ghost"
+            style={{ padding: "4px 8px", fontSize: 14 }}
+          >
+            ✕
+          </button>
         </div>
 
-        <div style={{ display: "grid", gap: "14px" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
-            <label style={labelStyle}>
-              Session Type
-              <select value={form.session_type} onChange={(e) => set("session_type", e.target.value)} style={inputStyle}>
-                {SESSION_TYPES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+        <hr className="ca-hairline" style={{ marginBottom: "1.25rem" }} />
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}>
+          <div
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}
+          >
+            <MField label="Session Type">
+              <select
+                value={form.session_type}
+                onChange={(e) => set("session_type", e.target.value)}
+                style={inputSt}
+              >
+                {SESSION_TYPES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
               </select>
-            </label>
-            <label style={labelStyle}>
-              Status
-              <select value={form.status} onChange={(e) => set("status", e.target.value)} style={inputStyle}>
-                {["prescribed","sent","completed","skipped","missed"].map(s => <option key={s} value={s}>{s}</option>)}
+            </MField>
+            <MField label="Status">
+              <select
+                value={form.status}
+                onChange={(e) => set("status", e.target.value)}
+                style={inputSt}
+              >
+                {["prescribed", "sent", "completed", "skipped", "missed"].map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
               </select>
-            </label>
+            </MField>
           </div>
 
-          <label style={labelStyle}>
-            Title
-            <input value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="Easy Z2 Run" style={inputStyle} />
-          </label>
+          <MField label="Title">
+            <input
+              value={form.title}
+              onChange={(e) => set("title", e.target.value)}
+              placeholder="e.g. Long easy ride"
+              style={inputSt}
+            />
+          </MField>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
-            <label style={labelStyle}>
-              Duration (min)
-              <input type="number" value={form.duration_min} onChange={(e) => set("duration_min", e.target.value)} placeholder="60" style={inputStyle} />
-            </label>
-            <label style={labelStyle}>
-              Distance (km)
-              <input type="number" step="0.1" value={form.distance_km} onChange={(e) => set("distance_km", e.target.value)} placeholder="10.0" style={inputStyle} />
-            </label>
+          <div
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}
+          >
+            <MField label="Duration (min)">
+              <input
+                type="number"
+                value={form.duration_min}
+                onChange={(e) => set("duration_min", e.target.value)}
+                placeholder="60"
+                style={inputSt}
+              />
+            </MField>
+            <MField label="Distance (km)">
+              <input
+                type="number"
+                step="0.1"
+                value={form.distance_km}
+                onChange={(e) => set("distance_km", e.target.value)}
+                placeholder="10.0"
+                style={inputSt}
+              />
+            </MField>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
-            <label style={labelStyle}>
-              HR Zone
-              <input value={form.hr_zone} onChange={(e) => set("hr_zone", e.target.value)} placeholder="Z2" style={inputStyle} />
-            </label>
-            <label style={labelStyle}>
-              Target Pace
-              <input value={form.target_pace} onChange={(e) => set("target_pace", e.target.value)} placeholder="5:30/km" style={inputStyle} />
-            </label>
+          <div
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}
+          >
+            <MField label="HR Zone">
+              <input
+                value={form.hr_zone}
+                onChange={(e) => set("hr_zone", e.target.value)}
+                placeholder="2"
+                style={inputSt}
+              />
+            </MField>
+            <MField label="Target Pace">
+              <input
+                value={form.target_pace}
+                onChange={(e) => set("target_pace", e.target.value)}
+                placeholder="5:30/km"
+                style={inputSt}
+              />
+            </MField>
           </div>
 
-          <label style={labelStyle}>
-            Coaching Notes
-            <textarea value={form.coaching_notes} onChange={(e) => set("coaching_notes", e.target.value)} placeholder="Keep it easy, focus on cadence…" rows={3} style={{ ...inputStyle, resize: "vertical" }} />
-          </label>
+          <MField label="Coaching Notes">
+            <textarea
+              value={form.coaching_notes}
+              onChange={(e) => set("coaching_notes", e.target.value)}
+              placeholder="Keep it easy, focus on cadence…"
+              rows={3}
+              style={{ ...inputSt, resize: "vertical" }}
+            />
+          </MField>
         </div>
 
-        <div style={{ display: "flex", gap: "10px", marginTop: "24px" }}>
+        <hr className="ca-hairline" style={{ margin: "1.25rem 0 1rem" }} />
+
+        <div style={{ display: "flex", gap: "0.625rem" }}>
           <button
             onClick={() => onSave(form)}
             disabled={saving}
-            style={{ flex: 1, padding: "10px", background: saving ? "#374151" : "linear-gradient(135deg,#6c63ff,#4f46e5)", border: "none", borderRadius: "8px", color: "#fff", fontWeight: 600, fontSize: "14px", cursor: saving ? "not-allowed" : "pointer" }}
+            className="ca-btn ca-btn-primary"
+            style={{
+              flex: 1,
+              justifyContent: "center",
+              padding: "9px",
+              opacity: saving ? 0.5 : 1,
+            }}
           >
             {saving ? "Saving…" : workout ? "Save Changes" : "Create Workout"}
           </button>
-          <button onClick={onClose} style={{ padding: "10px 20px", background: "#2a2d3e", border: "none", borderRadius: "8px", color: "#9ca3af", fontSize: "14px", cursor: "pointer" }}>
+          <button
+            onClick={onClose}
+            className="ca-btn ca-btn-ghost"
+            style={{ padding: "9px 18px" }}
+          >
             Cancel
           </button>
         </div>
@@ -395,24 +866,29 @@ function WorkoutFormModal({ date, workout, saving, onClose, onSave }: {
   );
 }
 
-// ---- Shared styles ----
-const navBtnStyle: React.CSSProperties = {
-  background: "#1a1d2e", border: "1px solid #2a2d3e", color: "#9ca3af",
-  borderRadius: "6px", padding: "5px 12px", cursor: "pointer", fontSize: "14px",
-};
-
-const smallBtnStyle: React.CSSProperties = {
-  border: "none", borderRadius: "4px", padding: "3px 7px",
-  fontSize: "10px", fontWeight: 600, cursor: "pointer",
-};
-
-const labelStyle: React.CSSProperties = {
-  display: "flex", flexDirection: "column", gap: "5px",
-  fontSize: "12px", fontWeight: 500, color: "#9ca3af",
-};
-
-const inputStyle: React.CSSProperties = {
-  background: "#0f1117", border: "1px solid #2a2d3e", borderRadius: "7px",
-  color: "#fff", padding: "8px 10px", fontSize: "14px", fontFamily: "inherit",
-  width: "100%", boxSizing: "border-box",
-};
+function MField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label
+        style={{
+          display: "block",
+          marginBottom: 4,
+          fontSize: 10,
+          fontFamily: "var(--mono)",
+          letterSpacing: "0.10em",
+          textTransform: "uppercase",
+          color: "var(--ink-mute)",
+        }}
+      >
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
