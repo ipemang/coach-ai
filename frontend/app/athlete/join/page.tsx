@@ -255,7 +255,11 @@ function JoinInner() {
         password,
         options: {
           data: { full_name: invite?.athlete_name ?? "" },
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          // Pass the invite token in the redirect URL as a fallback for
+        // incognito / private-browsing sessions where localStorage is wiped
+        // when the window closes. /auth/callback reads this if localStorage
+        // is empty.
+        emailRedirectTo: `${window.location.origin}/auth/callback?invite=${encodeURIComponent(token)}`,
         },
       });
       if (error) { setFormError(error.message); setSubmitting(false); return; }

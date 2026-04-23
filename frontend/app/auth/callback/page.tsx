@@ -61,7 +61,13 @@ function CallbackInner() {
       }
 
       const token = session.access_token;
-      const pendingInvite = localStorage.getItem("pending_athlete_invite");
+      // Primary: localStorage (set during /athlete/join signup).
+      // Fallback: invite param in redirect URL (set for incognito sessions
+      // where localStorage is wiped when the window closes).
+      const pendingInvite =
+        localStorage.getItem("pending_athlete_invite") ||
+        searchParams.get("invite") ||
+        null;
 
       // ── Athlete path ──────────────────────────────────────────────────────────
       if (pendingInvite) {
@@ -145,32 +151,31 @@ function CallbackInner() {
 
   if (error) {
     return (
-      <div style={{
-        minHeight: "100vh", background: "#0f1117",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-        padding: "24px",
-      }}>
-        <div style={{
-          background: "#1a1d2e", border: "1px solid #2a2d3e",
-          borderRadius: "16px", padding: "40px",
-          maxWidth: "380px", width: "100%", textAlign: "center",
-        }}>
-          <div style={{ fontSize: "40px", marginBottom: "16px" }}>⚠️</div>
-          <h2 style={{ color: "#fff", fontSize: "18px", fontWeight: 700, margin: "0 0 12px" }}>
+      <div
+        className="mosaic-bg"
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "1.5rem",
+        }}
+      >
+        <div
+          className="ca-panel"
+          style={{ width: "100%", maxWidth: 400, padding: "2.5rem 2rem", textAlign: "center" }}
+        >
+          <p style={{ fontSize: 40, margin: "0 0 16px" }}>⚠️</p>
+          <h2 className="ca-display" style={{ fontSize: 22, color: "var(--ink)", margin: "0 0 10px" }}>
             Something went wrong
           </h2>
-          <p style={{ color: "#9ca3af", fontSize: "14px", lineHeight: 1.6, margin: "0 0 24px" }}>
+          <p style={{ fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.65, margin: "0 0 24px" }}>
             {error}
           </p>
           <button
             onClick={() => window.location.href = "/login"}
-            style={{
-              padding: "10px 24px",
-              background: "linear-gradient(135deg, #6c63ff, #4f46e5)",
-              border: "none", borderRadius: "8px",
-              color: "#fff", fontSize: "14px", fontWeight: 600, cursor: "pointer",
-            }}
+            className="ca-btn ca-btn-primary"
+            style={{ width: "100%", justifyContent: "center", padding: "10px" }}
           >
             Back to sign in
           </button>
@@ -180,20 +185,23 @@ function CallbackInner() {
   }
 
   return (
-    <div style={{
-      minHeight: "100vh", background: "#0f1117",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-    }}>
+    <div
+      className="mosaic-bg"
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
       <div style={{ textAlign: "center" }}>
-        <div style={{
-          width: "44px", height: "44px", borderRadius: "11px",
-          background: "linear-gradient(135deg, #6c63ff, #4f46e5)",
-          margin: "0 auto 20px",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: "22px",
-        }}>⚡</div>
-        <p style={{ color: "#6b7280", fontSize: "14px" }}>{status}</p>
+        <div
+          className="ca-avatar"
+          style={{ width: 52, height: 52, fontSize: 22, margin: "0 auto 20px" }}
+        >
+          <span>C</span>
+        </div>
+        <p className="ca-eyebrow" style={{ fontSize: 11 }}>{status}</p>
       </div>
     </div>
   );
