@@ -1,0 +1,14 @@
+Coach.AI E2E Test File
+======================
+Athlete: Test Athlete
+Purpose: File upload + indexing test (Test H)
+Date: 2026-04-23
+
+This is a placeholder document used by the automated test suite.
+It verifies that the athlete file upload → indexing pipeline works end-to-end.
+
+Training notes:
+- Weekly mileage: 40km
+- Long run: 18km Sunday
+- Target race: Half Marathon
+- Goal time: sub-2:00
