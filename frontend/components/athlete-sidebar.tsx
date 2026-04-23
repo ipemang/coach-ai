@@ -12,18 +12,23 @@ interface Props {
   hasOura: boolean;
 }
 
-export function AthleteSidebar({ athlete, readiness: initialReadiness, hrv: initialHrv, sleep: initialSleep, ouraDate: initialOuraDate, hasOura: initialHasOura }: Props) {
+export function AthleteSidebar({
+  athlete,
+  readiness: initialReadiness,
+  hrv: initialHrv,
+  sleep: initialSleep,
+  ouraDate: initialOuraDate,
+  hasOura: initialHasOura,
+}: Props) {
   const cs = (athlete.current_state ?? {}) as Record<string, unknown>;
   const sp = (athlete.stable_profile ?? {}) as Record<string, unknown>;
 
-  // Local state for biometrics so sync updates reflect immediately without a page reload
   const [readiness, setReadiness] = useState(initialReadiness);
   const [hrv, setHrv] = useState(initialHrv);
   const [sleep, setSleep] = useState(initialSleep);
   const [ouraDate, setOuraDate] = useState(initialOuraDate);
   const [hasOura, setHasOura] = useState(initialHasOura);
 
-  // Strava local state
   const [stravaType, setStravaType] = useState(cs.strava_last_activity_type as string | undefined);
   const [stravaDate, setStravaDate] = useState(cs.strava_last_activity_date as string | undefined);
   const [stravaKm, setStravaKm] = useState(cs.strava_last_distance_km as number | undefined);
@@ -123,59 +128,146 @@ export function AthleteSidebar({ athlete, readiness: initialReadiness, hrv: init
   const flags = (cs.predictive_flags as Array<{ label: string; priority: string }>) ?? [];
   const highFlags = flags.filter((f) => f.priority === "high");
 
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "5px 8px",
+    background: "var(--parchment)",
+    border: "1px solid var(--rule)",
+    borderRadius: 2,
+    fontSize: 12,
+    color: "var(--ink)",
+    fontFamily: "var(--body)",
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
   return (
-    <div className="space-y-4">
+    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
 
       {/* Sync error */}
       {syncError && (
-        <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+        <div
+          style={{
+            padding: "0.5rem 0.875rem",
+            background: "var(--terracotta-soft)",
+            border: "1px solid oklch(0.75 0.10 45)",
+            borderRadius: 2,
+            fontSize: 12,
+            color: "var(--terracotta-deep)",
+            fontFamily: "var(--mono)",
+          }}
+        >
           ⚠ Sync failed: {syncError}
         </div>
       )}
 
-      {/* Biometrics — show panel if athlete has Oura token (even without data yet) */}
+      {/* Biometrics */}
       {!!hasOura && (
-        <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-purple-300 uppercase tracking-widest">Biometrics</h3>
-            <div className="flex items-center gap-2">
-              {ouraDate && <span className="text-xs text-slate-500">Oura · {ouraDate}</span>}
+        <div
+          className="ca-panel"
+          style={{
+            padding: "1rem 1.125rem",
+            borderLeft: "3px solid var(--ochre)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "0.875rem",
+            }}
+          >
+            <span className="ca-eyebrow" style={{ fontSize: 10 }}>
+              Biometrics
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {ouraDate && (
+                <span
+                  className="ca-mono"
+                  style={{ fontSize: 10, color: "var(--ink-mute)" }}
+                >
+                  Oura · {ouraDate}
+                </span>
+              )}
               <button
                 onClick={() => syncProvider("oura")}
                 disabled={syncing === "oura"}
-                className="rounded-lg bg-purple-500/15 px-2 py-1 text-[10px] font-medium text-purple-300 hover:bg-purple-500/25 disabled:opacity-40 transition"
+                className="ca-btn"
+                style={{
+                  padding: "2px 8px",
+                  fontSize: 10,
+                  opacity: syncing === "oura" ? 0.45 : 1,
+                }}
               >
-                {syncing === "oura" ? "Syncing…" : syncSuccess === "oura" ? "✓ Synced" : "Sync"}
+                {syncing === "oura"
+                  ? "Syncing…"
+                  : syncSuccess === "oura"
+                  ? "✓ Synced"
+                  : "Sync"}
               </button>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: "0.75rem",
+            }}
+          >
             {readiness !== undefined && (
-              <Biometric
+              <BiometricTile
                 label="Readiness"
                 value={readiness}
                 suffix="/100"
-                color={readiness >= 70 ? "text-emerald-300" : readiness >= 50 ? "text-amber-300" : "text-red-300"}
+                color={
+                  readiness >= 70
+                    ? "var(--aegean-deep)"
+                    : readiness >= 50
+                    ? "var(--ochre)"
+                    : "var(--terracotta)"
+                }
               />
             )}
             {hrv !== undefined && (
-              <Biometric label="HRV" value={Math.round(hrv)} suffix="ms" color="text-sky-300" />
+              <BiometricTile label="HRV" value={Math.round(hrv)} suffix="ms" color="var(--aegean-deep)" />
             )}
             {sleep !== undefined && (
-              <Biometric
+              <BiometricTile
                 label="Sleep"
                 value={sleep}
                 suffix="/100"
-                color={sleep >= 70 ? "text-emerald-300" : "text-amber-300"}
+                color={sleep >= 70 ? "var(--aegean-deep)" : "var(--ochre)"}
               />
             )}
             {readiness === undefined && hrv === undefined && sleep === undefined && (
-              <p className="col-span-3 text-xs text-slate-500 italic">No Oura data yet — hit Sync to fetch.</p>
+              <p
+                style={{
+                  gridColumn: "1/-1",
+                  fontSize: 11,
+                  color: "var(--ink-mute)",
+                  fontStyle: "italic",
+                }}
+              >
+                No Oura data yet — hit Sync to fetch.
+              </p>
             )}
           </div>
+
           {highFlags.length > 0 && (
-            <div className="mt-3 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2">
-              <p className="text-xs font-medium text-red-300">⚠ {highFlags.map((f) => f.label).join(", ")}</p>
+            <div
+              style={{
+                marginTop: "0.75rem",
+                padding: "0.5rem 0.75rem",
+                background: "var(--terracotta-soft)",
+                border: "1px solid oklch(0.75 0.10 45)",
+                borderRadius: 2,
+              }}
+            >
+              <p style={{ fontSize: 11, color: "var(--terracotta-deep)", margin: 0, fontFamily: "var(--body)" }}>
+                ⚠ {highFlags.map((f) => f.label).join(", ")}
+              </p>
             </div>
           )}
         </div>
@@ -183,19 +275,56 @@ export function AthleteSidebar({ athlete, readiness: initialReadiness, hrv: init
 
       {/* Strava last activity */}
       {!!stravaType && (
-        <div className="rounded-2xl border border-orange-500/20 bg-orange-500/5 p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-orange-300 uppercase tracking-widest">Last Activity</h3>
+        <div
+          className="ca-panel"
+          style={{
+            padding: "1rem 1.125rem",
+            borderLeft: "3px solid var(--terracotta)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "0.75rem",
+            }}
+          >
+            <span className="ca-eyebrow ca-eyebrow-terra" style={{ fontSize: 10 }}>
+              Last Activity
+            </span>
             <button
               onClick={() => syncProvider("strava")}
               disabled={syncing === "strava"}
-              className="rounded-lg bg-orange-500/15 px-2 py-1 text-[10px] font-medium text-orange-300 hover:bg-orange-500/25 disabled:opacity-40 transition"
+              className="ca-btn"
+              style={{
+                padding: "2px 8px",
+                fontSize: 10,
+                opacity: syncing === "strava" ? 0.45 : 1,
+              }}
             >
-              {syncing === "strava" ? "Syncing…" : syncSuccess === "strava" ? "✓ Synced" : "Sync"}
+              {syncing === "strava"
+                ? "Syncing…"
+                : syncSuccess === "strava"
+                ? "✓ Synced"
+                : "Sync"}
             </button>
           </div>
-          <p className="text-sm text-white font-medium">{stravaType}</p>
-          <div className="mt-1 flex gap-3 text-xs text-slate-400 flex-wrap">
+
+          <p style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", margin: 0 }}>
+            {stravaType}
+          </p>
+          <div
+            className="ca-mono"
+            style={{
+              marginTop: 4,
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 10,
+              fontSize: 11,
+              color: "var(--ink-mute)",
+            }}
+          >
             {stravaDate && <span>{stravaDate}</span>}
             {stravaKm != null && <span>{stravaKm}km</span>}
             {stravaDur != null && <span>{stravaDur}min</span>}
@@ -205,19 +334,26 @@ export function AthleteSidebar({ athlete, readiness: initialReadiness, hrv: init
       )}
 
       {/* Athlete Profile */}
-      <div className="rounded-2xl border border-line bg-surface/90 p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-white uppercase tracking-widest">Profile</h3>
-          <button
-            onClick={() => setEditingProfile((v) => !v)}
-            className="text-xs text-slate-400 hover:text-white transition"
-          >
-            {editingProfile ? "Cancel" : "Edit"}
-          </button>
+      <div className="ca-panel" style={{ padding: "1rem 1.125rem" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: "0.75rem",
+          }}
+        >
+          <span className="ca-eyebrow" style={{ fontSize: 10 }}>
+            Profile
+          </span>
+          <EditToggle
+            editing={editingProfile}
+            onToggle={() => setEditingProfile((v) => !v)}
+          />
         </div>
 
         {editingProfile ? (
-          <div className="space-y-2">
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {[
               { key: "target_race", label: "Target Race", placeholder: "e.g. Ironman 70.3 Eagleman" },
               { key: "race_date", label: "Race Date", placeholder: "e.g. June 15 2026" },
@@ -225,92 +361,152 @@ export function AthleteSidebar({ athlete, readiness: initialReadiness, hrv: init
               { key: "swim_css", label: "Swim CSS", placeholder: "e.g. 1:45/100m" },
             ].map(({ key, label, placeholder }) => (
               <div key={key}>
-                <label className="text-xs text-slate-400 mb-1 block">{label}</label>
+                <label
+                  style={{
+                    display: "block",
+                    marginBottom: 3,
+                    fontSize: 10,
+                    fontFamily: "var(--mono)",
+                    letterSpacing: "0.10em",
+                    textTransform: "uppercase",
+                    color: "var(--ink-mute)",
+                  }}
+                >
+                  {label}
+                </label>
                 <input
                   value={profileForm[key as keyof typeof profileForm]}
-                  onChange={(e) => setProfileForm((f) => ({ ...f, [key]: e.target.value }))}
+                  onChange={(e) =>
+                    setProfileForm((f) => ({ ...f, [key]: e.target.value }))
+                  }
                   placeholder={placeholder}
-                  className="w-full rounded-lg border border-line bg-white/5 px-2 py-1.5 text-xs text-white placeholder:text-slate-600"
+                  style={inputStyle}
                 />
               </div>
             ))}
-            <div>
-              <label className="text-xs text-slate-400 mb-1 block">Injury History</label>
-              <textarea
-                value={profileForm.injury_history}
-                onChange={(e) => setProfileForm((f) => ({ ...f, injury_history: e.target.value }))}
-                rows={2}
-                placeholder="Past injuries, recurring issues..."
-                className="w-full rounded-lg border border-line bg-white/5 px-2 py-1.5 text-xs text-white placeholder:text-slate-600 resize-none"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-slate-400 mb-1 block">Notes</label>
-              <textarea
-                value={profileForm.notes}
-                onChange={(e) => setProfileForm((f) => ({ ...f, notes: e.target.value }))}
-                rows={2}
-                placeholder="Athlete notes..."
-                className="w-full rounded-lg border border-line bg-white/5 px-2 py-1.5 text-xs text-white placeholder:text-slate-600 resize-none"
-              />
-            </div>
+
+            {[
+              { key: "injury_history", label: "Injury History", placeholder: "Past injuries, recurring issues…" },
+              { key: "notes", label: "Notes", placeholder: "Athlete notes…" },
+            ].map(({ key, label, placeholder }) => (
+              <div key={key}>
+                <label
+                  style={{
+                    display: "block",
+                    marginBottom: 3,
+                    fontSize: 10,
+                    fontFamily: "var(--mono)",
+                    letterSpacing: "0.10em",
+                    textTransform: "uppercase",
+                    color: "var(--ink-mute)",
+                  }}
+                >
+                  {label}
+                </label>
+                <textarea
+                  value={profileForm[key as keyof typeof profileForm]}
+                  onChange={(e) =>
+                    setProfileForm((f) => ({ ...f, [key]: e.target.value }))
+                  }
+                  rows={2}
+                  placeholder={placeholder}
+                  style={{ ...inputStyle, resize: "none" }}
+                />
+              </div>
+            ))}
+
             <button
               onClick={saveProfile}
               disabled={savingProfile}
-              className="w-full rounded-xl bg-indigo-500/20 py-2 text-xs font-medium text-indigo-300 hover:bg-indigo-500/30 disabled:opacity-40 transition"
+              className="ca-btn ca-btn-primary"
+              style={{
+                width: "100%",
+                justifyContent: "center",
+                padding: "7px",
+                fontSize: 12,
+                opacity: savingProfile ? 0.5 : 1,
+              }}
             >
               {savingProfile ? "Saving…" : profileSaved ? "✓ Saved" : "Save Profile"}
             </button>
           </div>
         ) : (
-          <div className="space-y-2.5">
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <ProfileRow label="Race" value={sp.target_race as string} />
             <ProfileRow label="Race date" value={sp.race_date as string} />
-            <ProfileRow label="Max hours/wk" value={sp.max_weekly_hours?.toString()} />
+            <ProfileRow label="Max hrs/wk" value={sp.max_weekly_hours?.toString()} />
             <ProfileRow label="Swim CSS" value={sp.swim_css as string} />
             <ProfileRow label="Injuries" value={sp.injury_history as string} />
-            <ProfileRow label="Training phase" value={cs.training_phase as string} />
-            <ProfileRow label="Disciplines" value={
-              Array.isArray(sp.disciplines)
-                ? (sp.disciplines as string[]).join(", ")
-                : (sp.disciplines as string)
-            } />
+            <ProfileRow label="Phase" value={cs.training_phase as string} />
+            <ProfileRow
+              label="Disciplines"
+              value={
+                Array.isArray(sp.disciplines)
+                  ? (sp.disciplines as string[]).join(", ")
+                  : (sp.disciplines as string)
+              }
+            />
           </div>
         )}
       </div>
 
       {/* Coach Notes */}
-      <div className="rounded-2xl border border-line bg-surface/90 p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-white uppercase tracking-widest">Coach Notes</h3>
-          <button
-            onClick={() => setEditingNotes((v) => !v)}
-            className="text-xs text-slate-400 hover:text-white transition"
-          >
-            {editingNotes ? "Cancel" : "Edit"}
-          </button>
+      <div className="ca-panel" style={{ padding: "1rem 1.125rem" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: "0.75rem",
+          }}
+        >
+          <span className="ca-eyebrow" style={{ fontSize: 10 }}>
+            Coach Notes
+          </span>
+          <EditToggle
+            editing={editingNotes}
+            onToggle={() => setEditingNotes((v) => !v)}
+          />
         </div>
+
         {editingNotes ? (
           <div>
             <textarea
               value={coachNotes}
               onChange={(e) => setCoachNotes(e.target.value)}
               rows={4}
-              placeholder="Private notes about this athlete..."
-              className="w-full rounded-lg border border-line bg-white/5 px-3 py-2 text-xs text-white placeholder:text-slate-600 resize-none"
+              placeholder="Private notes about this athlete…"
+              style={{ ...inputStyle, resize: "none" }}
               autoFocus
             />
             <button
               onClick={saveCoachNotes}
               disabled={savingNotes}
-              className="mt-2 w-full rounded-xl bg-indigo-500/20 py-2 text-xs font-medium text-indigo-300 hover:bg-indigo-500/30 disabled:opacity-40 transition"
+              className="ca-btn ca-btn-primary"
+              style={{
+                marginTop: 8,
+                width: "100%",
+                justifyContent: "center",
+                padding: "7px",
+                fontSize: 12,
+                opacity: savingNotes ? 0.5 : 1,
+              }}
             >
               {savingNotes ? "Saving…" : "Save Notes"}
             </button>
           </div>
         ) : (
-          <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">
-            {coachNotes || <span className="italic text-slate-600">No notes yet.</span>}
+          <p
+            style={{
+              fontSize: 12,
+              color: coachNotes ? "var(--ink-soft)" : "var(--ink-mute)",
+              fontStyle: coachNotes ? "normal" : "italic",
+              lineHeight: 1.6,
+              whiteSpace: "pre-wrap",
+              margin: 0,
+            }}
+          >
+            {coachNotes || "No notes yet."}
           </p>
         )}
       </div>
@@ -318,13 +514,40 @@ export function AthleteSidebar({ athlete, readiness: initialReadiness, hrv: init
   );
 }
 
-function Biometric({ label, value, suffix, color }: {
-  label: string; value: number; suffix: string; color: string;
+function BiometricTile({
+  label,
+  value,
+  suffix,
+  color,
+}: {
+  label: string;
+  value: number;
+  suffix: string;
+  color: string;
 }) {
   return (
-    <div className="text-center">
-      <p className={`text-2xl font-bold ${color}`}>{value}<span className="text-xs font-normal text-slate-500">{suffix}</span></p>
-      <p className="text-xs text-slate-500 mt-0.5">{label}</p>
+    <div style={{ textAlign: "center" }}>
+      <p
+        className="ca-num"
+        style={{
+          fontSize: 22,
+          fontWeight: 600,
+          color,
+          margin: 0,
+          lineHeight: 1,
+        }}
+      >
+        {value}
+        <span style={{ fontSize: 10, fontWeight: 400, color: "var(--ink-mute)" }}>
+          {suffix}
+        </span>
+      </p>
+      <p
+        className="ca-mono"
+        style={{ fontSize: 9.5, color: "var(--ink-mute)", marginTop: 3 }}
+      >
+        {label}
+      </p>
     </div>
   );
 }
@@ -332,9 +555,54 @@ function Biometric({ label, value, suffix, color }: {
 function ProfileRow({ label, value }: { label: string; value?: string }) {
   if (!value) return null;
   return (
-    <div className="flex gap-2">
-      <span className="text-xs text-slate-500 w-24 shrink-0">{label}</span>
-      <span className="text-xs text-slate-300 leading-relaxed">{value}</span>
+    <div style={{ display: "flex", gap: 8 }}>
+      <span
+        className="ca-mono"
+        style={{
+          fontSize: 10,
+          color: "var(--ink-mute)",
+          width: 72,
+          flexShrink: 0,
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+          paddingTop: 1,
+        }}
+      >
+        {label}
+      </span>
+      <span style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.5 }}>
+        {value}
+      </span>
     </div>
+  );
+}
+
+function EditToggle({
+  editing,
+  onToggle,
+}: {
+  editing: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      style={{
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        fontSize: 11,
+        fontFamily: "var(--mono)",
+        letterSpacing: "0.08em",
+        color: "var(--ink-mute)",
+        padding: "2px 6px",
+        borderRadius: 2,
+        transition: "color 140ms",
+      }}
+      onMouseOver={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--aegean-deep)")}
+      onMouseOut={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--ink-mute)")}
+    >
+      {editing ? "Cancel" : "Edit"}
+    </button>
   );
 }

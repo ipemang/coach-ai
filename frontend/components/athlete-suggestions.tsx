@@ -77,15 +77,32 @@ export function AthleteSuggestions({ suggestions: initial, athleteId }: Props) {
   }
 
   return (
-    <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5">
-      <div className="mb-4 flex items-center gap-2">
-        <span className="text-amber-300">⚡</span>
-        <h2 className="text-sm font-semibold text-amber-300 uppercase tracking-widest">
+    <div
+      className="ca-panel"
+      style={{
+        borderLeft: "3px solid var(--terracotta)",
+        padding: "1.25rem 1.5rem",
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: "1.25rem",
+        }}
+      >
+        <span style={{ fontSize: 16 }}>⚡</span>
+        <span
+          className="ca-eyebrow ca-eyebrow-terra"
+          style={{ fontSize: 11 }}
+        >
           AI Recommendations — {suggestions.length} pending
-        </h2>
+        </span>
       </div>
 
-      <div className="space-y-3">
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}>
         {suggestions.map((s) => {
           const isEditing = editingId === s.id;
           const isLoading = loading === s.id;
@@ -94,50 +111,118 @@ export function AthleteSuggestions({ suggestions: initial, athleteId }: Props) {
           return (
             <div
               key={s.id}
-              className="rounded-xl border border-line bg-surface/80 p-4"
+              className="tessera ca-rise"
+              style={{ padding: "1rem 1.125rem" }}
             >
-              {/* Athlete message */}
+              {/* Athlete message bubble */}
               {s.athlete_message && (
-                <div className="mb-3 rounded-lg bg-white/5 px-3 py-2">
-                  <p className="text-xs text-slate-400 mb-1">Athlete said:</p>
-                  <p className="text-sm text-slate-300 italic">"{s.athlete_message}"</p>
+                <div
+                  style={{
+                    marginBottom: "0.875rem",
+                    padding: "0.625rem 0.875rem",
+                    background: "var(--linen-deep)",
+                    borderLeft: "2px solid var(--ochre)",
+                    borderRadius: 2,
+                  }}
+                >
+                  <p
+                    className="ca-eyebrow"
+                    style={{ marginBottom: 4, fontSize: 10 }}
+                  >
+                    Athlete said:
+                  </p>
+                  <p
+                    style={{
+                      fontSize: 13,
+                      color: "var(--ink-soft)",
+                      fontStyle: "italic",
+                      margin: 0,
+                    }}
+                  >
+                    &ldquo;{s.athlete_message}&rdquo;
+                  </p>
                 </div>
               )}
 
-              {/* AI draft reply */}
-              <div className="mb-3">
-                <p className="text-xs text-slate-400 mb-1">AI draft reply:</p>
+              {/* AI draft */}
+              <div style={{ marginBottom: "0.875rem" }}>
+                <p
+                  className="ca-eyebrow ca-eyebrow-aegean"
+                  style={{ marginBottom: 6, fontSize: 10 }}
+                >
+                  AI draft reply:
+                </p>
                 {isEditing ? (
                   <textarea
-                    className="w-full rounded-lg border border-line bg-white/5 px-3 py-2 text-sm text-white resize-none focus:border-indigo-500 focus:outline-none"
+                    style={{
+                      width: "100%",
+                      padding: "0.625rem 0.75rem",
+                      background: "var(--parchment)",
+                      border: "1px solid var(--rule)",
+                      borderRadius: 2,
+                      fontSize: 13,
+                      color: "var(--ink)",
+                      fontFamily: "var(--body)",
+                      lineHeight: 1.5,
+                      resize: "vertical",
+                      outline: "none",
+                      boxSizing: "border-box",
+                    }}
                     rows={3}
                     value={editText}
                     onChange={(e) => setEditText(e.target.value)}
                     autoFocus
                   />
                 ) : (
-                  <p className="text-sm text-white leading-relaxed">
+                  <p
+                    style={{
+                      fontSize: 13,
+                      color: "var(--ink)",
+                      lineHeight: 1.6,
+                      margin: 0,
+                    }}
+                  >
                     {s.suggestion_text ?? "—"}
                   </p>
                 )}
               </div>
 
-              {/* Timestamp + actions */}
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <span className="text-xs text-slate-500">{timeAgo}</span>
-                <div className="flex items-center gap-2">
+              {/* Actions row */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: 8,
+                }}
+              >
+                <span
+                  className="ca-mono"
+                  style={{ fontSize: 11, color: "var(--ink-mute)" }}
+                >
+                  {timeAgo}
+                </span>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   {isEditing ? (
                     <>
                       <button
                         onClick={() => setEditingId(null)}
-                        className="rounded-lg px-3 py-1.5 text-xs text-slate-400 hover:text-white transition"
+                        className="ca-btn ca-btn-ghost"
+                        style={{ padding: "5px 12px", fontSize: 12 }}
                       >
                         Cancel
                       </button>
                       <button
                         onClick={() => act(s.id, "approved", editText)}
                         disabled={isLoading || !editText.trim()}
-                        className="rounded-lg bg-emerald-500/20 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-40 transition"
+                        className="ca-btn ca-btn-primary"
+                        style={{
+                          padding: "5px 14px",
+                          fontSize: 12,
+                          opacity: isLoading || !editText.trim() ? 0.45 : 1,
+                        }}
                       >
                         {isLoading ? "Sending…" : "Send edited reply"}
                       </button>
@@ -147,21 +232,39 @@ export function AthleteSuggestions({ suggestions: initial, athleteId }: Props) {
                       <button
                         onClick={() => act(s.id, "ignored")}
                         disabled={isLoading}
-                        className="rounded-lg bg-white/5 px-3 py-1.5 text-xs text-slate-400 hover:text-white disabled:opacity-40 transition"
+                        className="ca-btn ca-btn-ghost"
+                        style={{
+                          padding: "5px 12px",
+                          fontSize: 12,
+                          opacity: isLoading ? 0.45 : 1,
+                        }}
                       >
                         Dismiss
                       </button>
                       <button
-                        onClick={() => { setEditingId(s.id); setEditText(s.suggestion_text ?? ""); }}
+                        onClick={() => {
+                          setEditingId(s.id);
+                          setEditText(s.suggestion_text ?? "");
+                        }}
                         disabled={isLoading}
-                        className="rounded-lg bg-indigo-500/20 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-500/30 disabled:opacity-40 transition"
+                        className="ca-btn"
+                        style={{
+                          padding: "5px 12px",
+                          fontSize: 12,
+                          opacity: isLoading ? 0.45 : 1,
+                        }}
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => act(s.id, "approved", s.suggestion_text ?? "")}
                         disabled={isLoading}
-                        className="rounded-lg bg-emerald-500/20 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-40 transition"
+                        className="ca-btn ca-btn-primary"
+                        style={{
+                          padding: "5px 14px",
+                          fontSize: 12,
+                          opacity: isLoading ? 0.45 : 1,
+                        }}
                       >
                         {isLoading ? "Approving…" : "✓ Approve & Send"}
                       </button>

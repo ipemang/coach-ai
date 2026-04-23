@@ -14,87 +14,183 @@ export function AthleteHistory({ checkins, suggestions }: Props) {
   const completed = suggestions.filter((s) => s.status !== "pending");
 
   return (
-    <div className="rounded-2xl border border-line bg-surface/90 p-5 shadow-panel">
-      <div className="mb-4 flex items-center gap-4 border-b border-line pb-3">
+    <div className="ca-panel" style={{ padding: "0" }}>
+      {/* Tab bar */}
+      <div
+        style={{
+          display: "flex",
+          borderBottom: "1px solid var(--rule)",
+          padding: "0 1.25rem",
+        }}
+      >
         <button
+          className={`ca-tab${tab === "checkins" ? " active" : ""}`}
           onClick={() => setTab("checkins")}
-          className={`text-xs font-semibold uppercase tracking-widest transition pb-3 -mb-3 border-b-2 ${
-            tab === "checkins"
-              ? "border-sky-400 text-sky-300"
-              : "border-transparent text-slate-500 hover:text-white"
-          }`}
         >
           Check-ins ({checkins.length})
         </button>
         <button
+          className={`ca-tab${tab === "all_suggestions" ? " active" : ""}`}
           onClick={() => setTab("all_suggestions")}
-          className={`text-xs font-semibold uppercase tracking-widest transition pb-3 -mb-3 border-b-2 ${
-            tab === "all_suggestions"
-              ? "border-sky-400 text-sky-300"
-              : "border-transparent text-slate-500 hover:text-white"
-          }`}
         >
           Coach Replies ({completed.length})
         </button>
       </div>
 
-      {tab === "checkins" && (
-        <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-          {checkins.length === 0 && (
-            <p className="text-xs text-slate-500 italic">No check-ins yet.</p>
-          )}
-          {checkins.map((c) => (
-            <div key={c.id} className="rounded-xl border border-line bg-white/[0.02] p-3">
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className={`text-xs rounded-full px-2 py-0.5 ${
-                  c.message_type === "voice"
-                    ? "bg-purple-500/15 text-purple-300"
-                    : "bg-white/5 text-slate-400"
-                }`}>
-                  {c.message_type === "voice" ? "🎙️ Voice" : "💬 Text"}
-                </span>
-                <span className="text-xs text-slate-500">{formatDate(c.created_at)}</span>
-              </div>
-              <p className="text-sm text-slate-300 leading-relaxed">
-                {c.message_text || <span className="italic text-slate-600">No content</span>}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {tab === "all_suggestions" && (
-        <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-          {completed.length === 0 && (
-            <p className="text-xs text-slate-500 italic">No sent replies yet.</p>
-          )}
-          {completed.map((s) => (
-            <div key={s.id} className="rounded-xl border border-line bg-white/[0.02] p-3">
-              <div className="flex items-center gap-2 mb-2">
-                <span className={`text-xs rounded-full px-2 py-0.5 ${
-                  s.status === "approved"
-                    ? "bg-emerald-500/15 text-emerald-300"
-                    : s.status === "ignored"
-                    ? "bg-white/5 text-slate-500"
-                    : "bg-sky-500/15 text-sky-300"
-                }`}>
-                  {s.status}
-                </span>
-                <span className="text-xs text-slate-500">{formatDate(s.created_at)}</span>
-              </div>
-              {s.athlete_message && (
-                <p className="text-xs text-slate-500 italic mb-1.5">
-                  Athlete: "{s.athlete_message}"
+      {/* Content */}
+      <div
+        className="ca-scroll"
+        style={{
+          padding: "1rem 1.25rem",
+          maxHeight: 420,
+          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: "0.625rem",
+        }}
+      >
+        {tab === "checkins" && (
+          <>
+            {checkins.length === 0 && (
+              <Empty>No check-ins yet.</Empty>
+            )}
+            {checkins.map((c) => (
+              <div
+                key={c.id}
+                style={{
+                  padding: "0.75rem 0.875rem",
+                  background: "var(--parchment)",
+                  border: "1px solid var(--rule-soft)",
+                  borderRadius: 2,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 6,
+                  }}
+                >
+                  <span
+                    className={`ca-chip${c.message_type === "voice" ? " ca-chip-ochre" : ""}`}
+                    style={{ padding: "1px 7px", fontSize: 9.5 }}
+                  >
+                    {c.message_type === "voice" ? "🎙 Voice" : "💬 Text"}
+                  </span>
+                  <span
+                    className="ca-mono"
+                    style={{ fontSize: 10, color: "var(--ink-mute)" }}
+                  >
+                    {formatDate(c.created_at)}
+                  </span>
+                </div>
+                <p
+                  style={{
+                    fontSize: 13,
+                    color: "var(--ink-soft)",
+                    lineHeight: 1.55,
+                    margin: 0,
+                  }}
+                >
+                  {c.message_text || (
+                    <span style={{ fontStyle: "italic", color: "var(--ink-mute)" }}>
+                      No content
+                    </span>
+                  )}
                 </p>
-              )}
-              <p className="text-sm text-slate-300 leading-relaxed">
-                {s.coach_reply || s.suggestion_text || "—"}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
+              </div>
+            ))}
+          </>
+        )}
+
+        {tab === "all_suggestions" && (
+          <>
+            {completed.length === 0 && (
+              <Empty>No sent replies yet.</Empty>
+            )}
+            {completed.map((s) => {
+              const chipClass =
+                s.status === "approved"
+                  ? "ca-chip ca-chip-aegean"
+                  : s.status === "ignored"
+                  ? "ca-chip"
+                  : "ca-chip ca-chip-ochre";
+
+              return (
+                <div
+                  key={s.id}
+                  style={{
+                    padding: "0.75rem 0.875rem",
+                    background: "var(--parchment)",
+                    border: "1px solid var(--rule-soft)",
+                    borderRadius: 2,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginBottom: 8,
+                    }}
+                  >
+                    <span className={chipClass} style={{ padding: "1px 7px", fontSize: 9.5 }}>
+                      {s.status}
+                    </span>
+                    <span
+                      className="ca-mono"
+                      style={{ fontSize: 10, color: "var(--ink-mute)" }}
+                    >
+                      {formatDate(s.created_at)}
+                    </span>
+                  </div>
+
+                  {s.athlete_message && (
+                    <p
+                      style={{
+                        fontSize: 11,
+                        color: "var(--ink-mute)",
+                        fontStyle: "italic",
+                        marginBottom: 6,
+                      }}
+                    >
+                      Athlete: &ldquo;{s.athlete_message}&rdquo;
+                    </p>
+                  )}
+
+                  <p
+                    style={{
+                      fontSize: 13,
+                      color: "var(--ink-soft)",
+                      lineHeight: 1.55,
+                      margin: 0,
+                    }}
+                  >
+                    {s.coach_reply || s.suggestion_text || "—"}
+                  </p>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
     </div>
+  );
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return (
+    <p
+      style={{
+        fontSize: 12,
+        color: "var(--ink-mute)",
+        fontStyle: "italic",
+        padding: "0.25rem 0",
+      }}
+    >
+      {children}
+    </p>
   );
 }
 

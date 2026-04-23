@@ -26,21 +26,33 @@ export function ResendPlanButton({ athleteId }: { athleteId: string }) {
 
   if (state === "sent") {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1.5 text-sm text-emerald-300">
+      <span
+        className="ca-chip ca-chip-olive"
+        style={{ gap: 5 }}
+      >
         ✓ Plan link sent
       </span>
     );
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       {state === "error" && detail && (
-        <span className="text-xs text-red-400">{detail}</span>
+        <span
+          style={{
+            fontSize: 11,
+            fontFamily: "var(--mono)",
+            color: "var(--terracotta-deep)",
+          }}
+        >
+          {detail}
+        </span>
       )}
       <button
         onClick={handleResend}
         disabled={state === "loading"}
-        className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/10 px-3 py-1.5 text-sm text-sky-300 transition hover:bg-sky-500/20 disabled:opacity-50"
+        className="ca-btn"
+        style={{ padding: "4px 12px", fontSize: 12, borderRadius: 2 }}
       >
         {state === "loading" ? "Sending…" : "↻ Resend plan link"}
       </button>

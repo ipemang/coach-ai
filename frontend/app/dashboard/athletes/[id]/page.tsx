@@ -108,43 +108,123 @@ export default async function AthleteProfilePage({
     ? new Date(checkins[0].created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
     : "No check-ins";
 
+  const initials = athlete.full_name
+    .split(" ")
+    .map((n) => n[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
   return (
-    <main className="mx-auto min-h-screen max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      {/* Back + Header */}
-      <div className="mb-6">
+    <main
+      className="mosaic-bg"
+      style={{ minHeight: "100vh", padding: "2rem 1.5rem" }}
+    >
+      <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+
+        {/* Back link */}
         <Link
           href="/dashboard"
-          className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-white transition"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            color: "var(--aegean-deep)",
+            fontSize: 13,
+            fontFamily: "var(--mono)",
+            letterSpacing: "0.06em",
+            textDecoration: "none",
+            marginBottom: "1.25rem",
+            opacity: 0.8,
+            transition: "opacity 160ms",
+          }}
+          onMouseOver={(e) => ((e.target as HTMLElement).style.opacity = "1")}
+          onMouseOut={(e) => ((e.target as HTMLElement).style.opacity = "0.8")}
         >
           ← Dashboard
         </Link>
 
-        <div className="mt-3 flex flex-wrap items-start justify-between gap-4 rounded-3xl border border-line bg-surface/75 px-6 py-5 shadow-panel backdrop-blur">
-          <div>
-            <p className="text-sm font-medium text-sky-300">Athlete Profile</p>
-            <h1 className="mt-1 text-3xl font-semibold text-white">{athlete.full_name}</h1>
-            <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-400">
-              <span>{athlete.phone_number ?? "No phone"}</span>
-              <span>·</span>
-              <span>Last check-in: {lastCheckin}</span>
-              <span>·</span>
-              <span>Member since {new Date(athlete.created_at).toLocaleDateString("en-US", { month: "short", year: "numeric" })}</span>
+        {/* ── Header ─────────────────────────────────────────────── */}
+        <div
+          className="ca-panel"
+          style={{
+            padding: "1.25rem 1.5rem",
+            marginBottom: "1.5rem",
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: "1rem",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+            {/* Avatar */}
+            <div
+              className="ca-avatar"
+              style={{ width: 52, height: 52, fontSize: 20 }}
+            >
+              <span>{initials}</span>
+            </div>
+
+            <div>
+              <p className="ca-eyebrow ca-eyebrow-terra" style={{ marginBottom: 4 }}>
+                Athlete Profile
+              </p>
+              <h1
+                className="ca-display"
+                style={{ fontSize: 28, color: "var(--ink)", margin: 0 }}
+              >
+                {athlete.full_name}
+              </h1>
+              <div
+                style={{
+                  marginTop: 6,
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  color: "var(--ink-mute)",
+                  fontSize: 12,
+                  fontFamily: "var(--mono)",
+                }}
+              >
+                <span>{athlete.phone_number ?? "No phone"}</span>
+                <span style={{ color: "var(--rule)" }}>·</span>
+                <span>Last check-in: {lastCheckin}</span>
+                <span style={{ color: "var(--rule)" }}>·</span>
+                <span>
+                  Member since{" "}
+                  {new Date(athlete.created_at).toLocaleDateString("en-US", {
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </span>
+              </div>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
+
+          {/* Badges */}
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: "0.5rem",
+            }}
+          >
             {hasOura && (
-              <span className="rounded-full bg-purple-500/15 px-3 py-1.5 text-purple-300">💍 Oura</span>
+              <span className="ca-chip ca-chip-ochre">💍 Oura</span>
             )}
             {hasStrava && (
-              <span className="rounded-full bg-orange-500/15 px-3 py-1.5 text-orange-300">🚴 Strava</span>
+              <span className="ca-chip ca-chip-terra">🚴 Strava</span>
             )}
             {pending.length > 0 && (
-              <span className="rounded-full bg-amber-500/15 px-3 py-1.5 text-amber-300">
-                {pending.length} pending
+              <span className="ca-chip ca-chip-terra">
+                ⚡ {pending.length} pending
               </span>
             )}
             {targetRace && (
-              <span className="rounded-full bg-white/5 px-3 py-1.5 text-slate-300">
+              <span className="ca-chip">
                 🏁 {targetRace}
                 {raceDate ? ` · ${raceDate}` : ""}
               </span>
@@ -152,36 +232,56 @@ export default async function AthleteProfilePage({
             <ResendPlanButton athleteId={id} />
           </div>
         </div>
-      </div>
 
-      {/* AI Suggestions — full width at top */}
-      {pending.length > 0 && (
-        <AthleteSuggestions suggestions={pending} athleteId={id} />
-      )}
+        {/* ── AI Suggestions ─────────────────────────────────────── */}
+        {pending.length > 0 && (
+          <div style={{ marginBottom: "1.5rem" }}>
+            <AthleteSuggestions suggestions={pending} athleteId={id} />
+          </div>
+        )}
 
-      {/* Main layout */}
-      <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_320px]">
-        {/* Left — weekly plan + history */}
-        <div className="space-y-6">
-          <AthleteWeeklyPlan
-            workouts={workouts}
-            athleteId={id}
-            coachId={athlete.coach_id}
-            weekStart={weekStart}
-            weekEnd={weekEnd}
+        {/* ── Main layout ────────────────────────────────────────── */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr",
+            gap: "1.5rem",
+          }}
+          className="athlete-grid"
+        >
+          <style>{`
+            @media (min-width: 1024px) {
+              .athlete-grid { grid-template-columns: 1fr 300px !important; }
+            }
+          `}</style>
+
+          {/* Left — weekly plan + history */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+            <AthleteWeeklyPlan
+              workouts={workouts}
+              athleteId={id}
+              coachId={athlete.coach_id}
+              weekStart={weekStart}
+              weekEnd={weekEnd}
+            />
+            <AthleteHistory checkins={checkins} suggestions={suggestions} />
+          </div>
+
+          {/* Right — sidebar */}
+          <AthleteSidebar
+            athlete={athlete}
+            readiness={readiness}
+            hrv={hrv}
+            sleep={sleep}
+            ouraDate={ouraDate}
+            hasOura={hasOura}
           />
-          <AthleteHistory checkins={checkins} suggestions={suggestions} />
         </div>
 
-        {/* Right — sidebar */}
-        <AthleteSidebar
-          athlete={athlete}
-          readiness={readiness}
-          hrv={hrv}
-          sleep={sleep}
-          ouraDate={ouraDate}
-          hasOura={hasOura}
-        />
+        {/* Footer ornament */}
+        <div className="ca-ornament" style={{ marginTop: "3rem", paddingBottom: "1rem" }}>
+          · · ·
+        </div>
       </div>
     </main>
   );
