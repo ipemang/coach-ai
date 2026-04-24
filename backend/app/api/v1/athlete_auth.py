@@ -115,12 +115,10 @@ async def send_athlete_invite(
                 "email": email,
                 "coach_id": scope.coach_id,
                 "organization_id": scope.organization_id,
-                "status": "invited",
                 "current_state": {},
             }
             if phone:
                 insert_payload["phone_number"] = phone
-                insert_payload["whatsapp_number"] = phone
 
             result = supabase.table("athletes").insert(insert_payload).execute()
             if not result.data:
