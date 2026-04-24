@@ -92,11 +92,11 @@ test.describe.serial("Athlete Auth & Onboarding (Tests A–K)", () => {
     });
 
     await test.step("Fill in athlete name + email", async () => {
-      // Modal form fields
-      const nameField = coachPage.getByLabel(/full name/i).or(
-        coachPage.locator('input[placeholder*="name" i]')
-      );
-      const emailField = coachPage.locator('input[type="email"]').last();
+      // Modal uses <label> without htmlFor — getByLabel won't work.
+      // Scope to the modal panel and grab inputs by position (name=0, email=1).
+      const modal = coachPage.locator(".ca-panel").filter({ hasText: /invite an athlete/i });
+      const nameField = modal.locator("input").nth(0);
+      const emailField = modal.locator("input").nth(1);
 
       await nameField.fill(TEST_ATHLETE_NAME);
       await emailField.fill(TEST_ATHLETE_EMAIL);
@@ -221,18 +221,18 @@ test.describe.serial("Athlete Auth & Onboarding (Tests A–K)", () => {
       console.log(`\n  ✓ Athlete DB row linked. auth_user_id: ${row?.auth_user_id?.slice(0, 8)}…\n`);
     });
 
-    await test.step("Verify athlete_connect_tokens row is now consumed", async () => {
+    await test.step("Verify athlete_invite_tokens row is now consumed", async () => {
       const sb = (await import("@supabase/supabase-js")).createClient(
         process.env.SUPABASE_URL!,
         process.env.SUPABASE_SERVICE_ROLE_KEY!,
         { auth: { persistSession: false } }
       );
       const { data } = await sb
-        .from("athlete_connect_tokens")
-        .select("linked_at")
+        .from("athlete_invite_tokens")
+        .select("used_at")
         .eq("token", inviteToken)
         .single();
-      expect(data?.linked_at).not.toBeNull();
+      expect(data?.used_at).not.toBeNull();
     });
   });
 
@@ -407,9 +407,9 @@ test.describe.serial("Athlete Auth & Onboarding (Tests A–K)", () => {
       // Verify via DB: the token we extracted in Test A came from send-invite.
       // If the token exists, the endpoint was called successfully.
       await assertDbRow(
-        "athlete_connect_tokens",
-        { athlete_email: TEST_ATHLETE_EMAIL.toLowerCase() },
-        `No athlete_connect_tokens row for ${TEST_ATHLETE_EMAIL} — send-invite did not fire.`
+        "athlete_invite_tokens",
+        { email: TEST_ATHLETE_EMAIL.toLowerCase() },
+        `No athlete_invite_tokens row for ${TEST_ATHLETE_EMAIL} — send-invite did not fire.`
       );
 
       console.log("\n  ✓ COA-78 confirmed — InviteModal → send-invite → token row created\n");
