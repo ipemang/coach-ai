@@ -454,6 +454,217 @@ function DailyDigest({
   );
 }
 
+// ─── Weekly Digest (COA-104) ──────────────────────────────────────────────────
+
+type WeeklyDigestRow = {
+  id: string;
+  athlete_id: string;
+  week_ending: string;
+  summary_text: string;
+  status: "draft" | "sent" | "dismissed";
+  sent_at: string | null;
+  athletes?: { full_name: string | null; display_name: string | null } | null;
+};
+
+function WeeklyDigestPanel({
+  digests,
+  loading,
+  generating,
+  onGenerate,
+  onSend,
+  onDismiss,
+  onEdit,
+}: {
+  digests: WeeklyDigestRow[];
+  loading: boolean;
+  generating: boolean;
+  onGenerate: () => void;
+  onSend: (id: string) => Promise<void>;
+  onDismiss: (id: string) => void;
+  onEdit: (id: string, text: string) => Promise<void>;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [sendingId, setSendingId] = useState<string | null>(null);
+
+  const draftDigests = digests.filter(d => d.status === "draft");
+
+  if (loading) {
+    return (
+      <div className="ca-panel" style={{ padding: "16px 20px", marginTop: 20, display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 16, height: 16, border: "2px solid var(--rule)", borderTopColor: "var(--aegean-deep)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+        <span className="ca-eyebrow" style={{ fontSize: 11 }}>Loading weekly summaries…</span>
+      </div>
+    );
+  }
+
+  if (draftDigests.length === 0 && !generating) {
+    return (
+      <div className="ca-panel" style={{ marginTop: 20, padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <G.Scroll size={15} color="var(--aegean-deep)" />
+          <span className="ca-eyebrow" style={{ fontSize: 10 }}>Weekly summaries</span>
+          <span className="ca-eyebrow" style={{ fontSize: 9, color: "var(--ink-mute)" }}>— none drafted yet</span>
+        </div>
+        <button
+          onClick={onGenerate}
+          className="ca-btn ca-btn-primary"
+          style={{ fontSize: 11, padding: "6px 14px" }}
+        >
+          Draft all summaries
+        </button>
+      </div>
+    );
+  }
+
+  if (generating) {
+    return (
+      <div className="ca-panel" style={{ padding: "16px 20px", marginTop: 20, display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 16, height: 16, border: "2px solid var(--rule)", borderTopColor: "var(--aegean-deep)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+        <span className="ca-eyebrow" style={{ fontSize: 11 }}>Drafting weekly summaries for all athletes…</span>
+      </div>
+    );
+  }
+
+  const weekLabel = (() => {
+    try {
+      const d = new Date(draftDigests[0]?.week_ending + "T12:00:00Z");
+      return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    } catch { return "this week"; }
+  })();
+
+  return (
+    <div className="ca-panel" style={{ marginTop: 20, overflow: "hidden" }}>
+      {/* Header */}
+      <div style={{ padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--rule)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <G.Scroll size={15} color="var(--aegean-deep)" />
+          <span className="ca-eyebrow" style={{ fontSize: 10 }}>Weekly summaries ready</span>
+          <span className="ca-eyebrow" style={{ fontSize: 9, color: "var(--ink-mute)" }}>— week ending {weekLabel}</span>
+          <span className="ca-chip" style={{ fontSize: 9 }}>
+            {draftDigests.length} {draftDigests.length === 1 ? "draft" : "drafts"}
+          </span>
+        </div>
+        <button
+          onClick={onGenerate}
+          style={{ fontSize: 10, color: "var(--ink-mute)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+        >
+          Regenerate all
+        </button>
+      </div>
+
+      {/* Digest cards */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+        {draftDigests.map((d, idx) => {
+          const name = d.athletes?.display_name || d.athletes?.full_name || "Athlete";
+          const isExpanded = expandedId === d.id;
+          const isEditing = editingId === d.id;
+
+          return (
+            <div
+              key={d.id}
+              style={{
+                borderBottom: idx < draftDigests.length - 1 ? "1px solid var(--rule)" : "none",
+                padding: "12px 20px",
+              }}
+            >
+              {/* Row header */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <button
+                  onClick={() => setExpandedId(isExpanded ? null : d.id)}
+                  style={{ flex: 1, textAlign: "left", display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                >
+                  <span style={{ fontSize: 13, fontFamily: "var(--serif)", fontWeight: 600, color: "var(--ink)" }}>{name}</span>
+                  <G.Arrow size={11} color="var(--ink-mute)" dir={isExpanded ? "up" : "down"} />
+                </button>
+
+                {/* Action buttons */}
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  <button
+                    onClick={() => { setEditingId(d.id); setEditText(d.summary_text); setExpandedId(d.id); }}
+                    className="ca-btn"
+                    style={{ fontSize: 10, padding: "4px 10px" }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => onDismiss(d.id)}
+                    className="ca-btn"
+                    style={{ fontSize: 10, padding: "4px 10px", color: "var(--ink-mute)" }}
+                  >
+                    Dismiss
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setSendingId(d.id);
+                      try { await onSend(d.id); } finally { setSendingId(null); }
+                    }}
+                    className="ca-btn ca-btn-primary"
+                    style={{ fontSize: 10, padding: "4px 12px" }}
+                    disabled={sendingId === d.id}
+                  >
+                    {sendingId === d.id ? "Sending…" : "Send →"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Expanded body */}
+              {isExpanded && (
+                <div style={{ marginTop: 10 }}>
+                  {isEditing ? (
+                    <>
+                      <textarea
+                        value={editText}
+                        onChange={e => setEditText(e.target.value)}
+                        rows={5}
+                        style={{
+                          width: "100%", boxSizing: "border-box",
+                          fontFamily: "var(--serif)", fontStyle: "italic",
+                          fontSize: 13.5, lineHeight: 1.65,
+                          color: "var(--ink)", background: "var(--parchment)",
+                          border: "1px solid var(--rule)", borderRadius: 2,
+                          padding: "10px 12px", resize: "vertical",
+                        }}
+                      />
+                      <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                        <button
+                          onClick={async () => {
+                            setSavingId(d.id);
+                            try { await onEdit(d.id, editText); setEditingId(null); }
+                            finally { setSavingId(null); }
+                          }}
+                          className="ca-btn ca-btn-primary"
+                          style={{ fontSize: 10, padding: "5px 14px" }}
+                          disabled={savingId === d.id}
+                        >
+                          {savingId === d.id ? "Saving…" : "Save"}
+                        </button>
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="ca-btn"
+                          style={{ fontSize: 10, padding: "5px 14px" }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, lineHeight: 1.65, color: "var(--ink-soft)", margin: 0 }}>
+                      {d.summary_text}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Athlete Card ─────────────────────────────────────────────────────────────
 
 function AthleteCard({ athlete, href }: { athlete: EnrichedAthlete; href: string; }) {
@@ -1033,6 +1244,11 @@ export default function DashboardShell({
   const [digestData, setDigestData] = useState<DigestData | null>(null);
   const [digestLoading, setDigestLoading] = useState(false);
 
+  // ── COA-104: Weekly digests (Friday–Sunday) ──
+  const [weeklyDigests, setWeeklyDigests] = useState<WeeklyDigestRow[]>([]);
+  const [weeklyLoading, setWeeklyLoading] = useState(false);
+  const [weeklyGenerating, setWeeklyGenerating] = useState(false);
+
   // ── Real-time subscription ──
   useEffect(() => {
     const supabase = createBrowserSupabase();
@@ -1123,6 +1339,71 @@ export default function DashboardShell({
 
     loadDigest();
   }, []); // run once on mount
+
+  // ── COA-104: Load weekly digests on Friday–Sunday ──
+  useEffect(() => {
+    const dow = new Date().getDay(); // 0=Sun, 5=Fri, 6=Sat
+    if (dow !== 0 && dow !== 5 && dow !== 6) return; // only show Fri–Sun
+
+    async function loadWeeklyDigests() {
+      setWeeklyLoading(true);
+      try {
+        const res = await fetch("/api/weekly-digests?status=draft");
+        if (res.ok) {
+          const json = await res.json();
+          setWeeklyDigests(json.digests ?? []);
+        }
+      } catch {
+        // non-fatal
+      } finally {
+        setWeeklyLoading(false);
+      }
+    }
+
+    loadWeeklyDigests();
+  }, []);
+
+  const handleGenerateWeeklyDigests = async () => {
+    setWeeklyGenerating(true);
+    try {
+      const res = await fetch("/api/weekly-digests/generate", { method: "POST" });
+      if (res.ok) {
+        const json = await res.json();
+        setWeeklyDigests(json.digests ?? []);
+      }
+    } catch {
+      // non-fatal
+    } finally {
+      setWeeklyGenerating(false);
+    }
+  };
+
+  const handleSendWeeklyDigest = async (id: string) => {
+    const res = await fetch(`/api/weekly-digests/${id}?action=send`, { method: "POST" });
+    if (res.ok) {
+      setWeeklyDigests(prev => prev.filter(d => d.id !== id));
+    }
+  };
+
+  const handleDismissWeeklyDigest = async (id: string) => {
+    const res = await fetch(`/api/weekly-digests/${id}?action=dismiss`, { method: "POST" });
+    if (res.ok) {
+      setWeeklyDigests(prev => prev.filter(d => d.id !== id));
+    }
+  };
+
+  const handleEditWeeklyDigest = async (id: string, summary_text: string) => {
+    const res = await fetch(`/api/weekly-digests/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ summary_text }),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      const updated = json.digest as WeeklyDigestRow;
+      setWeeklyDigests(prev => prev.map(d => d.id === id ? { ...d, summary_text: updated.summary_text } : d));
+    }
+  };
 
   // ── Fetch office hours when tab is active ──
   useEffect(() => {
@@ -1232,6 +1513,19 @@ export default function DashboardShell({
 
         {/* COA-102: Daily briefing panel */}
         <DailyDigest digest={digestData} loading={digestLoading} />
+
+        {/* COA-104: Weekly summaries (Friday–Sunday only) */}
+        {(weeklyLoading || weeklyGenerating || new Date().getDay() === 0 || new Date().getDay() === 5 || new Date().getDay() === 6) && (
+          <WeeklyDigestPanel
+            digests={weeklyDigests}
+            loading={weeklyLoading}
+            generating={weeklyGenerating}
+            onGenerate={handleGenerateWeeklyDigests}
+            onSend={handleSendWeeklyDigest}
+            onDismiss={handleDismissWeeklyDigest}
+            onEdit={handleEditWeeklyDigest}
+          />
+        )}
 
         {/* KPI mosaic row */}
         <section style={{ marginTop: 24, display: "grid", gridTemplateColumns: "1.3fr 1fr 1fr 1fr", gap: 1, background: "var(--rule)", border: "1px solid var(--rule)", borderRadius: 4, overflow: "hidden" }}>

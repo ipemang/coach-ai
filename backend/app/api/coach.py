@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -2011,3 +2011,416 @@ async def confirm_coach_profile(
         "coach_id": coach_id,
         "methodology_id": methodology_id,
     }
+
+
+# ── COA-104: Weekly coach digest ───────────────────────────────────────────────
+
+class WeeklyDigestUpdateRequest(_BaseModel):
+    summary_text: str = Field(..., min_length=1, max_length=4000)
+
+
+def _last_sunday(reference: date | None = None) -> date:
+    """Return the most recent Sunday on or before reference (defaults to today)."""
+    d = reference or date.today()
+    # weekday(): Mon=0 … Sun=6
+    days_since_sunday = (d.weekday() + 1) % 7
+    return d - timedelta(days=days_since_sunday)
+
+
+@router.get("/weekly-digests")
+async def list_weekly_digests(
+    request: Request,
+    status: str | None = None,
+    principal=Depends(require_roles("coach")),
+):
+    """COA-104: List weekly digests for this coach.
+
+    Optional ?status=draft|sent|dismissed filter.
+    Returns digests ordered by week_ending DESC (most recent first).
+    """
+    supabase = request.app.state.supabase
+    coach_id = principal["coach_id"]
+
+    query = (
+        supabase.table("weekly_digests")
+        .select(
+            "id, athlete_id, week_ending, summary_text, status, sent_at, created_at, updated_at, "
+            "athletes(full_name, display_name)"
+        )
+        .eq("coach_id", coach_id)
+        .order("week_ending", desc=True)
+        .order("created_at", desc=True)
+    )
+    if status:
+        query = query.eq("status", status)
+
+    result = query.execute()
+    return {"coach_id": coach_id, "digests": result.data or []}
+
+
+@router.post("/weekly-digests/generate")
+async def generate_weekly_digests(
+    request: Request,
+    force: bool = False,
+    week_ending: str | None = None,
+    principal=Depends(require_roles("coach")),
+):
+    """COA-104: Generate per-athlete weekly digest summaries for this coach.
+
+    Generates one draft summary per active athlete using:
+    - Workouts completed vs planned in the past 7 days
+    - Biometric trend vs 30-day baseline (COA-101)
+    - Morning pulse session summaries if available (COA-103)
+    - Upcoming week's focus
+    - Weeks-to-race countdown from stable_profile.race_date
+
+    Skips athletes that already have a non-dismissed digest for this week
+    unless force=True.
+
+    Returns: {generated: int, skipped: int, digests: [...]}
+    """
+    from asyncio import get_event_loop
+    from starlette.concurrency import run_in_threadpool
+
+    supabase = request.app.state.supabase
+    coach_id = principal["coach_id"]
+
+    # Determine week_ending (most recent Sunday)
+    if week_ending:
+        try:
+            target_week = date.fromisoformat(week_ending)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="week_ending must be YYYY-MM-DD") from exc
+    else:
+        target_week = _last_sunday()
+
+    week_start = target_week - timedelta(days=6)
+
+    # Fetch coach profile
+    coach_row = supabase.table("coaches").select(
+        "id, full_name, persona_system_prompt, methodology_playbook"
+    ).eq("id", coach_id).single().execute()
+    coach = coach_row.data
+    if not coach:
+        raise HTTPException(status_code=404, detail="Coach not found")
+
+    persona = (coach.get("persona_system_prompt") or "").strip()
+    playbook = coach.get("methodology_playbook") or {}
+
+    # Fetch all active athletes
+    athletes_row = supabase.table("athletes").select(
+        "id, full_name, display_name, current_state, stable_profile"
+    ).eq("coach_id", coach_id).is_("deleted_at", None).execute()
+    athletes = athletes_row.data or []
+
+    if not athletes:
+        return {"coach_id": coach_id, "generated": 0, "skipped": 0, "digests": []}
+
+    athlete_ids = [a["id"] for a in athletes]
+
+    # Fetch existing digests for this week (to skip if force=False)
+    existing_row = supabase.table("weekly_digests").select("athlete_id, status").eq(
+        "coach_id", coach_id
+    ).eq("week_ending", target_week.isoformat()).execute()
+    existing_map: dict[str, str] = {
+        r["athlete_id"]: r["status"] for r in (existing_row.data or [])
+    }
+
+    # Fetch workouts for the week
+    workouts_row = supabase.table("workouts").select(
+        "athlete_id, session_type, scheduled_date, status, duration_min, distance_km"
+    ).in_("athlete_id", athlete_ids).gte(
+        "scheduled_date", week_start.isoformat()
+    ).lte("scheduled_date", target_week.isoformat()).execute()
+    workouts_by_athlete: dict[str, list] = {}
+    for w in (workouts_row.data or []):
+        workouts_by_athlete.setdefault(w["athlete_id"], []).append(w)
+
+    # Fetch biometric snapshots (last 35 days for baseline)
+    baseline_start = (target_week - timedelta(days=35)).isoformat()
+    snapshots_row = supabase.table("biometric_snapshots").select(
+        "athlete_id, snapshot_date, readiness, hrv, sleep"
+    ).in_("athlete_id", athlete_ids).gte(
+        "snapshot_date", baseline_start
+    ).lte("snapshot_date", target_week.isoformat()).execute()
+    snapshots_by_athlete: dict[str, list] = {}
+    for s in (snapshots_row.data or []):
+        snapshots_by_athlete.setdefault(s["athlete_id"], []).append(s)
+
+    # Fetch morning pulse sessions for the week
+    pulse_row = supabase.table("morning_pulse_sessions").select(
+        "athlete_id, session_date, summary_text, completed"
+    ).in_("athlete_id", athlete_ids).gte(
+        "session_date", week_start.isoformat()
+    ).lte("session_date", target_week.isoformat()).eq("completed", True).execute()
+    pulse_by_athlete: dict[str, list] = {}
+    for p in (pulse_row.data or []):
+        pulse_by_athlete.setdefault(p["athlete_id"], []).append(p)
+
+    from app.services.llm_client import LLMClient
+    llm = LLMClient()
+    generated = 0
+    skipped = 0
+    result_digests = []
+
+    for athlete in athletes:
+        aid = athlete["id"]
+        existing_status = existing_map.get(aid)
+
+        # Skip if already has a non-dismissed digest and not forcing
+        if existing_status in ("draft", "sent") and not force:
+            skipped += 1
+            continue
+
+        name = athlete.get("display_name") or athlete.get("full_name") or "Athlete"
+        stable = athlete.get("stable_profile") or {}
+        current = athlete.get("current_state") or {}
+
+        # Workout summary
+        workouts = workouts_by_athlete.get(aid, [])
+        planned = len(workouts)
+        completed = sum(1 for w in workouts if w.get("status") == "completed")
+        missed = sum(1 for w in workouts if (
+            w.get("status") not in ("completed", "planned")
+            and w.get("scheduled_date", "") < date.today().isoformat()
+        ))
+        workout_types = list({w.get("session_type", "workout") for w in workouts})
+        workout_summary = (
+            f"{completed}/{planned} sessions completed"
+            + (f" ({missed} missed)" if missed else "")
+            + (f" — {', '.join(workout_types[:3])}" if workout_types else "")
+        ) if planned else "No workouts scheduled this week"
+
+        # Biometric trend
+        snaps = snapshots_by_athlete.get(aid, [])
+        this_week_snaps = [s for s in snaps if s["snapshot_date"] >= week_start.isoformat()]
+        baseline_snaps = [s for s in snaps if s["snapshot_date"] < week_start.isoformat()]
+
+        def avg(lst, key):
+            vals = [x[key] for x in lst if x.get(key) is not None]
+            return round(sum(vals) / len(vals), 1) if vals else None
+
+        bio_lines = []
+        for metric, label in [("readiness", "Readiness"), ("hrv", "HRV"), ("sleep", "Sleep")]:
+            w_avg = avg(this_week_snaps, metric)
+            b_avg = avg(baseline_snaps, metric)
+            if w_avg is not None and b_avg and b_avg > 0:
+                pct = round((w_avg - b_avg) / b_avg * 100)
+                direction = "▲" if pct >= 0 else "▼"
+                bio_lines.append(f"{label}: {w_avg} ({direction}{abs(pct)}% vs 30-day avg)")
+            elif w_avg is not None:
+                bio_lines.append(f"{label}: {w_avg}")
+        bio_summary = "; ".join(bio_lines) if bio_lines else "No biometric data this week"
+
+        # Pulse check-in themes
+        pulses = pulse_by_athlete.get(aid, [])
+        pulse_themes = " | ".join(
+            p["summary_text"] for p in pulses if p.get("summary_text")
+        ) or "No morning pulse data"
+
+        # Race countdown
+        race_date_str = stable.get("race_date") or current.get("race_date")
+        race_countdown = ""
+        if race_date_str:
+            try:
+                race_dt = date.fromisoformat(str(race_date_str)[:10])
+                weeks_out = max(0, (race_dt - target_week).days // 7)
+                race_name = stable.get("target_race") or current.get("target_race") or "target race"
+                race_countdown = f"{weeks_out} weeks to {race_name} ({race_dt.strftime('%b %d')})"
+            except (ValueError, TypeError):
+                pass
+
+        # Build LLM prompt
+        system_prompt = persona or (
+            "You are a high-performance endurance sports coach. "
+            "Write in a direct, encouraging, professional tone."
+        )
+
+        user_prompt = f"""Write a weekly training summary for athlete {name}.
+
+Week: {week_start.strftime('%b %d')} – {target_week.strftime('%b %d, %Y')}
+{f'Race countdown: {race_countdown}' if race_countdown else ''}
+
+Training this week:
+{workout_summary}
+
+Biometric trends:
+{bio_summary}
+
+Morning check-in themes:
+{pulse_themes}
+
+Instructions:
+- 3–4 sentences maximum
+- Acknowledge what went well
+- Note any concern if biometrics are down >15% or sessions were missed
+- Preview next week's focus briefly
+- Write in my (the coach's) voice as if I'm messaging directly to {name}
+- Do NOT include generic AI language or sign-off — I will send this myself"""
+
+        try:
+            response = await run_in_threadpool(
+                llm.complete,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=300,
+            )
+            summary_text = response.content.strip()
+        except Exception as exc:
+            logger.warning("[COA-104] LLM failed for athlete %s: %s", aid[:8], exc)
+            # Fallback: build a minimal text summary without AI
+            summary_text = (
+                f"{name} — week of {week_start.strftime('%b %d')}: "
+                f"{workout_summary}. {bio_summary}."
+                + (f" {race_countdown}." if race_countdown else "")
+            )
+
+        # Upsert into weekly_digests
+        try:
+            upsert_data = {
+                "coach_id": coach_id,
+                "athlete_id": aid,
+                "week_ending": target_week.isoformat(),
+                "summary_text": summary_text,
+                "status": "draft",
+            }
+            upserted = supabase.table("weekly_digests").upsert(
+                upsert_data,
+                on_conflict="athlete_id,week_ending",
+            ).execute()
+            digest_row = (upserted.data or [{}])[0]
+        except Exception as exc:
+            logger.error("[COA-104] Failed to upsert digest for athlete %s: %s", aid[:8], exc)
+            digest_row = {**upsert_data, "id": None}
+
+        result_digests.append({
+            **digest_row,
+            "athlete_name": name,
+        })
+        generated += 1
+
+    logger.info(
+        "[COA-104] Weekly digest batch: coach=%s generated=%d skipped=%d week=%s",
+        coach_id[:8], generated, skipped, target_week.isoformat(),
+    )
+    return {
+        "coach_id": coach_id,
+        "week_ending": target_week.isoformat(),
+        "generated": generated,
+        "skipped": skipped,
+        "digests": result_digests,
+    }
+
+
+@router.patch("/weekly-digests/{digest_id}")
+async def update_weekly_digest(
+    digest_id: str,
+    body: WeeklyDigestUpdateRequest,
+    request: Request,
+    principal=Depends(require_roles("coach")),
+):
+    """COA-104: Update the summary_text of a draft weekly digest (inline edit before send)."""
+    supabase = request.app.state.supabase
+    coach_id = principal["coach_id"]
+
+    existing = supabase.table("weekly_digests").select("id, status, coach_id").eq(
+        "id", digest_id
+    ).single().execute()
+    row = existing.data
+    if not row:
+        raise HTTPException(status_code=404, detail="Digest not found")
+    if row["coach_id"] != coach_id:
+        raise HTTPException(status_code=403, detail="Not your digest")
+    if row["status"] == "sent":
+        raise HTTPException(status_code=400, detail="Cannot edit a digest that has already been sent")
+
+    updated = supabase.table("weekly_digests").update({
+        "summary_text": body.summary_text.strip(),
+    }).eq("id", digest_id).execute()
+
+    return {"updated": True, "digest": (updated.data or [{}])[0]}
+
+
+@router.post("/weekly-digests/{digest_id}/send")
+async def send_weekly_digest(
+    digest_id: str,
+    request: Request,
+    principal=Depends(require_roles("coach")),
+):
+    """COA-104: Send a weekly digest to the athlete via WhatsApp and mark it sent."""
+    supabase = request.app.state.supabase
+    coach_id = principal["coach_id"]
+
+    # Fetch digest + athlete phone
+    digest_row = supabase.table("weekly_digests").select(
+        "id, athlete_id, summary_text, status, coach_id, week_ending"
+    ).eq("id", digest_id).single().execute()
+    digest = digest_row.data
+    if not digest:
+        raise HTTPException(status_code=404, detail="Digest not found")
+    if digest["coach_id"] != coach_id:
+        raise HTTPException(status_code=403, detail="Not your digest")
+    if digest["status"] == "sent":
+        raise HTTPException(status_code=400, detail="Digest already sent")
+
+    athlete_row = supabase.table("athletes").select(
+        "id, full_name, display_name, whatsapp_number"
+    ).eq("id", digest["athlete_id"]).single().execute()
+    athlete = athlete_row.data
+    if not athlete:
+        raise HTTPException(status_code=404, detail="Athlete not found")
+
+    phone = athlete.get("whatsapp_number")
+    if not phone:
+        raise HTTPException(status_code=422, detail="Athlete has no WhatsApp number")
+
+    name = athlete.get("display_name") or athlete.get("full_name") or "Athlete"
+    week_end = digest.get("week_ending", "")
+    try:
+        week_label = date.fromisoformat(week_end).strftime("week of %b %d")
+    except (ValueError, TypeError):
+        week_label = f"week of {week_end}"
+
+    message = (
+        f"📊 Your weekly summary — {week_label}:\n\n"
+        f"{digest['summary_text']}"
+    )
+
+    # Use existing WhatsApp send utility
+    try:
+        from app.services.whatsapp_service import send_whatsapp_message
+        await send_whatsapp_message(phone, message)
+    except Exception as exc:
+        logger.error("[COA-104] WhatsApp send failed for digest %s: %s", digest_id[:8], exc)
+        raise HTTPException(status_code=502, detail=f"WhatsApp send failed: {exc}") from exc
+
+    # Mark as sent
+    supabase.table("weekly_digests").update({
+        "status": "sent",
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", digest_id).execute()
+
+    logger.info("[COA-104] Weekly digest sent: digest=%s athlete=%s", digest_id[:8], athlete["id"][:8])
+    return {"sent": True, "athlete": name, "digest_id": digest_id}
+
+
+@router.post("/weekly-digests/{digest_id}/dismiss")
+async def dismiss_weekly_digest(
+    digest_id: str,
+    request: Request,
+    principal=Depends(require_roles("coach")),
+):
+    """COA-104: Dismiss a weekly digest without sending it."""
+    supabase = request.app.state.supabase
+    coach_id = principal["coach_id"]
+
+    row = supabase.table("weekly_digests").select("id, coach_id, status").eq(
+        "id", digest_id
+    ).single().execute().data
+    if not row:
+        raise HTTPException(status_code=404, detail="Digest not found")
+    if row["coach_id"] != coach_id:
+        raise HTTPException(status_code=403, detail="Not your digest")
+
+    supabase.table("weekly_digests").update({"status": "dismissed"}).eq("id", digest_id).execute()
+    return {"dismissed": True, "digest_id": digest_id}
