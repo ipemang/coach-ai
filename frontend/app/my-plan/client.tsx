@@ -303,13 +303,339 @@ function CheckInForm({ token, onDone }: { token: string; onDone: () => void }) {
   );
 }
 
+// ── Types: calendar ──────────────────────────────────────────────────────────
+
+interface CalendarWorkout {
+  id: string;
+  scheduled_date: string;
+  session_type: string;
+  title: string | null;
+  duration_min: number | null;
+  distance_km: number | null;
+  hr_zone: string | null;
+  target_pace: string | null;
+  coaching_notes: string | null;
+  status: string;
+  display_status: "completed" | "missed" | "today" | "upcoming";
+  is_today: boolean;
+}
+
+interface CalendarData {
+  month: string;
+  workouts: CalendarWorkout[];
+  race_date: string | null;
+  race_name: string | null;
+  today: string;
+}
+
+// ── Training Calendar Component ───────────────────────────────────────────────
+
+function TrainingCalendar({
+  token,
+}: {
+  token: string;
+}) {
+  const today = new Date();
+  const [viewDate, setViewDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+  const [data, setData] = useState<CalendarData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [selectedWorkout, setSelectedWorkout] = useState<CalendarWorkout | null>(null);
+
+  const monthKey = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, "0")}`;
+
+  useEffect(() => {
+    setLoading(true);
+    setData(null);
+    fetch(`${BACKEND}/athlete/calendar?token=${encodeURIComponent(token)}&month=${monthKey}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setData(d))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [token, monthKey]);
+
+  // Build calendar grid
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const todayStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+  // Build date → workout lookup
+  const workoutsByDate: Record<string, CalendarWorkout[]> = {};
+  for (const w of (data?.workouts ?? [])) {
+    if (!workoutsByDate[w.scheduled_date]) workoutsByDate[w.scheduled_date] = [];
+    workoutsByDate[w.scheduled_date].push(w);
+  }
+
+  const raceDateStr = data?.race_date ?? null;
+
+  const prevMonth = () => setViewDate(new Date(year, month - 1, 1));
+  const nextMonth = () => setViewDate(new Date(year, month + 1, 1));
+  const goToday = () => setViewDate(new Date(today.getFullYear(), today.getMonth(), 1));
+
+  const dotColor = (status: string) => {
+    if (status === "completed") return "#34d399"; // emerald
+    if (status === "missed") return "#f87171";    // red
+    if (status === "today") return "#38bdf8";     // sky
+    return "#64748b";                             // slate/upcoming
+  };
+
+  const monthLabel = viewDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+  // Grid cells: blank preamble + day cells
+  const cells: (number | null)[] = [
+    ...Array.from({ length: firstDay }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  // Pad to full weeks
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  return (
+    <div style={{ paddingBottom: 8 }}>
+      {/* Month navigation */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <button
+          onClick={prevMonth}
+          style={{ background: "rgba(255,255,255,0.05)", border: "none", borderRadius: 8, padding: "6px 12px", color: "#94a3b8", cursor: "pointer", fontSize: 16 }}
+        >
+          ‹
+        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ color: "#fff", fontWeight: 600, fontSize: 15 }}>{monthLabel}</span>
+          {monthKey !== `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}` && (
+            <button
+              onClick={goToday}
+              style={{ background: "rgba(56,189,248,0.1)", border: "1px solid rgba(56,189,248,0.2)", borderRadius: 6, padding: "2px 8px", color: "#38bdf8", fontSize: 11, cursor: "pointer" }}
+            >
+              Today
+            </button>
+          )}
+        </div>
+        <button
+          onClick={nextMonth}
+          style={{ background: "rgba(255,255,255,0.05)", border: "none", borderRadius: 8, padding: "6px 12px", color: "#94a3b8", cursor: "pointer", fontSize: 16 }}
+        >
+          ›
+        </button>
+      </div>
+
+      {/* Day headers */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, marginBottom: 4 }}>
+        {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map(d => (
+          <div key={d} style={{ textAlign: "center", fontSize: 10, color: "#64748b", paddingBottom: 4, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            {d}
+          </div>
+        ))}
+      </div>
+
+      {/* Loading overlay */}
+      {loading && (
+        <div style={{ textAlign: "center", padding: "24px 0", color: "#64748b", fontSize: 13 }}>
+          Loading…
+        </div>
+      )}
+
+      {/* Calendar grid */}
+      {!loading && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
+          {cells.map((day, idx) => {
+            if (!day) {
+              return <div key={`blank-${idx}`} style={{ aspectRatio: "1", borderRadius: 6 }} />;
+            }
+
+            const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+            const isToday = dateStr === todayStr;
+            const isRaceDay = dateStr === raceDateStr;
+            const dayWorkouts = workoutsByDate[dateStr] ?? [];
+
+            return (
+              <button
+                key={dateStr}
+                onClick={() => {
+                  if (dayWorkouts.length > 0) {
+                    setSelectedWorkout(dayWorkouts[0]);
+                  } else if (isRaceDay) {
+                    // Show race info via selectedWorkout=null but day = race pin
+                    setSelectedWorkout(null);
+                  }
+                }}
+                style={{
+                  aspectRatio: "1",
+                  borderRadius: 6,
+                  border: isToday ? "1px solid rgba(56,189,248,0.5)" : "1px solid transparent",
+                  background: isToday
+                    ? "rgba(56,189,248,0.08)"
+                    : isRaceDay
+                    ? "rgba(250,204,21,0.08)"
+                    : dayWorkouts.length > 0
+                    ? "rgba(255,255,255,0.04)"
+                    : "rgba(255,255,255,0.02)",
+                  cursor: dayWorkouts.length > 0 || isRaceDay ? "pointer" : "default",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "5px 2px",
+                  position: "relative",
+                  transition: "background 0.1s",
+                }}
+              >
+                <span style={{ fontSize: 11, color: isToday ? "#38bdf8" : isRaceDay ? "#fbbf24" : "#94a3b8", fontWeight: isToday ? 700 : 400 }}>
+                  {day}
+                </span>
+                {/* Race pin */}
+                {isRaceDay && (
+                  <span style={{ fontSize: 10 }}>🏁</span>
+                )}
+                {/* Workout dots */}
+                {!isRaceDay && dayWorkouts.length > 0 && (
+                  <div style={{ display: "flex", gap: 2, flexWrap: "wrap", justifyContent: "center" }}>
+                    {dayWorkouts.slice(0, 3).map((w, wi) => (
+                      <div
+                        key={wi}
+                        style={{
+                          width: 5,
+                          height: 5,
+                          borderRadius: "50%",
+                          background: dotColor(w.display_status),
+                          flexShrink: 0,
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Race date callout */}
+      {raceDateStr && (() => {
+        const raceMonth = raceDateStr.slice(0, 7);
+        if (raceMonth === monthKey) {
+          const raceDt = new Date(raceDateStr + "T12:00:00Z");
+          const label = raceDt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          const weeksOut = Math.max(0, Math.round((raceDt.getTime() - Date.now()) / (7 * 86400000)));
+          return (
+            <div style={{ marginTop: 14, background: "rgba(250,204,21,0.08)", border: "1px solid rgba(250,204,21,0.2)", borderRadius: 8, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 18 }}>🏁</span>
+              <div>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: "#fbbf24" }}>
+                  {data?.race_name || "Race day"} — {label}
+                </p>
+                <p style={{ margin: 0, fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                  {weeksOut > 0 ? `${weeksOut} week${weeksOut === 1 ? "" : "s"} away` : "Race day is today!"}
+                </p>
+              </div>
+            </div>
+          );
+        }
+        return null;
+      })()}
+
+      {/* Legend */}
+      <div style={{ marginTop: 14, display: "flex", gap: 14, flexWrap: "wrap" }}>
+        {[
+          { color: "#34d399", label: "Done" },
+          { color: "#38bdf8", label: "Today" },
+          { color: "#64748b", label: "Planned" },
+          { color: "#f87171", label: "Missed" },
+        ].map(({ color, label }) => (
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: color }} />
+            <span style={{ fontSize: 11, color: "#64748b" }}>{label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Workout detail drawer */}
+      {selectedWorkout && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 100,
+            display: "flex", alignItems: "flex-end", justifyContent: "center",
+          }}
+          onClick={() => setSelectedWorkout(null)}
+        >
+          <div
+            style={{
+              width: "100%", maxWidth: 480, background: "#0f1117",
+              borderRadius: "16px 16px 0 0", padding: "20px 20px 32px 20px",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Handle */}
+            <div style={{ width: 36, height: 4, background: "rgba(255,255,255,0.15)", borderRadius: 2, margin: "0 auto 16px auto" }} />
+
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+              <span style={{ fontSize: 28 }}>{sessionIcon(selectedWorkout.session_type)}</span>
+              <div>
+                <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "#fff" }}>
+                  {selectedWorkout.title || selectedWorkout.session_type}
+                </p>
+                <p style={{ margin: 0, fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                  {new Date(selectedWorkout.scheduled_date + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+                </p>
+              </div>
+              <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLE[selectedWorkout.display_status]}`} style={{ marginLeft: "auto" }}>
+                {STATUS_LABEL[selectedWorkout.display_status]}
+              </span>
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: selectedWorkout.coaching_notes ? 14 : 0 }}>
+              {selectedWorkout.duration_min && (
+                <span style={{ background: "rgba(255,255,255,0.05)", borderRadius: 6, padding: "4px 10px", fontSize: 12, color: "#94a3b8" }}>
+                  ⏱ {selectedWorkout.duration_min} min
+                </span>
+              )}
+              {selectedWorkout.distance_km && (
+                <span style={{ background: "rgba(255,255,255,0.05)", borderRadius: 6, padding: "4px 10px", fontSize: 12, color: "#94a3b8" }}>
+                  📏 {selectedWorkout.distance_km} km
+                </span>
+              )}
+              {selectedWorkout.hr_zone && (
+                <span style={{ background: "rgba(255,255,255,0.05)", borderRadius: 6, padding: "4px 10px", fontSize: 12, color: "#94a3b8" }}>
+                  💓 Zone {selectedWorkout.hr_zone}
+                </span>
+              )}
+              {selectedWorkout.target_pace && (
+                <span style={{ background: "rgba(255,255,255,0.05)", borderRadius: 6, padding: "4px 10px", fontSize: 12, color: "#94a3b8" }}>
+                  🎯 {selectedWorkout.target_pace}
+                </span>
+              )}
+            </div>
+
+            {selectedWorkout.coaching_notes && (
+              <div style={{ background: "rgba(56,189,248,0.05)", border: "1px solid rgba(56,189,248,0.15)", borderRadius: 8, padding: "10px 14px" }}>
+                <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>
+                  <span style={{ color: "#38bdf8", fontWeight: 600 }}>Coach: </span>
+                  {selectedWorkout.coaching_notes}
+                </p>
+              </div>
+            )}
+
+            <button
+              onClick={() => setSelectedWorkout(null)}
+              style={{ marginTop: 16, width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, padding: "12px", color: "#64748b", fontSize: 13, cursor: "pointer" }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main client component ─────────────────────────────────────────────────────
 
 export function AthletePlanClient() {
   const params = useSearchParams();
   const token = params.get("token");
 
-  const [tab, setTab] = useState<"plan" | "checkin" | "messages">("plan");
+  const [tab, setTab] = useState<"plan" | "calendar" | "checkin" | "messages">("plan");
   const [profile, setProfile] = useState<Profile | null>(null);
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -425,7 +751,7 @@ export function AthletePlanClient() {
 
       {/* Tabs */}
       <div className="flex border-b border-white/8 px-5">
-        {(["plan", "checkin", "messages"] as const).map((t) => (
+        {(["plan", "calendar", "checkin", "messages"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -435,7 +761,7 @@ export function AthletePlanClient() {
                 : "border-transparent text-slate-500 hover:text-slate-300"
             }`}
           >
-            {t === "plan" ? "Training" : t === "checkin" ? "Check In" : "Messages"}
+            {t === "plan" ? "This Week" : t === "calendar" ? "Calendar" : t === "checkin" ? "Check In" : "Messages"}
           </button>
         ))}
       </div>
@@ -504,6 +830,11 @@ export function AthletePlanClient() {
               </button>
             ))}
           </>
+        )}
+
+        {/* ── CALENDAR TAB ── */}
+        {tab === "calendar" && (
+          <TrainingCalendar token={token} />
         )}
 
         {/* ── CHECK IN TAB ── */}

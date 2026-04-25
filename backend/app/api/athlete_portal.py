@@ -428,3 +428,100 @@ async def save_oura_token(
 
     logger.info("[athlete-portal] Oura token saved for athlete=%s", athlete["id"])
     return {"ok": True, "message": "Oura Ring connected successfully"}
+
+
+# ── COA-105: Monthly workout calendar ─────────────────────────────────────────
+
+@router.get("/calendar")
+async def athlete_calendar(
+    token: str = Query(...),
+    month: str = Query(None, description="YYYY-MM, defaults to current month"),
+    request: Request = None,  # type: ignore
+):
+    """COA-105: Return all workouts for a calendar month (±1 month buffer on each side).
+
+    Also returns athlete's stable_profile.race_date for race pin on calendar.
+    """
+    supabase = request.app.state.supabase_client
+    athlete = await _resolve_token(supabase, token)
+    athlete_id = athlete["id"]
+
+    today = date.today()
+
+    # Parse target month
+    if month:
+        try:
+            y, m = [int(x) for x in month.split("-")]
+            target_month = date(y, m, 1)
+        except (ValueError, AttributeError) as exc:
+            raise HTTPException(status_code=400, detail="month must be YYYY-MM") from exc
+    else:
+        target_month = date(today.year, today.month, 1)
+
+    # Fetch one month of workouts (just the target month, let JS handle display)
+    # Add a 7-day buffer on each side for calendar grid overflow
+    range_start = (target_month - timedelta(days=7)).isoformat()
+    next_month = date(
+        target_month.year + (1 if target_month.month == 12 else 0),
+        (target_month.month % 12) + 1,
+        1
+    )
+    range_end = (next_month + timedelta(days=7)).isoformat()
+
+    workouts = await _qr(
+        supabase.table("workouts")
+        .select(
+            "id, scheduled_date, session_type, title, duration_min, distance_km, "
+            "hr_zone, target_pace, coaching_notes, status, completed_at"
+        )
+        .eq("athlete_id", athlete_id)
+        .gte("scheduled_date", range_start)
+        .lte("scheduled_date", range_end)
+        .order("scheduled_date", desc=False)
+    )
+
+    # Enrich each workout with display status
+    enriched = []
+    for w in workouts:
+        try:
+            sched = date.fromisoformat(w["scheduled_date"])
+        except (KeyError, ValueError):
+            continue
+
+        status = w.get("status", "pending")
+        if status == "completed":
+            display_status = "completed"
+        elif sched < today:
+            display_status = "missed"
+        elif sched == today:
+            display_status = "today"
+        else:
+            display_status = "upcoming"
+
+        enriched.append({
+            **w,
+            "display_status": display_status,
+            "is_today": sched == today,
+        })
+
+    # Fetch race date from stable_profile
+    race_date = None
+    race_name = None
+    stable = athlete.get("stable_profile") or {}
+    current = athlete.get("current_state") or {}
+    race_date_raw = stable.get("race_date") or current.get("race_date")
+    race_name_raw = stable.get("target_race") or current.get("target_race")
+    if race_date_raw:
+        try:
+            race_date = str(race_date_raw)[:10]  # ensure YYYY-MM-DD
+            race_name = race_name_raw
+        except (TypeError, ValueError):
+            pass
+
+    return {
+        "month": target_month.isoformat(),
+        "workouts": enriched,
+        "race_date": race_date,
+        "race_name": race_name,
+        "today": today.isoformat(),
+    }
