@@ -640,6 +640,7 @@ export function AthletePlanClient() {
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [checkins, setCheckins] = useState<CheckIn[]>([]);
+  const [coachNotes, setCoachNotes] = useState<{ id: string; note_text: string; sent_at: string | null; created_at: string }[]>([]);
   const [loggingWorkout, setLoggingWorkout] = useState<Workout | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -649,11 +650,12 @@ export function AthletePlanClient() {
     setLoading(true);
     setError(null);
     try {
-      const [profileRes, planRes, messagesRes, checkinsRes] = await Promise.all([
+      const [profileRes, planRes, messagesRes, checkinsRes, notesRes] = await Promise.all([
         fetch(`${BACKEND}/athlete/profile?token=${token}`),
         fetch(`${BACKEND}/athlete/plan?token=${token}`),
         fetch(`${BACKEND}/athlete/messages?token=${token}`),
         fetch(`${BACKEND}/athlete/checkins?token=${token}`),
+        fetch(`${BACKEND}/athlete/notes?token=${token}`),
       ]);
 
       if (!profileRes.ok) {
@@ -665,6 +667,7 @@ export function AthletePlanClient() {
       if (planRes.ok) setPlan(await planRes.json());
       if (messagesRes.ok) setMessages((await messagesRes.json()).messages || []);
       if (checkinsRes.ok) setCheckins((await checkinsRes.json()).checkins || []);
+      if (notesRes.ok) setCoachNotes((await notesRes.json()).notes || []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load your plan");
     } finally {
@@ -830,6 +833,26 @@ export function AthletePlanClient() {
               </button>
             ))}
           </>
+        )}
+
+        {/* ── FROM YOUR COACH (COA-106) — shown at bottom of plan tab ── */}
+        {tab === "plan" && coachNotes.length > 0 && (
+          <div className="space-y-2 pt-2">
+            <p className="text-xs text-slate-500 uppercase tracking-widest">From your coach</p>
+            {coachNotes.map((n) => (
+              <div
+                key={n.id}
+                className="rounded-2xl border border-sky-400/10 bg-sky-400/[0.03] px-4 py-3"
+              >
+                <p className="text-sm text-slate-200 leading-relaxed italic">{n.note_text}</p>
+                <p className="text-xs text-slate-600 mt-1.5">
+                  {n.sent_at
+                    ? new Date(n.sent_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                    : new Date(n.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </p>
+              </div>
+            ))}
+          </div>
         )}
 
         {/* ── CALENDAR TAB ── */}

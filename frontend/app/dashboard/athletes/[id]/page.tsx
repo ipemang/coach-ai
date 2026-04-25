@@ -6,6 +6,7 @@ import { AthleteWeeklyPlan } from "@/components/athlete-weekly-plan";
 import { AthleteSidebar } from "@/components/athlete-sidebar";
 import { AthleteHistory } from "@/components/athlete-history";
 import { ResendPlanButton } from "@/components/resend-plan-button";
+import { SessionNotePanel } from "@/components/session-note-panel";
 import Link from "next/link";
 
 function getSupabase() {
@@ -265,6 +266,8 @@ export default async function AthleteProfilePage({
               weekEnd={weekEnd}
             />
             <AthleteHistory checkins={checkins} suggestions={suggestions} />
+            {/* COA-106: Session notes */}
+            <SessionNotePanel athleteId={id} />
           </div>
 
           {/* Right — sidebar */}

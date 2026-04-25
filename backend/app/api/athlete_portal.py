@@ -525,3 +525,31 @@ async def athlete_calendar(
         "race_name": race_name,
         "today": today.isoformat(),
     }
+
+
+# ── COA-106: Coach notes for athlete portal ────────────────────────────────────
+
+@router.get("/notes")
+async def athlete_notes(
+    token: str = Query(...),
+    request: Request = None,  # type: ignore
+):
+    """COA-106: Return last 5 sent coach session notes for the athlete portal.
+
+    Displayed as "From your coach" section on /my-plan.
+    Only shows notes where sent_via_whatsapp=true (i.e., coach explicitly sent).
+    """
+    supabase = request.app.state.supabase_client
+    athlete = await _resolve_token(supabase, token)
+    athlete_id = athlete["id"]
+
+    notes = await _qr(
+        supabase.table("coach_notes")
+        .select("id, note_text, sent_at, created_at, workout_id")
+        .eq("athlete_id", athlete_id)
+        .eq("sent_via_whatsapp", True)
+        .order("created_at", desc=True)
+        .limit(5)
+    )
+
+    return {"notes": notes}

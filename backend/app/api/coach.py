@@ -2424,3 +2424,268 @@ async def dismiss_weekly_digest(
 
     supabase.table("weekly_digests").update({"status": "dismissed"}).eq("id", digest_id).execute()
     return {"dismissed": True, "digest_id": digest_id}
+
+
+# ── COA-106: Coach session notes ───────────────────────────────────────────────
+
+class SessionNoteRequest(_BaseModel):
+    note_text: str = Field(..., min_length=1, max_length=2000)
+    workout_id: str | None = Field(default=None)
+
+
+@router.post("/athletes/{athlete_id}/notes/draft")
+async def draft_session_note(
+    athlete_id: str,
+    request: Request,
+    workout_id: str | None = None,
+    principal=Depends(require_roles("coach")),
+):
+    """COA-106: AI-draft a post-workout session note for this athlete.
+
+    Uses the most recent completed workout (or the specified workout_id),
+    biometric data from current_state, and the coach's persona_system_prompt
+    to generate a note in the coach's voice. Under 3 sentences.
+    """
+    from starlette.concurrency import run_in_threadpool
+    from app.services.llm_client import LLMClient
+
+    supabase = request.app.state.supabase
+    coach_id = principal["coach_id"]
+
+    # Fetch coach persona
+    coach_row = supabase.table("coaches").select(
+        "id, full_name, persona_system_prompt"
+    ).eq("id", coach_id).single().execute()
+    coach = coach_row.data or {}
+    persona = (coach.get("persona_system_prompt") or "").strip()
+
+    # Fetch athlete
+    athlete_row = supabase.table("athletes").select(
+        "id, full_name, display_name, current_state, stable_profile, coach_id"
+    ).eq("id", athlete_id).single().execute()
+    athlete = athlete_row.data
+    if not athlete:
+        raise HTTPException(status_code=404, detail="Athlete not found")
+    if athlete["coach_id"] != coach_id:
+        raise HTTPException(status_code=403, detail="Not your athlete")
+
+    name = athlete.get("display_name") or athlete.get("full_name") or "Athlete"
+    cs = athlete.get("current_state") or {}
+    sp = athlete.get("stable_profile") or {}
+
+    # Fetch target workout
+    if workout_id:
+        wq = supabase.table("workouts").select(
+            "id, session_type, title, duration_min, distance_km, hr_zone, status, scheduled_date"
+        ).eq("id", workout_id).single().execute()
+        workout = wq.data
+    else:
+        # Most recent completed workout
+        wq = supabase.table("workouts").select(
+            "id, session_type, title, duration_min, distance_km, hr_zone, status, scheduled_date"
+        ).eq("athlete_id", athlete_id).eq("status", "completed").order(
+            "scheduled_date", desc=True
+        ).limit(1).execute()
+        workout = (wq.data or [None])[0]
+
+    # Build workout line
+    if workout:
+        wtype = workout.get("session_type", "workout")
+        wdur = workout.get("duration_min")
+        wdist = workout.get("distance_km")
+        wtitle = workout.get("title") or wtype
+        workout_line = f"{wtitle}"
+        if wdur: workout_line += f" ({wdur} min"
+        if wdist: workout_line += f", {wdist} km"
+        if wdur or wdist: workout_line += ")"
+        workout_status = workout.get("status", "completed")
+    else:
+        workout_line = "recent training session"
+        workout_status = "completed"
+
+    # Biometrics
+    readiness = cs.get("oura_readiness_score") or cs.get("last_readiness_score")
+    hrv = cs.get("oura_avg_hrv") or cs.get("last_hrv")
+    bio_line = ""
+    if readiness: bio_line += f"Readiness {readiness}"
+    if hrv: bio_line += f"{', ' if bio_line else ''}HRV {hrv}"
+    if not bio_line: bio_line = "No biometric data today"
+
+    # Race context
+    race_date = sp.get("race_date") or cs.get("race_date")
+    race_name = sp.get("target_race") or cs.get("target_race")
+    race_line = ""
+    if race_date and race_name:
+        try:
+            rd = date.fromisoformat(str(race_date)[:10])
+            weeks = max(0, (rd - date.today()).days // 7)
+            race_line = f"({weeks} weeks to {race_name})"
+        except (ValueError, TypeError):
+            pass
+
+    system_prompt = persona or (
+        "You are a high-performance endurance sports coach. "
+        "Write short, specific, encouraging post-workout notes directly to your athlete."
+    )
+    user_prompt = f"""Write a brief post-workout note for {name} about their {workout_line}.
+
+Athlete biometrics today: {bio_line}
+{f'Race context: {race_line}' if race_line else ''}
+
+Instructions:
+- Maximum 3 sentences
+- Acknowledge what they did specifically
+- Note anything about their biometrics if relevant
+- Preview or encourage for next session
+- Write directly to the athlete (use "you")
+- Do NOT include a sign-off or greeting — the coach will send this themselves"""
+
+    try:
+        llm = LLMClient()
+        resp = await run_in_threadpool(
+            llm.complete,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=200,
+        )
+        note_text = resp.content.strip()
+    except Exception as exc:
+        logger.warning("[COA-106] LLM draft failed for athlete %s: %s", athlete_id[:8], exc)
+        note_text = f"Great work on your {workout_line}, {name}. Keep that momentum going!"
+
+    return {
+        "draft": note_text,
+        "athlete_id": athlete_id,
+        "workout_id": workout_id or (workout or {}).get("id"),
+    }
+
+
+@router.post("/athletes/{athlete_id}/notes")
+async def save_session_note(
+    athlete_id: str,
+    body: SessionNoteRequest,
+    request: Request,
+    send: bool = False,
+    principal=Depends(require_roles("coach")),
+):
+    """COA-106: Save a session note (manual or AI-drafted).
+
+    If ?send=true, also fires the note to the athlete via WhatsApp and sets
+    sent_via_whatsapp=true.
+    """
+    supabase = request.app.state.supabase
+    coach_id = principal["coach_id"]
+
+    # Validate athlete belongs to coach
+    athlete_row = supabase.table("athletes").select(
+        "id, full_name, display_name, whatsapp_number, coach_id"
+    ).eq("id", athlete_id).single().execute()
+    athlete = athlete_row.data
+    if not athlete:
+        raise HTTPException(status_code=404, detail="Athlete not found")
+    if athlete["coach_id"] != coach_id:
+        raise HTTPException(status_code=403, detail="Not your athlete")
+
+    sent_via_whatsapp = False
+    sent_at = None
+
+    if send:
+        phone = athlete.get("whatsapp_number")
+        if not phone:
+            raise HTTPException(status_code=422, detail="Athlete has no WhatsApp number")
+        try:
+            from app.services.whatsapp_service import send_whatsapp_message
+            await send_whatsapp_message(phone, body.note_text.strip())
+            sent_via_whatsapp = True
+            sent_at = datetime.now(timezone.utc).isoformat()
+        except Exception as exc:
+            logger.error("[COA-106] WhatsApp send failed: %s", exc)
+            raise HTTPException(status_code=502, detail=f"WhatsApp send failed: {exc}") from exc
+
+    result = supabase.table("coach_notes").insert({
+        "coach_id": coach_id,
+        "athlete_id": athlete_id,
+        "note_text": body.note_text.strip(),
+        "source": "manual",
+        "workout_id": body.workout_id,
+        "sent_via_whatsapp": sent_via_whatsapp,
+        "sent_at": sent_at,
+    }).execute()
+
+    note = (result.data or [{}])[0]
+    logger.info("[COA-106] Note saved: coach=%s athlete=%s sent=%s", coach_id[:8], athlete_id[:8], sent_via_whatsapp)
+    return {"saved": True, "sent": sent_via_whatsapp, "note": note}
+
+
+@router.get("/athletes/{athlete_id}/notes")
+async def list_session_notes(
+    athlete_id: str,
+    request: Request,
+    limit: int = 20,
+    principal=Depends(require_roles("coach")),
+):
+    """COA-106: List session notes for an athlete (newest first)."""
+    supabase = request.app.state.supabase
+    coach_id = principal["coach_id"]
+
+    # Validate ownership
+    athlete_row = supabase.table("athletes").select("id, coach_id").eq("id", athlete_id).single().execute()
+    athlete = athlete_row.data
+    if not athlete or athlete["coach_id"] != coach_id:
+        raise HTTPException(status_code=403, detail="Not your athlete")
+
+    notes_row = supabase.table("coach_notes").select(
+        "id, note_text, source, sent_via_whatsapp, sent_at, workout_id, created_at"
+    ).eq("athlete_id", athlete_id).eq("coach_id", coach_id).order(
+        "created_at", desc=True
+    ).limit(limit).execute()
+
+    return {"athlete_id": athlete_id, "notes": notes_row.data or []}
+
+
+@router.post("/athletes/{athlete_id}/notes/{note_id}/send")
+async def send_session_note(
+    athlete_id: str,
+    note_id: str,
+    request: Request,
+    principal=Depends(require_roles("coach")),
+):
+    """COA-106: Send an existing saved note to the athlete via WhatsApp."""
+    supabase = request.app.state.supabase
+    coach_id = principal["coach_id"]
+
+    note_row = supabase.table("coach_notes").select(
+        "id, note_text, coach_id, sent_via_whatsapp"
+    ).eq("id", note_id).eq("athlete_id", athlete_id).single().execute()
+    note = note_row.data
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if note["coach_id"] != coach_id:
+        raise HTTPException(status_code=403, detail="Not your note")
+    if note["sent_via_whatsapp"]:
+        raise HTTPException(status_code=400, detail="Note already sent")
+
+    athlete_row = supabase.table("athletes").select(
+        "full_name, display_name, whatsapp_number, coach_id"
+    ).eq("id", athlete_id).single().execute()
+    athlete = athlete_row.data
+    if not athlete:
+        raise HTTPException(status_code=404, detail="Athlete not found")
+
+    phone = athlete.get("whatsapp_number")
+    if not phone:
+        raise HTTPException(status_code=422, detail="Athlete has no WhatsApp number")
+
+    try:
+        from app.services.whatsapp_service import send_whatsapp_message
+        await send_whatsapp_message(phone, note["note_text"])
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"WhatsApp send failed: {exc}") from exc
+
+    supabase.table("coach_notes").update({
+        "sent_via_whatsapp": True,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+        "source": "ai_sent" if note.get("source") == "ai_draft" else "manual",
+    }).eq("id", note_id).execute()
+
+    return {"sent": True, "note_id": note_id}
