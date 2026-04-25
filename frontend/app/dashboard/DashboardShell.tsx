@@ -4,14 +4,28 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createBrowserSupabase } from "@/app/lib/supabase";
-import type { Athlete, Suggestion } from "@/app/lib/types";
+import type { Athlete, Suggestion, StableProfile, CurrentState, PredictiveFlag } from "@/app/lib/types";
 
 // ─── Extended types ───────────────────────────────────────────────────────────
+
+type WeekWorkout = {
+  scheduled_date: string;
+  status: string;
+  distance_km: number | null;
+};
+
+type BiometricBaseline = {
+  readiness_avg: number | null;
+  hrv_avg: number | null;
+  sleep_avg: number | null;
+};
 
 type EnrichedAthlete = Athlete & {
   pending_suggestions?: number;
   total_checkins?: number;
   last_checkin_at?: string | null;
+  week_workouts?: WeekWorkout[];
+  biometric_baseline?: BiometricBaseline | null;  // COA-101
 };
 
 type Tab = "roster" | "queue" | "officehours";
@@ -47,31 +61,92 @@ function relativeTime(iso: string | null | undefined): string {
 }
 
 function getProfile(a: EnrichedAthlete) {
-  const sp = a.stable_profile as Record<string, unknown> | null | undefined;
-  const cs = a.current_state as Record<string, unknown> | null | undefined;
+  const sp = a.stable_profile as StableProfile | null | undefined;
+  const cs = a.current_state as CurrentState | null | undefined;
+
+  // Compute weeks to race from race_date (stable_profile has the event date)
+  let weeksToRace = 99;
+  if (sp?.race_date) {
+    const diff = Math.ceil(
+      (new Date(sp.race_date).getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000),
+    );
+    weeksToRace = diff > 0 ? diff : 0;
+  }
+
   return {
-    readiness: (sp?.readiness as number | undefined) ?? null,
-    hrv:       String(sp?.hrv ?? "—"),
-    sleep:     String(sp?.sleep ?? "—"),
-    load:      String(sp?.load ?? "—"),
-    trend:     (sp?.trend as string | undefined) ?? null,
-    phase:     String(sp?.phase ?? "General"),
-    week:      (sp?.week as number | undefined) ?? null,
-    target_race:   String(sp?.target_race ?? "No race set"),
-    weeks_to_race: (sp?.weeks_to_race as number | undefined) ?? 99,
-    notes: (cs?.notes as string | undefined) ?? null,
+    // Biometrics — live from current_state (Oura sync)
+    readiness:    (cs?.oura_readiness_score ?? null) as number | null,
+    hrv:          cs?.oura_avg_hrv != null ? String(Math.round(cs.oura_avg_hrv)) : "—",
+    sleep:        cs?.oura_sleep_score != null ? String(cs.oura_sleep_score) : "—",
+    // Load proxy — last Strava activity distance if available
+    load:         cs?.strava_last_distance_km != null ? `${cs.strava_last_distance_km}km` : "—",
+    // Training phase / week — live from current_state
+    phase:        cs?.training_phase ?? "General",
+    week:         (cs?.training_week ?? null) as number | null,
+    // Race info — stable (coach-set targets don't change daily)
+    target_race:  sp?.target_race ?? "No race set",
+    weeks_to_race: weeksToRace,
+    // Notes — coach notes from current_state, fallback to stable profile notes
+    notes:        cs?.coach_notes ?? sp?.notes ?? null,
+    // AI urgency flags
+    predictive_flags: (cs?.predictive_flags ?? []) as PredictiveFlag[],
   };
 }
 
+// COA-101: Biometric delta vs. 30-day personal baseline
+function BioDelta({ current, avg }: { current: number | null; avg: number | null }) {
+  if (current === null || avg === null || avg === 0) return null;
+  const pct = Math.round(((current - avg) / avg) * 100);
+  const abs = Math.abs(pct);
+  if (abs < 5) return null; // within noise — don't show
+  const down = pct < 0;
+  const severe = abs > 15;
+  const color = down ? (severe ? "var(--terracotta-deep)" : "var(--ochre)") : "var(--aegean-deep)";
+  return (
+    <div style={{ fontSize: 9, color, fontFamily: "var(--mono)", lineHeight: 1, marginTop: 2 }}
+         title={`30-day avg: ${avg}. Today: ${current}. ${down ? "Below" : "Above"} baseline.`}>
+      {down ? "↓" : "↑"} {abs}%
+    </div>
+  );
+}
+
 const DAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
-function buildWeekData() {
-  const todayDow = new Date().getDay();
-  const todayIdx = todayDow === 0 ? 6 : todayDow - 1;
-  return DAY_LABELS.map((day, i) => ({
-    day,
-    type: i < todayIdx ? "done" : i === todayIdx ? "planned today" : "planned",
-    km: [10, 0, 14, 8, 0, 20, 0][i],
-  }));
+
+function buildWeekData(workouts: WeekWorkout[] = []) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayDow = today.getDay(); // 0=Sun
+  const todayIdx = todayDow === 0 ? 6 : todayDow - 1; // Mon=0 … Sun=6
+
+  // Index workouts by date string
+  const byDate: Record<string, { km: number; type: string }> = {};
+  for (const w of workouts) {
+    const date = w.scheduled_date.split("T")[0];
+    if (!byDate[date]) byDate[date] = { km: 0, type: "" };
+    byDate[date].km += w.distance_km ?? 0;
+    const wDate = new Date(date + "T12:00:00");
+    const isToday = wDate.toDateString() === today.toDateString();
+    const isPast = wDate < today;
+    if (isToday) {
+      byDate[date].type = w.status === "completed" ? "done" : "planned today";
+    } else if (isPast) {
+      byDate[date].type = w.status === "completed" ? "done" : "missed";
+    } else {
+      byDate[date].type = "planned";
+    }
+  }
+
+  return DAY_LABELS.map((day, i) => {
+    const d = new Date(today);
+    d.setDate(today.getDate() - todayIdx + i);
+    const dateStr = d.toISOString().split("T")[0];
+    const entry = byDate[dateStr];
+    return {
+      day,
+      type: entry?.type ?? "",
+      km: entry?.km ?? 0,
+    };
+  });
 }
 
 // ─── SVG Glyphs ───────────────────────────────────────────────────────────────
@@ -298,6 +373,87 @@ function Greeting({ athleteCount }: { athleteCount: number }) {
   );
 }
 
+// ─── Daily Digest (COA-102) ───────────────────────────────────────────────────
+
+type DigestFlag = { athlete_id: string; name: string; reason: string };
+type DigestData = {
+  generated_at: string;
+  summary: string;
+  athlete_flags: DigestFlag[];
+};
+
+function DailyDigest({
+  digest,
+  loading,
+}: {
+  digest: DigestData | null;
+  loading: boolean;
+}) {
+  const [expanded, setExpanded] = useState(true);
+
+  if (loading) {
+    return (
+      <div className="ca-panel" style={{ padding: "16px 20px", marginTop: 20, display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 16, height: 16, border: "2px solid var(--rule)", borderTopColor: "var(--aegean-deep)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+        <span className="ca-eyebrow" style={{ fontSize: 11 }}>Preparing your morning briefing…</span>
+      </div>
+    );
+  }
+
+  if (!digest) return null;
+
+  const genTime = (() => {
+    try {
+      return new Date(digest.generated_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    } catch {
+      return "";
+    }
+  })();
+
+  return (
+    <div className="ca-panel" style={{ marginTop: 20, overflow: "hidden" }}>
+      {/* Header row — always visible */}
+      <button
+        onClick={() => setExpanded(v => !v)}
+        style={{ width: "100%", padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "transparent", border: "none", cursor: "pointer", textAlign: "left" }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <G.Sun size={15} color="var(--terracotta-deep)" />
+          <span className="ca-eyebrow ca-eyebrow-terra" style={{ fontSize: 10 }}>Today&apos;s briefing</span>
+          {genTime && (
+            <span className="ca-eyebrow" style={{ fontSize: 9, color: "var(--ink-mute)" }}>— {genTime}</span>
+          )}
+          {digest.athlete_flags.length > 0 && (
+            <span className="ca-chip ca-chip-terra" style={{ fontSize: 9 }}>
+              {digest.athlete_flags.length} {digest.athlete_flags.length === 1 ? "flag" : "flags"}
+            </span>
+          )}
+        </div>
+        <G.Arrow size={13} color="var(--ink-mute)" dir={expanded ? "up" : "down"} />
+      </button>
+
+      {/* Collapsible body */}
+      {expanded && (
+        <div style={{ padding: "0 20px 18px 20px", borderTop: "1px solid var(--rule)" }}>
+          <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 14.5, lineHeight: 1.65, color: "var(--ink-soft)", margin: "14px 0 0 0" }}>
+            {digest.summary}
+          </p>
+          {digest.athlete_flags.length > 0 && (
+            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 6 }}>
+              {digest.athlete_flags.map((f, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderLeft: "2px solid var(--terracotta)", borderRadius: 2 }}>
+                  <span style={{ fontSize: 11, fontFamily: "var(--serif)", fontWeight: 600, color: "var(--ink)", flexShrink: 0 }}>{f.name}</span>
+                  <span style={{ fontSize: 11, fontFamily: "var(--serif)", color: "var(--ink-soft)", fontStyle: "italic" }}>{f.reason}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Athlete Card ─────────────────────────────────────────────────────────────
 
 function AthleteCard({ athlete, href }: { athlete: EnrichedAthlete; href: string; }) {
@@ -305,7 +461,24 @@ function AthleteCard({ athlete, href }: { athlete: EnrichedAthlete; href: string
   const pending = athlete.pending_suggestions ?? 0;
   const tone: "aegean" | "terra" | "ochre" | "linen" = pending > 0 ? "terra" : "aegean";
   const readinessColor = profile.readiness === null ? "var(--ink-soft)" : profile.readiness >= 80 ? "var(--aegean-deep)" : profile.readiness >= 60 ? "var(--ochre)" : "var(--terracotta-deep)";
-  const weekData = useMemo(() => buildWeekData(), []);
+  const baseline = athlete.biometric_baseline ?? null;  // COA-101
+  const weekData = useMemo(() => buildWeekData(athlete.week_workouts), [athlete.week_workouts]);
+  const [resendState, setResendState] = useState<"idle" | "loading" | "sent" | "error">("idle");
+
+  async function handleResendPlanLink(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (resendState === "loading") return;
+    setResendState("loading");
+    try {
+      const res = await fetch(`/api/athletes/${athlete.id}/resend-plan-link`, { method: "POST" });
+      setResendState(res.ok ? "sent" : "error");
+      setTimeout(() => setResendState("idle"), 3000);
+    } catch {
+      setResendState("error");
+      setTimeout(() => setResendState("idle"), 3000);
+    }
+  }
 
   return (
     <Link href={href} style={{ textDecoration: "none", display: "block" }}>
@@ -332,10 +505,25 @@ function AthleteCard({ athlete, href }: { athlete: EnrichedAthlete; href: string
       {/* Metrics strip */}
       <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr 1fr 1fr", gap: 1, background: "var(--rule)", borderTop: "1px solid var(--rule)", borderBottom: "1px solid var(--rule)" }}>
         {[
-          { label: "Readiness", value: profile.readiness !== null ? <><span className="ca-num" style={{ fontSize: 26, color: readinessColor, lineHeight: 1 }}>{profile.readiness}</span><span style={{ fontSize: 11, color: "var(--ink-mute)" }}>/100</span></> : <span className="ca-num" style={{ fontSize: 20, color: "var(--ink-mute)" }}>—</span>, icon: null, wide: true },
-          { label: "HRV", value: <>{profile.hrv}{profile.hrv !== "—" && <span style={{ fontSize: 10, color: "var(--ink-mute)", marginLeft: 2 }}>ms</span>}</>, icon: <G.Heart size={10} />, wide: false },
-          { label: "Sleep", value: profile.sleep, icon: <G.Moon size={10} />, wide: false },
-          { label: "Load", value: profile.load, icon: <G.Flame size={10} />, wide: false },
+          {
+            label: "Readiness",
+            value: profile.readiness !== null ? <><span className="ca-num" style={{ fontSize: 26, color: readinessColor, lineHeight: 1 }}>{profile.readiness}</span><span style={{ fontSize: 11, color: "var(--ink-mute)" }}>/100</span></> : <span className="ca-num" style={{ fontSize: 20, color: "var(--ink-mute)" }}>—</span>,
+            delta: <BioDelta current={profile.readiness} avg={baseline?.readiness_avg ?? null} />,
+            icon: null, wide: true,
+          },
+          {
+            label: "HRV",
+            value: <>{profile.hrv}{profile.hrv !== "—" && <span style={{ fontSize: 10, color: "var(--ink-mute)", marginLeft: 2 }}>ms</span>}</>,
+            delta: <BioDelta current={profile.hrv !== "—" ? Number(profile.hrv) : null} avg={baseline?.hrv_avg ?? null} />,
+            icon: <G.Heart size={10} />, wide: false,
+          },
+          {
+            label: "Sleep",
+            value: profile.sleep,
+            delta: <BioDelta current={profile.sleep !== "—" ? Number(profile.sleep) : null} avg={baseline?.sleep_avg ?? null} />,
+            icon: <G.Moon size={10} />, wide: false,
+          },
+          { label: "Load", value: profile.load, delta: null, icon: <G.Flame size={10} />, wide: false },
         ].map((m, i) => (
           <div key={i} style={{ padding: m.wide ? "12px 16px" : "12px 14px", background: "var(--linen)" }}>
             <div className="ca-eyebrow" style={{ fontSize: 9, display: "flex", alignItems: "center", gap: 4 }}>
@@ -344,6 +532,7 @@ function AthleteCard({ athlete, href }: { athlete: EnrichedAthlete; href: string
             <div className="ca-num" style={{ fontSize: m.wide ? undefined : 20, marginTop: 4, lineHeight: 1 }}>
               {m.value}
             </div>
+            {m.delta}
           </div>
         ))}
       </div>
@@ -357,12 +546,52 @@ function AthleteCard({ athlete, href }: { athlete: EnrichedAthlete; href: string
         <WeekStrip week_data={weekData} />
       </div>
 
-      {/* Notes / last heard */}
-      <div style={{ padding: "10px 20px 16px 20px" }}>
-        {profile.notes
-          ? <div style={{ borderLeft: "2px solid var(--rule)", paddingLeft: 10, fontSize: 12.5, color: "var(--ink-soft)", fontStyle: "italic", fontFamily: "var(--serif)" }}>"{profile.notes}"</div>
-          : <div style={{ fontSize: 11, color: "var(--ink-mute)", fontFamily: "var(--mono)" }}>Last heard · {relativeTime(athlete.last_checkin_at)}</div>
-        }
+      {/* AI urgency flags */}
+      {profile.predictive_flags.length > 0 && (
+        <div style={{ padding: "0 20px 10px 20px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {profile.predictive_flags.slice(0, 3).map(f => (
+            <span
+              key={f.code}
+              className={`ca-chip ${f.priority === "high" ? "ca-chip-terra" : f.priority === "medium" ? "ca-chip-ochre" : ""}`}
+              style={{ fontSize: 10 }}
+              title={f.reason}
+            >
+              {f.label}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Notes / last heard + resend action */}
+      <div style={{ padding: "10px 20px 14px 20px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {profile.notes
+            ? <div style={{ borderLeft: "2px solid var(--rule)", paddingLeft: 10, fontSize: 12.5, color: "var(--ink-soft)", fontStyle: "italic", fontFamily: "var(--serif)" }}>"{profile.notes}"</div>
+            : <div style={{ fontSize: 11, color: "var(--ink-mute)", fontFamily: "var(--mono)" }}>Last heard · {relativeTime(athlete.last_checkin_at)}</div>
+          }
+        </div>
+        {/* COA-75: Resend plan link */}
+        <button
+          onClick={handleResendPlanLink}
+          disabled={resendState === "loading"}
+          style={{
+            flexShrink: 0,
+            padding: "5px 10px",
+            border: "1px solid var(--rule)",
+            borderRadius: 2,
+            background: resendState === "sent" ? "var(--aegean-wash)" : resendState === "error" ? "var(--terracotta-soft)" : "transparent",
+            color: resendState === "sent" ? "var(--aegean-deep)" : resendState === "error" ? "var(--terracotta-deep)" : "var(--ink-mute)",
+            fontFamily: "var(--mono)",
+            fontSize: 10,
+            letterSpacing: "0.08em",
+            cursor: resendState === "loading" ? "not-allowed" : "pointer",
+            opacity: resendState === "loading" ? 0.6 : 1,
+            whiteSpace: "nowrap",
+            transition: "all 160ms ease",
+          }}
+        >
+          {resendState === "loading" ? "Sending…" : resendState === "sent" ? "✓ Link sent" : resendState === "error" ? "Failed" : "Resend plan link"}
+        </button>
       </div>
     </article>
     </Link>
@@ -666,42 +895,52 @@ function RefineModal({ suggestion, onClose, onSend }: {
   );
 }
 
-// ─── Invite Modal ─────────────────────────────────────────────────────────────
+// ─── Invite Modal (COA-53 / COA-78) ──────────────────────────────────────────
 
 function InviteModal({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
-  const [done, setDone] = useState<string | null>(null);
+  const [result, setResult] = useState<{ invite_url: string; sent_whatsapp: boolean } | null>(null);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!name.trim()) return;
     setLoading(true);
     setError(null);
     try {
-      const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
       const supabase = createBrowserSupabase();
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token ?? "";
-      const res = await fetch(`${BACKEND}/api/v1/athlete/auth/send-invite`, {
+      const res = await fetch("/api/athletes/invite", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ full_name: name, email, phone_number: phone }),
+        body: JSON.stringify({
+          full_name: name.trim(),
+          phone_number: phone.trim() || undefined,
+          expires_in_days: 30,
+        }),
       });
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setError((body?.detail as string | undefined) ?? "Failed to send invite.");
+        setError((body?.detail as string | undefined) ?? "Failed to create invite.");
         setLoading(false);
         return;
       }
-      const body = await res.json();
-      setDone(body.invite_link ?? "Invite sent!");
+      setResult({ invite_url: body.invite_url, sent_whatsapp: !!body.sent_whatsapp });
     } catch {
       setError("Network error — please try again.");
     }
     setLoading(false);
+  }
+
+  async function handleCopy() {
+    if (!result?.invite_url) return;
+    await navigator.clipboard.writeText(result.invite_url).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }
 
   return (
@@ -710,22 +949,39 @@ function InviteModal({ onClose }: { onClose: () => void }) {
         <div className="ca-eyebrow ca-eyebrow-terra" style={{ marginBottom: 8 }}>New member</div>
         <h2 className="ca-display" style={{ fontSize: 26, margin: "0 0 20px 0" }}>Invite an athlete</h2>
 
-        {done ? (
+        {result ? (
           <div>
-            <div style={{ padding: "14px 18px", background: "var(--aegean-wash)", border: "1px solid var(--aegean-soft)", borderRadius: 2, fontFamily: "var(--serif)", fontSize: 14, color: "var(--aegean-deep)", wordBreak: "break-all", marginBottom: 20 }}>
-              {done}
+            {result.sent_whatsapp ? (
+              <p style={{ fontSize: 14, color: "var(--ink-soft)", fontFamily: "var(--serif)", marginBottom: 16 }}>
+                ✅ Invite sent to {name} via WhatsApp. You can also share this link directly:
+              </p>
+            ) : (
+              <p style={{ fontSize: 14, color: "var(--ink-soft)", fontFamily: "var(--serif)", marginBottom: 16 }}>
+                Share this onboarding link with {name}:
+              </p>
+            )}
+            <div style={{ padding: "12px 14px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontSize: 12, fontFamily: "var(--mono)", color: "var(--aegean-deep)", wordBreak: "break-all", marginBottom: 12 }}>
+              {result.invite_url}
             </div>
-            <p className="ca-display-italic" style={{ color: "var(--ink-soft)", fontSize: 14 }}>
-              Invite sent! The athlete will receive an email with their setup link.
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                className="ca-btn ca-btn-primary"
+                style={{ flex: 1 }}
+                onClick={handleCopy}
+              >
+                {copied ? "✓ Copied!" : "Copy link"}
+              </button>
+              <button className="ca-btn ca-btn-ghost" onClick={onClose}>Done</button>
+            </div>
+            <p style={{ marginTop: 12, fontSize: 12, color: "var(--ink-mute)", fontFamily: "var(--serif)", fontStyle: "italic" }}>
+              Link expires in 30 days. Athlete completes their profile and is added to your roster.
             </p>
-            <button className="ca-btn ca-btn-primary" onClick={onClose} style={{ marginTop: 20, width: "100%" }}>Done</button>
           </div>
         ) : (
           <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
             {[
               { label: "Full name", value: name, set: setName, type: "text", placeholder: "Alex Thompson", required: true },
-              { label: "Email address", value: email, set: setEmail, type: "email", placeholder: "alex@example.com", required: true },
-              { label: "WhatsApp number", value: phone, set: setPhone, type: "tel", placeholder: "+1 555 000 0000", required: false },
+              { label: "WhatsApp number (optional)", value: phone, set: setPhone, type: "tel", placeholder: "+1 555 000 0000", required: false },
             ].map((f) => (
               <div key={f.label}>
                 <label style={{ display: "block", fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.15em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 6 }}>{f.label}</label>
@@ -733,9 +989,12 @@ function InviteModal({ onClose }: { onClose: () => void }) {
                   style={{ width: "100%", padding: "9px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)", outline: "none", boxSizing: "border-box" }} />
               </div>
             ))}
+            <p style={{ fontSize: 12, color: "var(--ink-mute)", fontFamily: "var(--serif)", fontStyle: "italic", margin: 0 }}>
+              If a WhatsApp number is provided, the invite link is sent automatically. Otherwise you&apos;ll get a link to share manually.
+            </p>
             {error && <div style={{ padding: "10px 14px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13 }}>{error}</div>}
             <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-              <button type="submit" disabled={loading} className="ca-btn ca-btn-terra" style={{ flex: 1 }}>{loading ? "Sending…" : "Send invite →"}</button>
+              <button type="submit" disabled={loading || !name.trim()} className="ca-btn ca-btn-terra" style={{ flex: 1 }}>{loading ? "Creating…" : "Create invite →"}</button>
               <button type="button" className="ca-btn ca-btn-ghost" onClick={onClose}>Cancel</button>
             </div>
           </form>
@@ -769,6 +1028,10 @@ export default function DashboardShell({
   // ── Office hours ──
   const [ohData, setOhData] = useState<OfficeHoursData | null>(null);
   const [ohToggleLoading, setOhToggleLoading] = useState(false);
+
+  // ── COA-102: Daily digest ──
+  const [digestData, setDigestData] = useState<DigestData | null>(null);
+  const [digestLoading, setDigestLoading] = useState(false);
 
   // ── Real-time subscription ──
   useEffect(() => {
@@ -810,6 +1073,56 @@ export default function DashboardShell({
 
     return () => { supabase.removeChannel(channel); };
   }, []);
+
+  // ── COA-102: Fetch + lazily regenerate daily digest on mount ──
+  useEffect(() => {
+    const hour = new Date().getHours();
+    // Only show the briefing during working hours (6 AM onward)
+    if (hour < 6) return;
+
+    async function loadDigest() {
+      setDigestLoading(true);
+      try {
+        // 1. Check for an existing cached digest
+        const getRes = await fetch("/api/digest");
+        const getJson = getRes.ok ? await getRes.json() : {};
+        const existing: DigestData | null = getJson.digest ?? null;
+
+        // If digest is fresh (< 6 hours old), use it directly
+        if (existing?.generated_at) {
+          const ageHours = (Date.now() - new Date(existing.generated_at).getTime()) / 3_600_000;
+          if (ageHours < 6) {
+            setDigestData(existing);
+            setDigestLoading(false);
+            return;
+          }
+        }
+
+        // 2. Stale or missing — regenerate
+        const supabase = createBrowserSupabase();
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token ?? "";
+
+        const genRes = await fetch("/api/digest/generate", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const genJson = genRes.ok ? await genRes.json() : {};
+        if (genJson.digest) {
+          setDigestData(genJson.digest as DigestData);
+        } else if (existing) {
+          // Generation failed — fall back to stale digest
+          setDigestData(existing);
+        }
+      } catch {
+        // Non-fatal — digest is a nice-to-have
+      } finally {
+        setDigestLoading(false);
+      }
+    }
+
+    loadDigest();
+  }, []); // run once on mount
 
   // ── Fetch office hours when tab is active ──
   useEffect(() => {
@@ -886,10 +1199,29 @@ export default function DashboardShell({
   // ── Derived values ──
   const totalPending = suggestions.length;
   const watching = athletes.filter(a => (a.pending_suggestions ?? 0) > 0).length;
-  const filteredAthletes = useMemo(() =>
-    filter === "pending" ? athletes.filter(a => (a.pending_suggestions ?? 0) > 0) : athletes,
-    [filter, athletes]
-  );
+  const filteredAthletes = useMemo(() => {
+    const base = filter === "pending"
+      ? athletes.filter(a => (a.pending_suggestions ?? 0) > 0)
+      : athletes;
+
+    // Urgency sort: high AI flags → pending suggestions → medium AI flags → rest
+    return [...base].sort((a, b) => {
+      const csA = a.current_state as CurrentState | null | undefined;
+      const csB = b.current_state as CurrentState | null | undefined;
+      const flagsA = csA?.predictive_flags ?? [];
+      const flagsB = csB?.predictive_flags ?? [];
+      const highA = flagsA.some(f => f.priority === "high") ? 1 : 0;
+      const highB = flagsB.some(f => f.priority === "high") ? 1 : 0;
+      if (highA !== highB) return highB - highA;
+      const pendA = a.pending_suggestions ?? 0;
+      const pendB = b.pending_suggestions ?? 0;
+      if (pendA !== pendB) return pendB - pendA;
+      const medA = flagsA.some(f => f.priority === "medium") ? 1 : 0;
+      const medB = flagsB.some(f => f.priority === "medium") ? 1 : 0;
+      if (medA !== medB) return medB - medA;
+      return 0;
+    });
+  }, [filter, athletes]);
 
   return (
     <div className="mosaic-bg" style={{ minHeight: "100vh" }}>
@@ -897,6 +1229,9 @@ export default function DashboardShell({
 
       <div style={{ maxWidth: 1440, margin: "0 auto", padding: "24px 32px 60px 32px" }}>
         <Greeting athleteCount={athletes.length} />
+
+        {/* COA-102: Daily briefing panel */}
+        <DailyDigest digest={digestData} loading={digestLoading} />
 
         {/* KPI mosaic row */}
         <section style={{ marginTop: 24, display: "grid", gridTemplateColumns: "1.3fr 1fr 1fr 1fr", gap: 1, background: "var(--rule)", border: "1px solid var(--rule)", borderRadius: 4, overflow: "hidden" }}>
@@ -928,6 +1263,13 @@ export default function DashboardShell({
             style={{ textDecoration: "none" }}
           >
             Training plans
+          </Link>
+          <Link
+            href="/dashboard/onboarding"
+            className="ca-tab"
+            style={{ textDecoration: "none" }}
+          >
+            AI voice setup
           </Link>
           <div style={{ flex: 1 }} />
           {tab === "roster" && (

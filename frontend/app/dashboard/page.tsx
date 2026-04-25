@@ -2,6 +2,13 @@ import { createClient } from "@supabase/supabase-js";
 import DashboardShell from "./DashboardShell";
 import type { Athlete, Suggestion } from "@/app/lib/types";
 
+// COA-101: 30-day biometric baseline per athlete
+type BiometricBaseline = {
+  readiness_avg: number | null;
+  hrv_avg: number | null;
+  sleep_avg: number | null;
+};
+
 async function getData() {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -17,6 +24,30 @@ async function getData() {
       )
       .order("created_at", { ascending: false })
   ).data ?? [];
+
+  // Fetch 7-day workouts for all athletes in a single batch query
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+  const sevenDaysAgoStr = sevenDaysAgo.toISOString().split("T")[0];
+
+  const athleteIds = athletes.map((a) => a.id);
+  const { data: weekWorkouts } = await supabase
+    .from("workouts")
+    .select("athlete_id, scheduled_date, status, distance_km")
+    .in("athlete_id", athleteIds)
+    .gte("scheduled_date", sevenDaysAgoStr)
+    .order("scheduled_date", { ascending: true });
+
+  // Group workouts by athlete_id
+  const workoutsByAthlete: Record<
+    string,
+    { scheduled_date: string; status: string; distance_km: number | null }[]
+  > = {};
+  for (const w of weekWorkouts ?? []) {
+    const id = w.athlete_id as string;
+    if (!workoutsByAthlete[id]) workoutsByAthlete[id] = [];
+    workoutsByAthlete[id].push(w as { scheduled_date: string; status: string; distance_km: number | null });
+  }
 
   // Enrich athletes with counts
   const enriched = await Promise.all(
@@ -43,9 +74,43 @@ async function getData() {
         pending_suggestions: pendingRes.count ?? 0,
         total_checkins: checkinRes.count ?? 0,
         last_checkin_at: lastCheckinRes.data?.[0]?.created_at ?? null,
+        week_workouts: workoutsByAthlete[a.id] ?? [],
+        biometric_baseline: baselineByAthlete[a.id] ?? null,
       };
     }),
   );
+
+  // COA-101: Batch-fetch last 30 days of biometric snapshots for all athletes
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split("T")[0];
+
+  const { data: snapshots } = await supabase
+    .from("biometric_snapshots")
+    .select("athlete_id, readiness, hrv, sleep")
+    .in("athlete_id", athleteIds)
+    .gte("snapshot_date", thirtyDaysAgoStr);
+
+  // Compute 30-day averages per athlete (need ≥3 days of data)
+  const baselineByAthlete: Record<string, BiometricBaseline> = {};
+  if (snapshots && snapshots.length > 0) {
+    const grouped: Record<string, { readiness: number[]; hrv: number[]; sleep: number[] }> = {};
+    for (const s of snapshots) {
+      const id = s.athlete_id as string;
+      if (!grouped[id]) grouped[id] = { readiness: [], hrv: [], sleep: [] };
+      if (s.readiness != null) grouped[id].readiness.push(s.readiness as number);
+      if (s.hrv != null) grouped[id].hrv.push(s.hrv as number);
+      if (s.sleep != null) grouped[id].sleep.push(s.sleep as number);
+    }
+    for (const [id, vals] of Object.entries(grouped)) {
+      const avg = (arr: number[]) => arr.length >= 3 ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length * 10) / 10 : null;
+      baselineByAthlete[id] = {
+        readiness_avg: avg(vals.readiness),
+        hrv_avg: avg(vals.hrv),
+        sleep_avg: avg(vals.sleep),
+      };
+    }
+  }
 
   // Fetch pending suggestions with athlete message
   const rawSuggestions = (

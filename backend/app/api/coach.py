@@ -499,7 +499,72 @@ async def sync_oura_for_athlete(
         raise HTTPException(status_code=500, detail=f"Could not save Oura data: {exc}") from exc
 
     logger.info("[sync-oura] Synced athlete %s: %s", athlete_id, oura_data)
+    # COA-101: also write snapshot for baseline tracking
+    try:
+        from app.services.oura_service import _upsert_biometric_snapshot
+        _upsert_biometric_snapshot(supabase, athlete_id, target, oura_data)
+    except Exception:
+        pass  # non-fatal
     return {"ok": True, "athlete_id": athlete_id, "oura": oura_data}
+
+
+@router.get("/athletes/{athlete_id}/biometric-baseline")
+async def get_biometric_baseline(
+    athlete_id: str,
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach", "admin")),
+):
+    """COA-101: Return 30-day rolling biometric averages for a single athlete.
+
+    Used by the dashboard to show trend delta vs. personal baseline.
+    Returns null averages if fewer than 3 days of data exist (not enough for a baseline).
+    """
+    from datetime import date, timedelta
+
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    scope = resolve_coach_scope(principal)
+
+    # Verify athlete belongs to this coach
+    try:
+        ath = supabase.table("athletes").select("id").eq("id", athlete_id).eq(
+            "coach_id", scope.coach_id
+        ).single().execute()
+        if not ath.data:
+            raise HTTPException(status_code=404, detail="Athlete not found")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail="Athlete not found") from exc
+
+    # Fetch last 30 days of snapshots
+    since = (date.today() - timedelta(days=30)).isoformat()
+    try:
+        rows = supabase.table("biometric_snapshots").select(
+            "snapshot_date, readiness, hrv, sleep"
+        ).eq("athlete_id", athlete_id).gte("snapshot_date", since).order(
+            "snapshot_date", desc=True
+        ).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Could not fetch snapshots") from exc
+
+    data = rows.data or []
+
+    def _avg(field: str) -> float | None:
+        vals = [r[field] for r in data if r.get(field) is not None]
+        if len(vals) < 3:
+            return None
+        return round(sum(vals) / len(vals), 1)
+
+    return {
+        "athlete_id": athlete_id,
+        "days_of_data": len(data),
+        "readiness_avg": _avg("readiness"),
+        "hrv_avg": _avg("hrv"),
+        "sleep_avg": _avg("sleep"),
+    }
 
 
 @router.post("/athletes/{athlete_id}/sync-strava")
@@ -1376,6 +1441,221 @@ async def add_athlete_invite(
     }
 
 
+# ── COA-102: Daily coach digest ────────────────────────────────────────────────
+
+_DIGEST_STALE_HOURS = 6  # regenerate after 6 hours
+
+
+@router.get("/digest")
+async def get_coach_digest(
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+):
+    """COA-102: Return the cached daily digest for this coach.
+
+    Returns null if no digest has been generated yet. The dashboard calls
+    POST /digest/generate on first load after 6 AM to refresh a stale digest,
+    then polls this endpoint to display the result.
+    """
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    scope = resolve_coach_scope(principal)
+    coach_id = str(scope.coach_id)
+
+    try:
+        row = supabase.table("coaches").select("daily_digest").eq("id", coach_id).single().execute()
+        digest = (row.data or {}).get("daily_digest")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Database error") from exc
+
+    return {"coach_id": coach_id, "digest": digest}
+
+
+@router.post("/digest/generate")
+async def generate_coach_digest(
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+    force: bool = False,
+):
+    """COA-102: Generate (or refresh) the daily coach briefing using AI.
+
+    Checks if the existing digest is stale (> 6 hours old). If it is — or
+    force=true — re-runs the LLM pipeline and caches the result in
+    coaches.daily_digest.
+
+    The digest contains:
+    - summary: 3–5 sentence overview of the squad's status today
+    - athlete_flags: [{athlete_id, name, reason}] — athletes needing attention
+    - generated_at: ISO timestamp
+
+    This is a synchronous LLM call (~2–4 s). The frontend fires-and-forgets it
+    on first load after 6 AM, then polls GET /digest to display the result.
+    """
+    from starlette.concurrency import run_in_threadpool
+    from app.services.llm_client import LLMClient
+
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    scope = resolve_coach_scope(principal)
+    coach_id = str(scope.coach_id)
+
+    # ── 1. Check staleness ────────────────────────────────────────────────────
+    try:
+        coach_row = supabase.table("coaches").select(
+            "id, full_name, persona_system_prompt, methodology_playbook, daily_digest"
+        ).eq("id", coach_id).single().execute()
+        if not coach_row.data:
+            raise HTTPException(status_code=404, detail="Coach not found")
+        coach = coach_row.data
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Database error") from exc
+
+    existing_digest = coach.get("daily_digest") or {}
+    if not force and existing_digest.get("generated_at"):
+        try:
+            generated_at = datetime.fromisoformat(existing_digest["generated_at"])
+            age_hours = (datetime.now(timezone.utc) - generated_at).total_seconds() / 3600
+            if age_hours < _DIGEST_STALE_HOURS:
+                return {"coach_id": coach_id, "digest": existing_digest, "regenerated": False}
+        except (ValueError, TypeError):
+            pass  # malformed timestamp — regenerate
+
+    # ── 2. Fetch squad data ───────────────────────────────────────────────────
+    try:
+        athletes_resp = supabase.table("athletes").select(
+            "id, full_name, current_state"
+        ).eq("coach_id", coach_id).is_("archived_at", "null").execute()
+        athletes = athletes_resp.data or []
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Could not fetch athletes") from exc
+
+    # Fetch last 7 days of workouts for the whole squad in one query
+    from datetime import date, timedelta
+    seven_days_ago = (date.today() - timedelta(days=6)).isoformat()
+    athlete_ids = [a["id"] for a in athletes]
+    workout_summary: dict[str, dict] = {}
+    if athlete_ids:
+        try:
+            wk_resp = supabase.table("workouts").select(
+                "athlete_id, scheduled_date, status, session_type"
+            ).in_("athlete_id", athlete_ids).gte("scheduled_date", seven_days_ago).execute()
+            for w in (wk_resp.data or []):
+                aid = w["athlete_id"]
+                if aid not in workout_summary:
+                    workout_summary[aid] = {"completed": 0, "missed": 0, "total": 0}
+                workout_summary[aid]["total"] += 1
+                if w.get("status") == "completed":
+                    workout_summary[aid]["completed"] += 1
+                elif w.get("status") == "missed":
+                    workout_summary[aid]["missed"] += 1
+        except Exception:
+            pass  # non-fatal — degrade gracefully
+
+    # ── 3. Build prompt context ───────────────────────────────────────────────
+    athlete_lines: list[str] = []
+    flagged_athletes: list[dict] = []
+
+    for a in athletes:
+        name = a.get("full_name", "Unknown")
+        cs = a.get("current_state") or {}
+        wk = workout_summary.get(a["id"], {"completed": 0, "missed": 0, "total": 0})
+
+        # Predictive flags from COA-38
+        pred_flags = cs.get("predictive_flags") or []
+        high_flags = [f for f in pred_flags if isinstance(f, dict) and f.get("priority") in ("high", "critical")]
+
+        # Biometric readings
+        readiness = cs.get("oura_readiness_score")
+        hrv = cs.get("oura_avg_hrv")
+        sleep = cs.get("oura_sleep_score")
+
+        bio_str = ""
+        bio_parts = []
+        if readiness is not None:
+            bio_parts.append(f"readiness={readiness}")
+        if hrv is not None:
+            bio_parts.append(f"HRV={hrv}")
+        if sleep is not None:
+            bio_parts.append(f"sleep={sleep}")
+        if bio_parts:
+            bio_str = f" | biometrics: {', '.join(bio_parts)}"
+
+        workout_str = f"workouts last 7d: {wk['completed']}/{wk['total']} done, {wk['missed']} missed"
+        flags_str = ""
+        if high_flags:
+            flag_labels = [f.get("label", f.get("code", "flag")) for f in high_flags[:2]]
+            flags_str = f" ⚠ FLAGS: {', '.join(flag_labels)}"
+            for hf in high_flags[:2]:
+                flagged_athletes.append({
+                    "athlete_id": a["id"],
+                    "name": name,
+                    "reason": hf.get("reason") or hf.get("label") or "attention required",
+                })
+
+        athlete_lines.append(f"- {name}: {workout_str}{bio_str}{flags_str}")
+
+    squad_block = "\n".join(athlete_lines) if athlete_lines else "(no active athletes)"
+
+    persona = (coach.get("persona_system_prompt") or "").strip()
+    playbook = coach.get("methodology_playbook") or {}
+    sport = playbook.get("sport_specialties", [])
+    sport_str = ", ".join(sport) if sport else "endurance"
+
+    system_prompt = (
+        f"You are the AI assistant for a {sport_str} coach. "
+        f"Write the coach's morning briefing: a concise 3-5 sentence summary "
+        f"of their squad's current status based on the data below. "
+        f"Highlight athletes who need attention, patterns in missed workouts, "
+        f"and biometric concerns. Be direct and practical — the coach is busy. "
+        f"No greetings, no sign-offs. Just the briefing.\n\n"
+        f"{'Coach methodology context: ' + persona[:400] if persona else ''}"
+    ).strip()
+
+    user_prompt = (
+        f"Today is {date.today().isoformat()}. Here is your squad status:\n\n"
+        f"{squad_block}\n\n"
+        f"Write the morning briefing."
+    )
+
+    # ── 4. Call LLM ──────────────────────────────────────────────────────────
+    try:
+        client = LLMClient()
+        resp = await run_in_threadpool(
+            client.chat_completions,
+            system=system_prompt,
+            user=user_prompt,
+        )
+        summary_text = resp.content.strip()
+    except Exception as exc:
+        logger.exception("[COA-102] LLM digest generation failed for coach %s", coach_id[:8])
+        raise HTTPException(status_code=502, detail=f"AI digest generation failed: {exc}") from exc
+
+    # ── 5. Persist + return ───────────────────────────────────────────────────
+    digest: dict = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "summary": summary_text,
+        "athlete_flags": flagged_athletes,
+    }
+
+    try:
+        supabase.table("coaches").update({"daily_digest": digest}).eq("id", coach_id).execute()
+    except Exception as exc:
+        logger.warning("[COA-102] Failed to cache digest for coach %s: %s", coach_id[:8], exc)
+        # Return the digest anyway — don't fail just because caching failed
+
+    logger.info(
+        "[COA-102] Digest generated for coach=%s athletes=%d flags=%d",
+        coach_id[:8], len(athletes), len(flagged_athletes),
+    )
+    return {"coach_id": coach_id, "digest": digest, "regenerated": True}
+
+
 def _log_pipeline_usage(supabase, result, coach_id: str, athlete_id: str, principal) -> None:
     """Log token usage for all three pipeline stages (non-blocking)."""
     from app.services.llm_client import LLMResponse
@@ -1474,4 +1754,141 @@ async def analyze_athlete_video(
         "frame_count": result.frame_count,
         "latency_ms": result.latency_ms,
         "model": result.model,
+    }
+
+
+# ── COA-79: Coach onboarding — AI profile generation ──────────────────────────
+
+class GenerateProfileRequest(_BaseModel):
+    description: str = Field(
+        ...,
+        min_length=20,
+        max_length=8000,
+        description="Free-text coach philosophy / methodology — the AI turns this into a playbook.",
+    )
+    sport: str | None = Field(
+        default=None,
+        description="Primary sport (e.g. triathlon, running, cycling). Optional but improves output.",
+    )
+
+
+class GenerateProfileResponse(_BaseModel):
+    playbook: dict
+    persona_system_prompt: str
+    confidence: float
+    status: str
+    warnings: list[str] = Field(default_factory=list)
+
+
+@router.post("/onboarding/generate-profile", response_model=GenerateProfileResponse)
+async def generate_coach_profile(
+    body: GenerateProfileRequest,
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+):
+    """COA-79: Generate a methodology playbook + persona prompt from free-text.
+
+    Preview only — no data is written to the database.
+    The coach reviews the generated profile, edits if needed, then calls
+    confirm-profile to persist.
+    """
+    from app.services.methodology_extractor import (
+        MethodologyExtractor,
+        MethodologyExtractionRequest,
+    )
+    from app.api.methodology import _build_persona_system_prompt
+    from starlette.concurrency import run_in_threadpool
+
+    extractor = MethodologyExtractor()
+    extraction_request = MethodologyExtractionRequest(
+        transcript=body.description,
+        sport=body.sport,
+    )
+
+    try:
+        result = await run_in_threadpool(extractor.extract, extraction_request)
+    except Exception as exc:
+        logger.exception("[COA-79] Profile generation failed")
+        raise HTTPException(status_code=502, detail=f"Profile generation failed: {exc}") from exc
+
+    persona_system_prompt = _build_persona_system_prompt(result.playbook)
+
+    logger.info(
+        "[COA-79] Profile preview generated: coach=%s status=%s confidence=%.2f",
+        str(resolve_coach_scope(principal).coach_id)[:8],
+        result.status,
+        float(result.playbook.get("confidence", 0.0)),
+    )
+
+    return GenerateProfileResponse(
+        playbook=result.playbook,
+        persona_system_prompt=persona_system_prompt,
+        confidence=float(result.playbook.get("confidence", 0.0)),
+        status=result.status,
+        warnings=result.warnings,
+    )
+
+
+class ConfirmProfileRequest(_BaseModel):
+    playbook: dict = Field(..., description="The finalized methodology playbook (may be coach-edited).")
+    persona_system_prompt: str = Field(
+        ...,
+        min_length=10,
+        max_length=4000,
+        description="The persona prompt that controls the AI's voice when responding to athletes.",
+    )
+    source_description: str = Field(
+        default="",
+        description="Original free-text the coach submitted (stored as source_transcript for audit).",
+    )
+
+
+@router.post("/onboarding/confirm-profile")
+async def confirm_coach_profile(
+    body: ConfirmProfileRequest,
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+):
+    """COA-79: Persist the confirmed coach methodology profile.
+
+    Writes to:
+    - methodologies table: full playbook + persona_system_prompt + source_transcript
+    - coaches table: methodology_playbook + methodology_updated_at
+    """
+    from app.services.methodology_extractor import persist_methodology_extraction
+    from starlette.concurrency import run_in_threadpool
+
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    scope = resolve_coach_scope(principal)
+    coach_id = str(scope.coach_id)
+    settings = get_settings()
+
+    try:
+        persisted = await run_in_threadpool(
+            persist_methodology_extraction,
+            coach_id,
+            body.playbook,
+            body.persona_system_prompt,
+            body.source_description or "(coach onboarding)",
+            settings,
+            organization_id=str(scope.organization_id) if scope.organization_id else None,
+        )
+    except Exception as exc:
+        logger.exception("[COA-79] Profile confirm failed for coach %s", coach_id[:8])
+        raise HTTPException(status_code=502, detail=f"Failed to save profile: {exc}") from exc
+
+    methodology_id = (persisted.get("methodology_row") or {}).get("id")
+    logger.info(
+        "[COA-79] Profile confirmed and persisted: coach=%s methodology_id=%s",
+        coach_id[:8],
+        methodology_id or "unknown",
+    )
+
+    return {
+        "confirmed": True,
+        "coach_id": coach_id,
+        "methodology_id": methodology_id,
     }

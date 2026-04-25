@@ -174,6 +174,20 @@ def _update_last_synced(supabase: Client, athlete_id: str) -> None:
     supabase.table("oura_tokens").update({"last_synced_at": now}).eq("athlete_id", athlete_id).execute()
 
 
+def _upsert_biometric_snapshot(supabase: Client, athlete_id: str, target_date: date, oura_data: dict) -> None:
+    """COA-101: Write a daily biometric snapshot for 30-day baseline computation."""
+    try:
+        supabase.table("biometric_snapshots").upsert({
+            "athlete_id": athlete_id,
+            "snapshot_date": target_date.isoformat(),
+            "readiness": oura_data.get("oura_readiness_score"),
+            "hrv": float(oura_data["oura_avg_hrv"]) if oura_data.get("oura_avg_hrv") is not None else None,
+            "sleep": oura_data.get("oura_sleep_score"),
+        }, on_conflict="athlete_id,snapshot_date").execute()
+    except Exception as exc:
+        logger.warning("[snapshot] Could not upsert biometric snapshot for %s: %s", athlete_id, exc)
+
+
 # ---------------------------------------------------------------------------
 # Main sync logic
 # ---------------------------------------------------------------------------
@@ -231,6 +245,7 @@ async def sync_all_athletes(dry_run: bool = False) -> None:
         else:
             _update_athlete_current_state(supabase, athlete_id, merged)
             _update_last_synced(supabase, athlete_id)
+            _upsert_biometric_snapshot(supabase, athlete_id, yesterday, oura_data)  # COA-101
             logger.info("Successfully updated current_state for %s.", name)
 
             # COA-38: Run predictive analysis after Oura sync
