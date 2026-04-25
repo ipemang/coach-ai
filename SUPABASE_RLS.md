@@ -1,4 +1,4 @@
-# Supabase RLS (Row Level Security) — Coach.AI
+# Supabase RLS (Row Level Security) — Andesia
 
 **Last updated:** 2026-04-16  
 **Supabase project:** `qnvajgifeolwwcyjostm`  

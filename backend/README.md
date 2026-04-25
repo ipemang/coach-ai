@@ -1,6 +1,6 @@
-# Coach.AI Backend
+# Andesia Backend
 
-Initial FastAPI scaffold for the Coach.AI backend.
+Initial FastAPI scaffold for the Andesia backend.
 
 ## Structure
 - `app/api` — HTTP routes and API layer

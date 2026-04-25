@@ -64,7 +64,7 @@ export default function LoginPage() {
             display: "flex", alignItems: "center", justifyContent: "center",
             fontSize: "24px",
           }}>⚡</div>
-          <h1 style={{ color: "#fff", fontSize: "22px", fontWeight: 700, margin: 0 }}>Coach.AI</h1>
+          <h1 style={{ color: "#fff", fontSize: "22px", fontWeight: 700, margin: 0 }}>Andesia</h1>
           <p style={{ color: "#6b7280", fontSize: "14px", marginTop: "6px" }}>Coach dashboard login</p>
         </div>
 

@@ -374,7 +374,7 @@ async def invite_onboarding_athletes(
                         try:
                             msg = (
                                 f"Hi {name} 👋\n\n"
-                                f"You've been invited to join Coach.AI — your personal training platform.\n\n"
+                                f"You've been invited to join Andesia — your personal training platform.\n\n"
                                 f"Create your account here (link valid 7 days):\n{invite_url}"
                             )
                             import asyncio
@@ -1421,7 +1421,7 @@ async def add_athlete_invite(
                 await whatsapp_client.send_message(
                     to=phone,
                     body=(
-                        f"Hi {name}! Your coach has invited you to join Coach.AI.\n\n"
+                        f"Hi {name}! Your coach has invited you to join Andesia.\n\n"
                         f"Complete your athlete profile here:\n{invite_url}\n\n"
                         f"This link expires in {body.expires_in_days} days."
                     ),

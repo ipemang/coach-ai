@@ -115,7 +115,7 @@ def _coach_base_html(title: str, body: str, secret: str | None = None) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{title} — Coach.AI</title>
+<title>{title} — Andesia</title>
 <style>
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -163,7 +163,7 @@ def _coach_base_html(title: str, body: str, secret: str | None = None) -> str:
 </head>
 <body>
 <nav class="nav">
-  <span class="brand">Coach.AI</span>
+  <span class="brand">Andesia</span>
   <a href="/dashboard{nav_secret}">Athletes</a>
   <a href="/dashboard/workouts{nav_secret}">Workouts</a>
   <a href="/dashboard/coach/settings{nav_secret}">My Settings</a>
@@ -182,7 +182,7 @@ def _athlete_plan_html(title: str, body: str) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{title} — Coach.AI</title>
+<title>{title} — Andesia</title>
 <style>
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -206,7 +206,7 @@ def _athlete_plan_html(title: str, body: str) -> str:
 </head>
 <body>
 <nav class="nav">
-  <span class="brand">Coach.AI</span>
+  <span class="brand">Andesia</span>
 </nav>
 <div class="container">
 {body}

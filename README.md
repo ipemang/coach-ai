@@ -1,4 +1,4 @@
-# Coach.AI
+# Andesia
 
 B2B SaaS platform for endurance sports coaches. AI augments the coach's workflow — it never replaces the coach.
 

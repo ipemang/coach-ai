@@ -1,5 +1,5 @@
 /**
- * Coach.AI — Athlete Auth & Onboarding E2E Test Suite
+ * Andesia — Athlete Auth & Onboarding E2E Test Suite
  * Covers Tests A–K from production-test-athlete-auth.md
  *
  * HOW TO RUN
@@ -124,7 +124,7 @@ test.describe.serial("Athlete Auth & Onboarding (Tests A–K)", () => {
   test("B — Invite email arrives in inbox", async () => {
     printManualStep(
       `Check the inbox for: ${TEST_ATHLETE_EMAIL}\n\n` +
-      `  Expected: an email with subject "You've been invited to Coach.AI" (or similar)\n` +
+      `  Expected: an email with subject "You've been invited to Andesia" (or similar)\n` +
       `  Expected: a link to /athlete/join?token=…\n\n` +
       `  You do NOT need to click the link yet — just confirm it arrived.`
     );

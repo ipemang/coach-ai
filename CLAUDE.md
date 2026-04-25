@@ -1,4 +1,4 @@
-# Coach.AI — Session Orientation
+# Andesia — Session Orientation
 
 **Read this file in full before starting any task in this project.**
 
@@ -6,11 +6,11 @@
 
 ## Project Context
 
-Coach.AI is a B2B SaaS platform for endurance sports coaches (triathlon, running, cycling). The AI augments the coach's workflow — it never replaces the coach. The coach reviews and approves every AI-generated message before it reaches an athlete. Tagline: "Your athletes. Your voice. Your AI."
+Andesia is a B2B SaaS platform for endurance sports coaches (triathlon, running, cycling). The AI augments the coach's workflow — it never replaces the coach. The coach reviews and approves every AI-generated message before it reaches an athlete. Tagline: "Your athletes. Your voice. Your AI."
 
 Founder: Felipe Deidan (Deloitte consultant, triathlete, mountaineer). Test coach: Felipe. Test athlete: Patrick (WhatsApp test account — not a team member).
 
-The product is live on Railway (production). Active development happens in this repo (`~/coach-ai`). The workspace folder (`~/Documents/Claude/Projects/Coach.AI`) is where documents, specs, and deliverables are saved.
+The product is live on Railway (production). Active development happens in this repo (`~/coach-ai`). The workspace folder (`~/Documents/Claude/Projects/Andesia`) is where documents, specs, and deliverables are saved.
 
 ---
 
@@ -45,8 +45,8 @@ The product is live on Railway (production). Active development happens in this 
 | `~/coach-ai/frontend/components/suggestion-review-modal.tsx` | Review modal (COA-65) |
 | `~/coach-ai/frontend/app/lib/types.ts` | Shared TypeScript interfaces |
 | `~/coach-ai/SUPABASE_RLS.md` | Row-Level Security policy documentation (COA-62) |
-| `~/Documents/Claude/Projects/Coach.AI/CLAUDE.md` | Mirror of this file — kept as project workspace reference |
-| `~/Documents/Claude/Projects/Coach.AI/` | Business docs, retros, skills — non-code project workspace |
+| `~/Documents/Claude/Projects/Andesia/CLAUDE.md` | Mirror of this file — kept as project workspace reference |
+| `~/Documents/Claude/Projects/Andesia/` | Business docs, retros, skills — non-code project workspace |
 
 ---
 
@@ -78,7 +78,7 @@ The product is live on Railway (production). Active development happens in this 
 
 ### 🔴 Next: End-to-End Production Testing
 The entire athlete auth + onboarding flow has never been tested in Railway production.
-Test checklist: `~/Documents/Claude/Projects/Coach.AI/production-test-athlete-auth.md`
+Test checklist: `~/Documents/Claude/Projects/Andesia/production-test-athlete-auth.md`
 Tests A–K must pass before the flow is considered live.
 
 ### Known gaps (not yet ticketed)
@@ -121,7 +121,7 @@ These project-specific rules extend the universal 8-check gate:
 
 ## Crash-Resilient Pipeline
 
-Any task with 3+ sequential stages must checkpoint to persistent storage. Checkpoint location: `~/Documents/Claude/Projects/Coach.AI/checkpoints/[pipeline-name]/`. Never write checkpoints to `/tmp`.
+Any task with 3+ sequential stages must checkpoint to persistent storage. Checkpoint location: `~/Documents/Claude/Projects/Andesia/checkpoints/[pipeline-name]/`. Never write checkpoints to `/tmp`.
 
 Before starting any multi-stage task (research → draft → review → format → deliver), check for an existing checkpoint manifest at that path first. If found and valid, resume from the last completed stage. Report to the user which stage is being resumed from.
 
@@ -129,7 +129,7 @@ Before starting any multi-stage task (research → draft → review → format �
 
 ## Retro Log
 
-Retros are filed at `~/Documents/Claude/Projects/Coach.AI/retros/retros.md`. Each retro is numbered sequentially. File the retro BEFORE applying the fix. Hard Rules promoted from retros are added to this file (global) or to the relevant skill (skill-specific).
+Retros are filed at `~/Documents/Claude/Projects/Andesia/retros/retros.md`. Each retro is numbered sequentially. File the retro BEFORE applying the fix. Hard Rules promoted from retros are added to this file (global) or to the relevant skill (skill-specific).
 
 **Filed retros so far:** None yet. Hard Rules 11–12 added via direct session (no retro trigger — new rules, not a repeated error).
 

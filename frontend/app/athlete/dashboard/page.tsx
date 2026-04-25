@@ -380,7 +380,7 @@ export default function AthleteDashboardPage() {
             className="ca-display"
             style={{ fontSize: 16, color: "var(--ink)", letterSpacing: "-0.01em" }}
           >
-            Coach.AI
+            Andesia
           </span>
         </div>
 

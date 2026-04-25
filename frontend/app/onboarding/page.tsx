@@ -889,7 +889,7 @@ function OnboardingInner() {
               fontSize: "22px",
             }}>⚡</div>
             <h1 style={{ color: "#fff", fontSize: "20px", fontWeight: 700, margin: "0 0 4px" }}>
-              {step < 4 ? "Set up your coaching profile" : "Welcome to Coach.AI"}
+              {step < 4 ? "Set up your coaching profile" : "Welcome to Andesia"}
             </h1>
             {step < 4 && (
               <p style={{ color: "#6b7280", fontSize: "13px", margin: 0 }}>

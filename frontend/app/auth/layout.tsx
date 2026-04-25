@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "../dashboard/design-system.css";
 
 export const metadata: Metadata = {
-  title: "Coach.AI",
+  title: "Andesia",
 };
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {

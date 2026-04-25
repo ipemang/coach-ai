@@ -315,7 +315,7 @@ function JoinInner() {
               margin: 0,
             }}
           >
-            {coachFirst} invited you to join Coach.AI —
+            {coachFirst} invited you to join Andesia —
             your personal training platform.
           </p>
         </div>

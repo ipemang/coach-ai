@@ -1,5 +1,5 @@
 /**
- * Shared helpers for Coach.AI E2E tests.
+ * Shared helpers for Andesia E2E tests.
  *
  * Two browser contexts run in parallel throughout the suite:
  *   coachPage  — the coach's session (/dashboard)
