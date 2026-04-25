@@ -857,7 +857,7 @@ async def _start_onboarding(request: Request, supabase: Any, sender: str) -> Wha
 
     await _send_whatsapp_message(
         request, sender,
-        "Welcome to Andesia! \U0001f3cb\ufe0f\n"
+        "Welcome to Andes.IA! \U0001f3cb\ufe0f\n"
         "I don't have you in the system yet. Let's get you set up in just a few steps.\n\n"
         "What's your full name?"
     )

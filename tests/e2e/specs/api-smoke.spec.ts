@@ -1,5 +1,5 @@
 /**
- * Andesia — API Smoke Tests (no browser required)
+ * Andes.IA — API Smoke Tests (no browser required)
  *
  * Tests every backend endpoint in the athlete auth + onboarding flow
  * directly via HTTP. Run these first to confirm the backend is healthy

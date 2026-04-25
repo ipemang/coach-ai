@@ -316,7 +316,7 @@ function TopBand({ totalPending, onInvite, onSignOut }: { totalPending: number; 
           </svg>
           <div>
             <div className="ca-display" style={{ fontSize: 20, lineHeight: 1 }}>
-              Andesia
+              Andes<span style={{ color: "var(--terracotta-deep)" }}>.</span>IA
             </div>
             <div className="ca-eyebrow" style={{ fontSize: 8.5, marginTop: 2 }}>THE ATHLETE'S ATHLETE</div>
           </div>

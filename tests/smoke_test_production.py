@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""COA-52: Production smoke test for Andesia Railway deployment.
+"""COA-52: Production smoke test for Andes.IA Railway deployment.
 
 Tests every critical path in sequence:
   1. Backend health check
@@ -94,7 +94,7 @@ def test_health(client: httpx.Client):
 
     try:
         r = client.get(f"{BASE_URL}/privacy", timeout=TIMEOUT)
-        if r.status_code == 200 and "Andesia" in r.text:
+        if r.status_code == 200 and "Andes.IA" in r.text:
             ok("Privacy page renders", f"HTTP {r.status_code}")
         else:
             fail("Privacy page", f"HTTP {r.status_code}")
@@ -384,7 +384,7 @@ def print_summary():
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print(f"\n{BOLD}Andesia Production Smoke Test{RESET}")
+    print(f"\n{BOLD}Andes.IA Production Smoke Test{RESET}")
     print(f"Target: {BLUE}{BASE_URL}{RESET}")
     print(f"Time:   {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
 

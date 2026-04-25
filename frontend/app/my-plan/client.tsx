@@ -393,7 +393,7 @@ export function AthletePlanClient() {
 
       {/* Header */}
       <div className="px-5 pt-8 pb-4">
-        <p className="text-xs text-slate-500 uppercase tracking-widest">Andesia</p>
+        <p className="text-xs text-slate-500 uppercase tracking-widest">Andes.IA</p>
         <h1 className="text-2xl font-bold text-white mt-1">{profile?.full_name}</h1>
         {profile?.target_race && (
           <p className="text-sm text-slate-400 mt-1">

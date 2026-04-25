@@ -1,4 +1,4 @@
-"""Andesia backend application entrypoint."""
+"""Andes.IA backend application entrypoint."""
 from __future__ import annotations
 
 import logging
@@ -121,7 +121,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="Andesia API", lifespan=lifespan)
+app = FastAPI(title="Andes.IA API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -176,12 +176,12 @@ async def health_check() -> dict:
 @app.get("/privacy", response_class=HTMLResponse)
 async def privacy_policy():
     return """
-    <html><head><title>Andesia Privacy Policy</title>
+    <html><head><title>Andes.IA Privacy Policy</title>
     <style>body{font-family:sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6;color:#333}</style>
     </head><body>
-    <h1>Andesia Privacy Policy</h1>
+    <h1>Andes.IA Privacy Policy</h1>
     <p><strong>Last updated: April 14, 2026</strong></p>
-    <p>Andesia ("we", "us") provides AI-powered coaching via WhatsApp.</p>
+    <p>Andes.IA ("we", "us") provides AI-powered coaching via WhatsApp.</p>
     <h2>Data We Collect</h2>
     <p>Your WhatsApp phone number, messages you send us, and workout/coaching data you provide.</p>
     <h2>How We Use It</h2>
@@ -199,14 +199,14 @@ async def privacy_policy():
 @app.get("/terms", response_class=HTMLResponse)
 async def terms_of_service():
     return """
-    <html><head><title>Andesia Terms of Service</title>
+    <html><head><title>Andes.IA Terms of Service</title>
     <style>body{font-family:sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6;color:#333}</style>
     </head><body>
-    <h1>Andesia Terms of Service</h1>
+    <h1>Andes.IA Terms of Service</h1>
     <p><strong>Last updated: April 14, 2026</strong></p>
-    <p>By using Andesia via WhatsApp, you agree to these terms.</p>
+    <p>By using Andes.IA via WhatsApp, you agree to these terms.</p>
     <h2>Service</h2>
-    <p>Andesia provides AI-generated coaching advice for fitness and lifestyle purposes. It is not a substitute for professional medical or fitness advice.</p>
+    <p>Andes.IA provides AI-generated coaching advice for fitness and lifestyle purposes. It is not a substitute for professional medical or fitness advice.</p>
     <h2>Eligibility</h2>
     <p>You must be 13 or older to use this service.</p>
     <h2>Acceptable Use</h2>

@@ -204,7 +204,7 @@ def _shell(step_id: str, token: str, body: str) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Get Started — Andesia</title>
+<title>Get Started — Andes.IA</title>
 <style>
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -355,7 +355,7 @@ def _shell(step_id: str, token: str, body: str) -> str:
 <div class="layout">
   <!-- Sidebar -->
   <aside class="sidebar">
-    <div class="sidebar-logo">Andesia<span>Live optimized.</span></div>
+    <div class="sidebar-logo">Andes.IA<span>Live optimized.</span></div>
     {sidebar}
   </aside>
 

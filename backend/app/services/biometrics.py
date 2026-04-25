@@ -1,6 +1,6 @@
 """Biometric ingestion and synchronization service.
 
-This module keeps the Andesia biometric layer modular so provider-specific
+This module keeps the Andes.IA biometric layer modular so provider-specific
 transport/auth logic can be swapped in later without changing the service
 contract. The normalized dataclasses below give us one shape for Garmin,
 Strava, and Oura payloads, while the service keeps the Supabase sync path

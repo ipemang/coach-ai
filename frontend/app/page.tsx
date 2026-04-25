@@ -37,7 +37,7 @@ export default function LandingPage() {
               </g>
             </svg>
             <span style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: 20, fontWeight: 500, lineHeight: 1 }}>
-              Andesia
+              Andes<span style={{ color: "oklch(0.42 0.080 25)" }}>.</span>IA
             </span>
           </div>
           <div style={{ flex: 1 }} />
@@ -77,7 +77,7 @@ export default function LandingPage() {
               fontStyle: "italic", fontSize: 20, lineHeight: 1.6,
               color: "oklch(0.42 0.022 60)", margin: "0 0 40px", maxWidth: 480,
             }}>
-              Andesia helps endurance coaches save hours each week on training
+              Andes.IA helps endurance coaches save hours each week on training
               prescription — without losing your personal touch with each athlete.
             </p>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -181,7 +181,7 @@ export default function LandingPage() {
             {
               num: "02",
               title: "AI drafts a reply",
-              body: "Andesia reads the check-in, looks at their training plan, and drafts a reply in your voice — not a chatbot's.",
+              body: "Andes.IA reads the check-in, looks at their training plan, and drafts a reply in your voice — not a chatbot's.",
               color: "oklch(0.66 0.135 42)",
             },
             {

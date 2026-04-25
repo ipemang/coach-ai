@@ -1,6 +1,6 @@
-# Andesia Backend
+# Andes.IA Backend
 
-Initial FastAPI scaffold for the Andesia backend.
+Initial FastAPI scaffold for the Andes.IA backend.
 
 ## Structure
 - `app/api` — HTTP routes and API layer

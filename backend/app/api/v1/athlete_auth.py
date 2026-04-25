@@ -174,7 +174,7 @@ async def send_athlete_invite(
         try:
             message = (
                 f"Hi {name} 👋\n\n"
-                f"{coach_name} has invited you to join Andesia — your personal training platform.\n\n"
+                f"{coach_name} has invited you to join Andes.IA — your personal training platform.\n\n"
                 f"Create your account here (link valid 7 days):\n{invite_url}\n\n"
                 f"Once you sign up you'll see your training plan and can chat with your AI coach."
             )
@@ -298,7 +298,7 @@ async def generate_athlete_invite(
             try:
                 message = (
                     f"Hi {athlete.get('full_name', 'there')} 👋\n\n"
-                    f"{coach_name} has invited you to join Andesia — your personal training platform.\n\n"
+                    f"{coach_name} has invited you to join Andes.IA — your personal training platform.\n\n"
                     f"Create your account here (link valid 7 days):\n{invite_url}\n\n"
                     f"Once you sign up, you'll be able to view your training plan, upload files, and chat with your AI coach."
                 )

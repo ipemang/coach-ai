@@ -1,4 +1,4 @@
-# Supabase RLS (Row Level Security) — Andesia
+# Supabase RLS (Row Level Security) — Andes.IA
 
 **Last updated:** 2026-04-16  
 **Supabase project:** `qnvajgifeolwwcyjostm`  
