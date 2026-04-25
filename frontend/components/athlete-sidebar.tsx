@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { createBrowserSupabase } from "@/app/lib/supabase";
 import type { Athlete } from "@/app/lib/types";
 
 interface Props {
@@ -450,6 +451,9 @@ export function AthleteSidebar({
         )}
       </div>
 
+      {/* COA-103: Morning Pulse */}
+      <MorningPulsePanel athleteId={athlete.id} />
+
       {/* Coach Notes */}
       <div className="ca-panel" style={{ padding: "1rem 1.125rem" }}>
         <div
@@ -573,6 +577,182 @@ function ProfileRow({ label, value }: { label: string; value?: string }) {
       <span style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.5 }}>
         {value}
       </span>
+    </div>
+  );
+}
+
+// ── COA-103: Morning Pulse Panel ─────────────────────────────────────────────
+
+const DEFAULT_QUESTIONS = [
+  "How are your legs feeling today? (1 = very sore, 10 = fresh)",
+  "How did you sleep last night? (1 = very poor, 10 = excellent)",
+  "Any pain, niggles, or anything your coach should know about?",
+];
+
+function MorningPulsePanel({ athleteId }: { athleteId: string }) {
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [questions, setQuestions] = useState<string[]>(DEFAULT_QUESTIONS);
+  const [pulseTime, setPulseTime] = useState("07:30");
+  const [todaySession, setTodaySession] = useState<{
+    answers: string[];
+    summary_text: string | null;
+    completed: boolean;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const supabase = createBrowserSupabase();
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token ?? "";
+        const res = await fetch(`/api/athletes/${athleteId}/morning-pulse`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const d = await res.json();
+          if (Array.isArray(d.questions)) setQuestions(d.questions);
+          if (d.morning_pulse_time) setPulseTime(d.morning_pulse_time);
+          if (d.today_session) setTodaySession(d.today_session);
+        }
+      } catch {
+        // non-fatal
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [athleteId]);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const supabase = createBrowserSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token ?? "";
+      const res = await fetch(`/api/athletes/${athleteId}/morning-pulse`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ questions, morning_pulse_time: pulseTime }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setError((d.detail as string | undefined) ?? "Save failed");
+      } else {
+        setEditing(false);
+      }
+    } catch {
+      setError("Network error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "5px 8px",
+    background: "var(--parchment)",
+    border: "1px solid var(--rule)",
+    borderRadius: 2,
+    fontSize: 12,
+    color: "var(--ink)",
+    fontFamily: "var(--body)",
+    outline: "none",
+    boxSizing: "border-box",
+    lineHeight: 1.4,
+  };
+
+  return (
+    <div className="ca-panel" style={{ padding: "1rem 1.125rem" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
+        <span className="ca-eyebrow" style={{ fontSize: 10 }}>Morning Pulse</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {!loading && todaySession?.completed && (
+            <span className="ca-chip" style={{ fontSize: 9, color: "var(--aegean-deep)", background: "var(--aegean-wash)" }}>
+              ✓ Today done
+            </span>
+          )}
+          <EditToggle editing={editing} onToggle={() => { setEditing(v => !v); setError(null); }} />
+        </div>
+      </div>
+
+      {loading ? (
+        <p style={{ fontSize: 11, color: "var(--ink-mute)", fontStyle: "italic", margin: 0 }}>Loading…</p>
+      ) : editing ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <p style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--ink-mute)", margin: 0, letterSpacing: "0.06em" }}>
+            SEND TIME (24-hour)
+          </p>
+          <input
+            value={pulseTime}
+            onChange={e => setPulseTime(e.target.value)}
+            placeholder="07:30"
+            style={{ ...inputStyle, width: 90 }}
+          />
+          <p style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--ink-mute)", margin: "6px 0 0 0", letterSpacing: "0.06em" }}>
+            QUESTIONS (1–5)
+          </p>
+          {questions.map((q, i) => (
+            <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+              <span style={{ fontSize: 10, color: "var(--ink-mute)", paddingTop: 7, flexShrink: 0, fontFamily: "var(--mono)" }}>Q{i + 1}</span>
+              <textarea
+                value={q}
+                onChange={e => setQuestions(qs => { const next = [...qs]; next[i] = e.target.value; return next; })}
+                rows={2}
+                style={{ ...inputStyle, resize: "none", flex: 1 }}
+              />
+              {questions.length > 1 && (
+                <button
+                  onClick={() => setQuestions(qs => qs.filter((_, j) => j !== i))}
+                  style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "var(--ink-mute)", padding: "4px 2px", lineHeight: 1, flexShrink: 0 }}
+                >×</button>
+              )}
+            </div>
+          ))}
+          {questions.length < 5 && (
+            <button
+              onClick={() => setQuestions(qs => [...qs, ""])}
+              className="ca-btn"
+              style={{ fontSize: 11, padding: "4px 10px" }}
+            >
+              + Add question
+            </button>
+          )}
+          {error && <p style={{ fontSize: 11, color: "var(--terracotta-deep)", margin: 0 }}>{error}</p>}
+          <button
+            onClick={save}
+            disabled={saving || questions.some(q => !q.trim())}
+            className="ca-btn ca-btn-primary"
+            style={{ justifyContent: "center", padding: "7px", fontSize: 12, opacity: saving ? 0.5 : 1 }}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      ) : (
+        <div>
+          <p style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--ink-mute)", margin: "0 0 6px", letterSpacing: "0.06em" }}>
+            SENDS AT {pulseTime} · {questions.length} QUESTION{questions.length !== 1 ? "S" : ""}
+          </p>
+          <ol style={{ margin: 0, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 4 }}>
+            {questions.map((q, i) => (
+              <li key={i} style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.5 }}>{q}</li>
+            ))}
+          </ol>
+          {todaySession?.summary_text && (
+            <div style={{ marginTop: 10, padding: "6px 10px", background: "var(--parchment)", borderLeft: "2px solid var(--aegean-soft)", borderRadius: 2 }}>
+              <p style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--ink-mute)", margin: "0 0 3px", letterSpacing: "0.06em" }}>TODAY</p>
+              <p style={{ fontSize: 11, color: "var(--ink-soft)", fontStyle: "italic", margin: 0, lineHeight: 1.5 }}>{todaySession.summary_text}</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

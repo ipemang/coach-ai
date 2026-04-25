@@ -1353,6 +1353,125 @@ async def archive_athlete(
     }
 
 
+# ── COA-103: Morning pulse configuration ──────────────────────────────────────
+
+class MorningPulseConfigRequest(_BaseModel):
+    questions: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=5,
+        description="1–5 questions to ask the athlete each morning (default 3)",
+    )
+    morning_pulse_time: str = Field(
+        default="07:30",
+        description="Local time to send the pulse (HH:MM, 24-hour). Athlete's timezone is used.",
+    )
+
+
+@router.patch("/athletes/{athlete_id}/morning-pulse")
+async def update_morning_pulse_config(
+    athlete_id: str,
+    body: MorningPulseConfigRequest,
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+):
+    """COA-103: Update the morning pulse questions and send time for an athlete.
+
+    Validates the athlete belongs to this coach before writing.
+    """
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    scope = resolve_coach_scope(principal)
+    coach_id = str(scope.coach_id)
+
+    # Verify athlete belongs to this coach
+    try:
+        row = supabase.table("athletes").select("id").eq(
+            "id", athlete_id
+        ).eq("coach_id", coach_id).single().execute()
+        if not row.data:
+            raise HTTPException(status_code=404, detail="Athlete not found")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Database error") from exc
+
+    # Validate time format HH:MM
+    import re
+    if not re.match(r"^\d{2}:\d{2}$", body.morning_pulse_time):
+        raise HTTPException(status_code=400, detail="morning_pulse_time must be HH:MM (e.g. 07:30)")
+
+    try:
+        supabase.table("athletes").update({
+            "morning_pulse_questions": body.questions,
+            "morning_pulse_time": body.morning_pulse_time,
+        }).eq("id", athlete_id).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not save config: {exc}") from exc
+
+    logger.info(
+        "[COA-103] Morning pulse config updated: athlete=%s questions=%d time=%s coach=%s",
+        athlete_id[:8], len(body.questions), body.morning_pulse_time, coach_id[:8],
+    )
+    return {
+        "athlete_id": athlete_id,
+        "questions": body.questions,
+        "morning_pulse_time": body.morning_pulse_time,
+    }
+
+
+@router.get("/athletes/{athlete_id}/morning-pulse")
+async def get_morning_pulse_config(
+    athlete_id: str,
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+):
+    """COA-103: Get the morning pulse config + today's session (if any) for an athlete."""
+    from app.services.morning_pulse import DEFAULT_QUESTIONS
+    from datetime import date
+
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    scope = resolve_coach_scope(principal)
+    coach_id = str(scope.coach_id)
+
+    try:
+        row = supabase.table("athletes").select(
+            "id, morning_pulse_questions, morning_pulse_time"
+        ).eq("id", athlete_id).eq("coach_id", coach_id).single().execute()
+        if not row.data:
+            raise HTTPException(status_code=404, detail="Athlete not found")
+        athlete = row.data
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Database error") from exc
+
+    # Fetch today's completed session if it exists
+    today_session = None
+    try:
+        sess = supabase.table("morning_pulse_sessions").select(
+            "id, session_date, questions, answers, summary_text, completed"
+        ).eq("athlete_id", athlete_id).eq(
+            "session_date", date.today().isoformat()
+        ).limit(1).execute()
+        today_session = sess.data[0] if sess.data else None
+    except Exception:
+        pass  # non-fatal
+
+    questions = athlete.get("morning_pulse_questions") or DEFAULT_QUESTIONS
+    return {
+        "athlete_id": athlete_id,
+        "questions": questions,
+        "morning_pulse_time": athlete.get("morning_pulse_time") or "07:30",
+        "today_session": today_session,
+    }
+
+
 # ── COA-78: Add athlete from dashboard ────────────────────────────────────────
 
 class AddAthleteRequest(_BaseModel):

@@ -459,8 +459,47 @@ class WhatsAppTaskAdapter:
             except Exception as exc:
                 _logger.warning("[checkin] Context fetch failed for %s — using generic message: %s", athlete_id, exc)
 
-        msg = self._build_checkin_message(display_name, ctx)
-        _logger.info("[checkin] Sending personalised check-in to %s (%d chars)", athlete_id, len(msg))
+        # COA-103: Use structured morning pulse (3-question sequence) if the athlete
+        # has morning_pulse_questions configured. Otherwise fall back to the legacy
+        # open-ended check-in message.
+        use_pulse = False
+        pulse_q1: str | None = None
+        try:
+            from app.services.morning_pulse import get_athlete_questions, start_session
+            athlete_rows = self._sync_rows(
+                self.supabase_client.table("athletes")
+                .select("morning_pulse_questions, current_state")
+                .eq("id", athlete_id)
+                .limit(1)
+            ) if athlete_id and self.supabase_client else []
+            if athlete_rows:
+                athlete_row = athlete_rows[0]
+                questions = get_athlete_questions(athlete_row)
+                current_state = athlete_row.get("current_state") or {}
+                pulse_q1 = start_session(
+                    supabase=self.supabase_client,
+                    athlete_id=athlete_id,
+                    current_state=current_state,
+                    questions=questions,
+                )
+                use_pulse = True
+                _logger.info(
+                    "[COA-103] Using morning pulse for athlete=%s Q1 set",
+                    athlete_id[:8] if athlete_id else "?",
+                )
+        except Exception as pulse_exc:
+            _logger.warning("[COA-103] Pulse init failed for %s, falling back: %s", athlete_id, pulse_exc)
+
+        if use_pulse and pulse_q1:
+            # Send the morning greeting + Q1
+            name = display_name or "there"
+            msg = (
+                f"Good morning {name}! ☀️ Quick morning check-in from your coach:\n\n"
+                f"*Q1/3:* {pulse_q1}"
+            )
+        else:
+            msg = self._build_checkin_message(display_name, ctx)
+        _logger.info("[checkin] Sending morning message to %s (%d chars)", athlete_id, len(msg))
 
         try:
             await self.whatsapp_client.send_message(to=phone, body=msg)

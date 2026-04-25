@@ -1215,6 +1215,40 @@ async def _handle_athlete_message(
     is_voice: bool = False,
 ) -> WhatsAppWebhookResponse:
     _handler_t0 = time.monotonic()
+
+    # ── COA-103: Morning pulse intercept ────────────────────────────────────
+    # Check if this message is answering an active morning pulse sequence.
+    # If so, handle it entirely within the pulse state machine and skip the
+    # normal ack + suggestion engine — the next question IS the ack.
+    try:
+        from app.services.morning_pulse import is_session_active, handle_answer
+        cs = athlete.current_state or {}
+        pulse_state = cs.get("morning_pulse_state")
+        if pulse_state and is_session_active(pulse_state):
+            reply_text, is_complete = handle_answer(
+                supabase=supabase,
+                athlete_id=athlete.athlete_id,
+                coach_id=athlete.coach_id,
+                display_name=athlete.display_name or athlete.phone_number,
+                current_state=cs,
+                answer_text=text,
+            )
+            if reply_text:
+                await _send_whatsapp_message(request, sender, reply_text)
+            logger.info(
+                "[COA-103] Pulse response processed for athlete=%s complete=%s",
+                athlete.athlete_id[:8], is_complete,
+            )
+            return WhatsAppWebhookResponse(
+                status="pulse_answered",
+                athlete_id=athlete.athlete_id,
+                coach_id=athlete.coach_id,
+            )
+    except Exception as pulse_exc:
+        # Non-fatal: if pulse handling fails, fall through to normal flow
+        logger.warning("[COA-103] Pulse intercept failed (non-fatal): %s", pulse_exc)
+    # ── End COA-103 ─────────────────────────────────────────────────────────
+
     # COA-56: Detect workout context before ack — affects both message wording and AI routing
     workout_context = is_voice and _detect_workout_context(text)
     if workout_context:
