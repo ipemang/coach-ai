@@ -15,11 +15,68 @@ export async function PATCH(
 
   const { id } = await params;
   const body = await req.json();
-  const { action, coach_reply, plan_action } = body as {
+  const { action, coach_reply, plan_action, edit_plan_mod, change_type, change_value, reasoning } = body as {
     action?: "approved" | "ignored" | "modified";
     coach_reply?: string;
     plan_action?: "approved" | "rejected";
+    // COA-81: inline plan modification edit
+    edit_plan_mod?: boolean;
+    change_type?: string;
+    change_value?: string;
+    reasoning?: string;
   };
+
+  // COA-81: Edit plan modification payload before approving
+  if (edit_plan_mod) {
+    if (!change_type || !change_value) {
+      return NextResponse.json({ error: "change_type and change_value are required" }, { status: 400 });
+    }
+
+    // Fetch current payload to preserve original on first edit
+    const { data: existing, error: fetchErr } = await supabase
+      .from("suggestions")
+      .select("plan_modification_payload, plan_modification_original")
+      .eq("id", id)
+      .single();
+
+    if (fetchErr || !existing) {
+      return NextResponse.json({ error: fetchErr?.message ?? "Not found" }, { status: 404 });
+    }
+
+    const currentPayload = (existing.plan_modification_payload ?? {}) as Record<string, unknown>;
+    const updatedPayload = {
+      ...currentPayload,
+      change_type,
+      change_value,
+      ...(reasoning ? { coach_reasoning: reasoning } : {}),
+    };
+
+    const update: Record<string, unknown> = {
+      plan_modification_payload: updatedPayload,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Preserve original AI payload on first edit only — never overwrite again
+    if (!existing.plan_modification_original) {
+      update.plan_modification_original = currentPayload;
+    }
+
+    const { error: updateErr } = await supabase
+      .from("suggestions")
+      .update(update)
+      .eq("id", id);
+
+    if (updateErr) {
+      return NextResponse.json({ error: updateErr.message }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      id,
+      plan_modification_payload: updatedPayload,
+      plan_modification_original: update.plan_modification_original ?? existing.plan_modification_original,
+    });
+  }
 
   // COA-65: Plan modification approval — independent of message approval
   if (plan_action) {

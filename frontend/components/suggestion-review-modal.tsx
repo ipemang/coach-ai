@@ -48,6 +48,57 @@ export function SuggestionReviewModal({ suggestion: s, onClose, onSubmit, onPlan
       : null
   );
 
+  // COA-81: Plan modification inline edit state
+  const initialPlanPayload = s.plan_modification_payload;
+  const [planPayload, setPlanPayload] = useState(initialPlanPayload);
+  const [planHasOriginal, setPlanHasOriginal] = useState(!!s.plan_modification_original);
+  const [isPlanEditing, setIsPlanEditing] = useState(false);
+  const [planEditValues, setPlanEditValues] = useState({
+    change_type: initialPlanPayload?.change_type ?? "",
+    change_value: initialPlanPayload?.change_value ?? "",
+    reasoning: initialPlanPayload?.reasoning ?? "",
+  });
+  const [planEditLoading, setPlanEditLoading] = useState(false);
+  const [planEditError, setPlanEditError] = useState<string | null>(null);
+  const [planEdited, setPlanEdited] = useState(!!s.plan_modification_original);
+
+  async function handleSavePlanEdit() {
+    if (!planEditValues.change_type.trim() || !planEditValues.change_value.trim()) {
+      setPlanEditError("Change type and value are required.");
+      return;
+    }
+    setPlanEditLoading(true);
+    setPlanEditError(null);
+    try {
+      const res = await fetch(`/api/suggestions/${s.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          edit_plan_mod: true,
+          change_type: planEditValues.change_type.trim(),
+          change_value: planEditValues.change_value.trim(),
+          reasoning: planEditValues.reasoning.trim() || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json();
+        throw new Error(body.error ?? "Save failed");
+      }
+      const data = await res.json();
+      // Update local display with saved values
+      setPlanPayload(data.plan_modification_payload);
+      if (!planHasOriginal && data.plan_modification_original) {
+        setPlanHasOriginal(true);
+      }
+      setPlanEdited(true);
+      setIsPlanEditing(false);
+    } catch (e) {
+      setPlanEditError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setPlanEditLoading(false);
+    }
+  }
+
   const hasChanges = editedMessage.trim() !== displayText.trim();
   const classInfo = s.message_class ? CLASS_LABELS[s.message_class] : null;
 
@@ -149,22 +200,110 @@ export function SuggestionReviewModal({ suggestion: s, onClose, onSubmit, onPlan
             </details>
           )}
 
-          {/* Plan modification */}
-          {s.plan_modification_payload?.warranted && (
+          {/* Plan modification — COA-81: inline edit mode */}
+          {planPayload?.warranted && (
             <div>
-              <p className="mb-1.5 text-xs font-medium uppercase tracking-widest text-amber-400/70">
-                Suggested plan change
-              </p>
-              <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 space-y-1">
-                <p className="text-sm font-medium text-amber-200">
-                  {s.plan_modification_payload.change_type}:{" "}
-                  <span className="font-normal text-slate-300">{s.plan_modification_payload.change_value}</span>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-xs font-medium uppercase tracking-widest text-amber-400/70">
+                  Suggested plan change
                 </p>
-                {s.plan_modification_payload.reasoning && (
-                  <p className="text-xs text-slate-400">{s.plan_modification_payload.reasoning}</p>
+                {!isPlanEditing && planDone === null && (
+                  <button
+                    onClick={() => {
+                      setPlanEditValues({
+                        change_type: planPayload.change_type ?? "",
+                        change_value: planPayload.change_value ?? "",
+                        reasoning: (planPayload as Record<string, unknown>).coach_reasoning as string
+                          ?? planPayload.reasoning ?? "",
+                      });
+                      setPlanEditError(null);
+                      setIsPlanEditing(true);
+                    }}
+                    className="text-xs text-amber-400/80 hover:text-amber-300 transition"
+                  >
+                    ✎ Edit
+                  </button>
                 )}
               </div>
-              {onPlanAction && planDone === null && (
+
+              {isPlanEditing ? (
+                <div className="rounded-2xl border border-amber-400/30 bg-amber-400/5 px-4 py-3 space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium uppercase tracking-widest text-slate-500">
+                      Change type
+                    </label>
+                    <input
+                      type="text"
+                      value={planEditValues.change_type}
+                      onChange={(e) => setPlanEditValues(v => ({ ...v, change_type: e.target.value }))}
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 outline-none focus:border-amber-400/40 transition placeholder-slate-600"
+                      placeholder="e.g. reduce_duration"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium uppercase tracking-widest text-slate-500">
+                      Change value
+                    </label>
+                    <input
+                      type="text"
+                      value={planEditValues.change_value}
+                      onChange={(e) => setPlanEditValues(v => ({ ...v, change_value: e.target.value }))}
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 outline-none focus:border-amber-400/40 transition placeholder-slate-600"
+                      placeholder="e.g. 60 minutes"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium uppercase tracking-widest text-slate-500">
+                      Your reasoning (optional)
+                    </label>
+                    <textarea
+                      value={planEditValues.reasoning}
+                      onChange={(e) => setPlanEditValues(v => ({ ...v, reasoning: e.target.value }))}
+                      rows={2}
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 outline-none focus:border-amber-400/40 resize-none transition placeholder-slate-600"
+                      placeholder="Why are you adjusting this?"
+                    />
+                  </div>
+                  {planEditError && (
+                    <p className="text-xs text-red-400">{planEditError}</p>
+                  )}
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      disabled={planEditLoading}
+                      onClick={handleSavePlanEdit}
+                      className="flex-1 rounded-xl bg-amber-400/20 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-400/30 transition disabled:opacity-40"
+                    >
+                      {planEditLoading ? "Saving…" : "Save changes"}
+                    </button>
+                    <button
+                      disabled={planEditLoading}
+                      onClick={() => { setIsPlanEditing(false); setPlanEditError(null); }}
+                      className="rounded-xl bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-400 hover:bg-white/10 transition disabled:opacity-40"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 space-y-1">
+                  <p className="text-sm font-medium text-amber-200">
+                    {planPayload.change_type}:{" "}
+                    <span className="font-normal text-slate-300">{planPayload.change_value}</span>
+                  </p>
+                  {((planPayload as Record<string, unknown>).coach_reasoning as string | undefined
+                    ?? planPayload.reasoning) && (
+                    <p className="text-xs text-slate-400">
+                      {(planPayload as Record<string, unknown>).coach_reasoning as string
+                        ?? planPayload.reasoning}
+                    </p>
+                  )}
+                  {planEdited && (
+                    <p className="text-[11px] text-amber-400/60 pt-0.5">✎ Edited from AI original</p>
+                  )}
+                </div>
+              )}
+
+              {!isPlanEditing && onPlanAction && planDone === null && (
                 <div className="mt-2 flex gap-2">
                   <button
                     disabled={!!planLoading}

@@ -72,6 +72,7 @@ export interface Suggestion {
   classification_confidence?: number | null;
   message_reasoning?: string | null;       // why the AI drafted this response
   plan_modification_payload?: PlanModificationPayload | null;
+  plan_modification_original?: PlanModificationPayload | null;  // COA-81: preserved original AI payload on first coach edit
   plan_modification_status?: "pending" | "approved" | "rejected" | null;
   // COA-65: Coach decision tracking
   coach_decision?: "approved" | "rejected" | "modified" | null;
