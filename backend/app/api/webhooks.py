@@ -721,6 +721,155 @@ async def _generate_suggestion(athlete: AthleteRecord, text: str, supabase: Any 
     return decision.get("reply", _AI_DECISION_FALLBACK["reply"])
 
 
+# ---------------------------------------------------------------------------
+# COA-107: Media message handling (image/video form analysis)
+# ---------------------------------------------------------------------------
+
+def _extract_media_info(payload: dict) -> tuple[str | None, str | None, str | None]:
+    """Extract (sender, media_type, media_id) from a WhatsApp webhook payload.
+
+    Returns (None, None, None) if the message is not an image or video.
+    """
+    if "entry" not in payload:
+        return None, None, None
+    for entry in payload.get("entry", []):
+        for change in entry.get("changes", []):
+            val = change.get("value", {})
+            if "messages" not in val:
+                continue
+            msg = val["messages"][0]
+            msg_type = msg.get("type")
+            sender = msg.get("from")
+            if msg_type == "image":
+                media_id = (msg.get("image") or {}).get("id")
+                return sender, "image", media_id
+            elif msg_type == "video":
+                media_id = (msg.get("video") or {}).get("id")
+                return sender, "video", media_id
+    return None, None, None
+
+
+async def _download_whatsapp_media(media_id: str) -> bytes:
+    """Download media bytes from the WhatsApp Cloud API for a given media ID."""
+    settings = get_settings()
+    token = settings.whatsapp_access_token
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        meta_resp = await client.get(
+            f"https://graph.facebook.com/v18.0/{media_id}",
+            headers=headers,
+        )
+        meta_resp.raise_for_status()
+        media_url = meta_resp.json()["url"]
+        media_resp = await client.get(media_url, headers=headers)
+        media_resp.raise_for_status()
+        return media_resp.content
+
+
+async def _handle_media_message(
+    request: Any,
+    supabase: Any,
+    athlete: dict,
+    sender: str,
+    media_type: str,
+    media_id: str,
+) -> None:
+    """COA-107: Background task — download media, run AI analysis, store in media_reviews.
+
+    This function must be non-blocking relative to the webhook response.
+    All errors are caught and logged — never raises to avoid crashing the event loop.
+    """
+    from starlette.concurrency import run_in_threadpool
+    from app.services.media_analysis import analyze_media
+
+    athlete_id = athlete.get("id") or athlete.get("athlete_id")
+    coach_id = athlete.get("coach_id")
+
+    logger.info("[COA-107] Starting media analysis: athlete=%s type=%s", str(athlete_id)[:8], media_type)
+
+    try:
+        # 1. Download media from Meta CDN
+        try:
+            media_bytes = await _download_whatsapp_media(media_id)
+        except Exception as exc:
+            logger.error("[COA-107] Media download failed for %s: %s", media_id[:8], exc)
+            return
+
+        # 2. Upload to Supabase Storage
+        import time as _time
+        filename = f"{int(_time.time())}_{media_type}.{'jpg' if media_type == 'image' else 'mp4'}"
+        storage_path = f"athletes/{athlete_id}/{filename}"
+        try:
+            supabase.storage.from_("media-reviews").upload(
+                path=storage_path,
+                file=media_bytes,
+                file_options={"content-type": "image/jpeg" if media_type == "image" else "video/mp4"},
+            )
+        except Exception as exc:
+            logger.warning("[COA-107] Storage upload failed (non-fatal): %s", exc)
+            storage_path = f"UPLOAD_FAILED/{athlete_id}/{filename}"
+
+        # 3. Create pending_analysis record immediately
+        insert_result = supabase.table("media_reviews").insert({
+            "athlete_id": athlete_id,
+            "coach_id": coach_id,
+            "media_url": storage_path,
+            "media_type": media_type,
+            "whatsapp_media_id": media_id,
+            "status": "pending_analysis",
+        }).execute()
+        review_id = ((insert_result.data or [{}])[0]).get("id")
+
+        if not review_id:
+            logger.error("[COA-107] Failed to create media_reviews row")
+            return
+
+        # 4. Fetch coach persona + methodology
+        coach_row = supabase.table("coaches").select(
+            "persona_system_prompt, methodology_playbook, full_name"
+        ).eq("id", coach_id).single().execute()
+        coach_data = coach_row.data or {}
+        persona = (coach_data.get("persona_system_prompt") or "").strip()
+        playbook = coach_data.get("methodology_playbook") or {}
+        methodology_summary = (
+            playbook.get("summary") or playbook.get("focus") or
+            " | ".join(str(v) for v in list(playbook.values())[:3] if v)
+        ) if playbook else None
+
+        name = athlete.get("display_name") or athlete.get("full_name") or "Athlete"
+        sp = athlete.get("stable_profile") or {}
+        cs = athlete.get("current_state") or {}
+        sport = sp.get("sport") or cs.get("sport") or "endurance sports"
+
+        # 5. Run AI analysis (sync — called via threadpool)
+        try:
+            result = await run_in_threadpool(
+                analyze_media,
+                media_bytes=media_bytes,
+                media_type=media_type,
+                athlete_name=name,
+                sport=sport,
+                methodology_summary=methodology_summary,
+                persona_prompt=persona or None,
+            )
+            ai_analysis = result.analysis
+            logger.info("[COA-107] AI analysis complete: %d frames, %d chars", result.frames_extracted, len(ai_analysis))
+        except Exception as exc:
+            logger.error("[COA-107] AI analysis failed: %s", exc)
+            ai_analysis = f"Media received ({media_type}). AI analysis unavailable — review directly."
+
+        # 6. Update record with analysis
+        supabase.table("media_reviews").update({
+            "ai_analysis": ai_analysis,
+            "status": "pending_coach_review",
+        }).eq("id", review_id).execute()
+
+        logger.info("[COA-107] Media review %s ready for coach", str(review_id)[:8])
+
+    except Exception as exc:
+        logger.exception("[COA-107] Unhandled error in media message handler: %s", exc)
+
+
 async def _download_whatsapp_audio(media_id: str) -> bytes:
     """Download audio bytes from the WhatsApp Cloud API for a given media ID."""
     settings = get_settings()
@@ -1109,6 +1258,27 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
     payload = _parse_payload(raw_body, content_type)
 
     sender, text, wa_msg_id, is_voice = await _extract_message(payload)
+
+    # COA-107: Handle image/video before the text-only early-exit
+    media_sender, media_type, media_id = _extract_media_info(payload)
+    if media_sender and media_type and media_id:
+        supabase_early = request.app.state.supabase_client
+        athlete_early = await _find_athlete_by_phone(supabase_early, media_sender)
+        if athlete_early:
+            import asyncio
+            # Fire-and-forget: must return 200 to Meta within 5s
+            asyncio.create_task(
+                _handle_media_message(
+                    request,
+                    supabase_early,
+                    athlete_early,
+                    media_sender,
+                    media_type,
+                    media_id,
+                )
+            )
+            logger.info("[COA-107] Media message (%s) from %s — analysis task queued", media_type, _mask_phone(media_sender))
+            return WhatsAppWebhookResponse(status="media_queued")
 
     if not sender or not text:
         logger.info("[webhook] No actionable message in payload — ignoring")

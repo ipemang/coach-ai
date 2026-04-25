@@ -2689,3 +2689,163 @@ async def send_session_note(
     }).eq("id", note_id).execute()
 
     return {"sent": True, "note_id": note_id}
+
+
+# ── COA-107: Media review queue ────────────────────────────────────────────────
+
+class MediaReviewUpdateRequest(_BaseModel):
+    coach_edited_analysis: str | None = Field(default=None, max_length=4000)
+    coach_comment: str | None = Field(default=None, max_length=1000)
+
+
+@router.get("/media-reviews")
+async def list_media_reviews(
+    request: Request,
+    status: str | None = None,
+    principal=Depends(require_roles("coach")),
+):
+    """COA-107: List media reviews for this coach.
+
+    Default: returns pending_coach_review items (the queue).
+    Pass ?status=sent|dismissed|pending_analysis to filter.
+    """
+    supabase = request.app.state.supabase
+    coach_id = principal["coach_id"]
+
+    filter_status = status or "pending_coach_review"
+    result = supabase.table("media_reviews").select(
+        "id, athlete_id, media_url, media_type, ai_analysis, coach_edited_analysis, "
+        "coach_comment, status, sent_at, created_at, "
+        "athletes(full_name, display_name)"
+    ).eq("coach_id", coach_id).eq("status", filter_status).order(
+        "created_at", desc=True
+    ).execute()
+
+    reviews = result.data or []
+
+    # Generate signed URLs for each media item
+    signed_reviews = []
+    for r in reviews:
+        signed_url = None
+        try:
+            url_result = supabase.storage.from_("media-reviews").create_signed_url(
+                r["media_url"], 3600  # 1 hour expiry
+            )
+            signed_url = (url_result or {}).get("signedURL") or url_result
+        except Exception:
+            pass
+        signed_reviews.append({**r, "signed_url": signed_url})
+
+    return {"coach_id": coach_id, "reviews": signed_reviews}
+
+
+@router.patch("/media-reviews/{review_id}")
+async def update_media_review(
+    review_id: str,
+    body: MediaReviewUpdateRequest,
+    request: Request,
+    principal=Depends(require_roles("coach")),
+):
+    """COA-107: Update coach_edited_analysis and/or coach_comment for a media review."""
+    supabase = request.app.state.supabase
+    coach_id = principal["coach_id"]
+
+    row = supabase.table("media_reviews").select("id, coach_id, status").eq(
+        "id", review_id
+    ).single().execute().data
+    if not row:
+        raise HTTPException(status_code=404, detail="Media review not found")
+    if row["coach_id"] != coach_id:
+        raise HTTPException(status_code=403, detail="Not your review")
+    if row["status"] == "sent":
+        raise HTTPException(status_code=400, detail="Cannot edit a review that has been sent")
+
+    update_payload: dict = {}
+    if body.coach_edited_analysis is not None:
+        update_payload["coach_edited_analysis"] = body.coach_edited_analysis.strip()
+    if body.coach_comment is not None:
+        update_payload["coach_comment"] = body.coach_comment.strip()
+
+    if not update_payload:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    updated = supabase.table("media_reviews").update(update_payload).eq("id", review_id).execute()
+    return {"updated": True, "review": (updated.data or [{}])[0]}
+
+
+@router.post("/media-reviews/{review_id}/send")
+async def send_media_review(
+    review_id: str,
+    request: Request,
+    principal=Depends(require_roles("coach")),
+):
+    """COA-107: Send the AI form analysis (+ coach comment) to the athlete via WhatsApp."""
+    supabase = request.app.state.supabase
+    coach_id = principal["coach_id"]
+
+    review = supabase.table("media_reviews").select(
+        "id, athlete_id, coach_id, ai_analysis, coach_edited_analysis, coach_comment, "
+        "media_type, status, created_at"
+    ).eq("id", review_id).single().execute().data
+    if not review:
+        raise HTTPException(status_code=404, detail="Media review not found")
+    if review["coach_id"] != coach_id:
+        raise HTTPException(status_code=403, detail="Not your review")
+    if review["status"] == "sent":
+        raise HTTPException(status_code=400, detail="Review already sent")
+
+    athlete = supabase.table("athletes").select(
+        "id, full_name, display_name, whatsapp_number"
+    ).eq("id", review["athlete_id"]).single().execute().data
+    if not athlete:
+        raise HTTPException(status_code=404, detail="Athlete not found")
+    phone = athlete.get("whatsapp_number")
+    if not phone:
+        raise HTTPException(status_code=422, detail="Athlete has no WhatsApp number")
+
+    # Build the WhatsApp message
+    analysis_text = review.get("coach_edited_analysis") or review.get("ai_analysis") or "Form analysis not available."
+    coach_comment = (review.get("coach_comment") or "").strip()
+    media_emoji = "📸" if review["media_type"] == "image" else "📹"
+    try:
+        review_date = datetime.fromisoformat(review["created_at"]).strftime("%b %d")
+    except (TypeError, ValueError):
+        review_date = ""
+
+    message = f"{media_emoji} Form analysis{f' — {review_date}' if review_date else ''}:\n\n{analysis_text}"
+    if coach_comment:
+        message += f"\n\nCoach's note: {coach_comment}"
+
+    try:
+        from app.services.whatsapp_service import send_whatsapp_message
+        await send_whatsapp_message(phone, message)
+    except Exception as exc:
+        logger.error("[COA-107] WhatsApp send failed for review %s: %s", review_id[:8], exc)
+        raise HTTPException(status_code=502, detail=f"WhatsApp send failed: {exc}") from exc
+
+    supabase.table("media_reviews").update({
+        "status": "sent",
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", review_id).execute()
+
+    return {"sent": True, "review_id": review_id}
+
+
+@router.post("/media-reviews/{review_id}/dismiss")
+async def dismiss_media_review(
+    review_id: str,
+    request: Request,
+    principal=Depends(require_roles("coach")),
+):
+    """COA-107: Dismiss a media review without sending."""
+    supabase = request.app.state.supabase
+    coach_id = principal["coach_id"]
+
+    row = supabase.table("media_reviews").select("id, coach_id").eq(
+        "id", review_id
+    ).single().execute().data
+    if not row or row["coach_id"] != coach_id:
+        raise HTTPException(status_code=404, detail="Media review not found")
+
+    supabase.table("media_reviews").update({"status": "dismissed"}).eq("id", review_id).execute()
+    return {"dismissed": True, "review_id": review_id}

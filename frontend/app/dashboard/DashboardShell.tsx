@@ -28,7 +28,7 @@ type EnrichedAthlete = Athlete & {
   biometric_baseline?: BiometricBaseline | null;  // COA-101
 };
 
-type Tab = "roster" | "queue" | "officehours";
+type Tab = "roster" | "queue" | "media" | "officehours";
 type Filter = "all" | "pending";
 
 interface OfficeHoursData {
@@ -665,6 +665,245 @@ function WeeklyDigestPanel({
   );
 }
 
+// ─── Media Review Queue (COA-107) ─────────────────────────────────────────────
+
+type MediaReview = {
+  id: string;
+  athlete_id: string;
+  media_type: "image" | "video";
+  ai_analysis: string | null;
+  coach_edited_analysis: string | null;
+  coach_comment: string | null;
+  signed_url: string | null;
+  status: string;
+  created_at: string;
+  athletes?: { full_name: string | null; display_name: string | null } | null;
+};
+
+function MediaReviewQueue({
+  reviews,
+  loading,
+  onRefresh,
+}: {
+  reviews: MediaReview[];
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editAnalysis, setEditAnalysis] = useState("");
+  const [editComment, setEditComment] = useState("");
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  }
+
+  async function handleSave(id: string) {
+    setSavingId(id);
+    try {
+      const res = await fetch(`/api/media-reviews/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          coach_edited_analysis: editAnalysis || null,
+          coach_comment: editComment || null,
+        }),
+      });
+      if (res.ok) {
+        setEditingId(null);
+        onRefresh();
+      } else {
+        showToast("Save failed");
+      }
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function handleSend(id: string) {
+    setSendingId(id);
+    try {
+      const res = await fetch(`/api/media-reviews/${id}?action=send`, { method: "POST" });
+      if (res.ok) {
+        showToast("Form analysis sent to athlete ✓");
+        onRefresh();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || "Send failed");
+      }
+    } finally {
+      setSendingId(null);
+    }
+  }
+
+  async function handleDismiss(id: string) {
+    const res = await fetch(`/api/media-reviews/${id}?action=dismiss`, { method: "POST" });
+    if (res.ok) onRefresh();
+  }
+
+  if (loading) {
+    return (
+      <div className="ca-panel" style={{ padding: "20px", display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 16, height: 16, border: "2px solid var(--rule)", borderTopColor: "var(--aegean-deep)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+        <span className="ca-eyebrow" style={{ fontSize: 11 }}>Loading media queue…</span>
+      </div>
+    );
+  }
+
+  if (reviews.length === 0) {
+    return (
+      <div className="ca-panel" style={{ padding: "28px 20px", textAlign: "center" }}>
+        <div style={{ fontSize: 28, marginBottom: 10 }}>📭</div>
+        <p className="ca-eyebrow" style={{ fontSize: 10 }}>No media to review</p>
+        <p style={{ fontSize: 12, color: "var(--ink-mute)", marginTop: 6 }}>
+          When athletes send photos or videos via WhatsApp, they&apos;ll appear here for AI-assisted form review.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      {toast && (
+        <div style={{ position: "fixed", top: 20, right: 20, background: "var(--aegean-deep)", color: "oklch(0.97 0.02 210)", padding: "8px 16px", borderRadius: 4, fontSize: 12, zIndex: 100, fontFamily: "var(--mono)" }}>
+          {toast}
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {reviews.map(r => {
+          const name = r.athletes?.display_name || r.athletes?.full_name || "Athlete";
+          const isOpen = openId === r.id;
+          const isEditing = editingId === r.id;
+          const displayAnalysis = r.coach_edited_analysis || r.ai_analysis || "";
+
+          return (
+            <div key={r.id} className="ca-panel" style={{ overflow: "hidden" }}>
+              {/* Header row */}
+              <button
+                onClick={() => setOpenId(isOpen ? null : r.id)}
+                style={{ width: "100%", padding: "14px 18px", display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: "pointer", textAlign: "left" }}
+              >
+                <span style={{ fontSize: 18 }}>{r.media_type === "image" ? "📸" : "📹"}</span>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: 13, fontFamily: "var(--serif)", fontWeight: 600, color: "var(--ink)" }}>{name}</span>
+                  <span style={{ marginLeft: 8, fontSize: 11, color: "var(--ink-mute)" }}>
+                    {r.media_type} · {new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </span>
+                </div>
+                <G.Arrow size={12} color="var(--ink-mute)" dir={isOpen ? "up" : "down"} />
+              </button>
+
+              {isOpen && (
+                <div style={{ borderTop: "1px solid var(--rule)", padding: "16px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
+                  {/* Media preview */}
+                  {r.signed_url && (
+                    r.media_type === "image" ? (
+                      <img
+                        src={r.signed_url}
+                        alt="Athlete form photo"
+                        style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 4, border: "1px solid var(--rule)", objectFit: "contain" }}
+                      />
+                    ) : (
+                      <video
+                        src={r.signed_url}
+                        controls
+                        style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 4, border: "1px solid var(--rule)" }}
+                      />
+                    )
+                  )}
+
+                  {/* AI analysis + edit */}
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                      <span className="ca-eyebrow" style={{ fontSize: 9 }}>AI form analysis</span>
+                      {!isEditing && (
+                        <button
+                          onClick={() => { setEditingId(r.id); setEditAnalysis(displayAnalysis); setEditComment(r.coach_comment || ""); }}
+                          className="ca-btn"
+                          style={{ fontSize: 9, padding: "3px 10px" }}
+                        >
+                          Edit
+                        </button>
+                      )}
+                    </div>
+                    {isEditing ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <textarea
+                          value={editAnalysis}
+                          onChange={e => setEditAnalysis(e.target.value)}
+                          rows={5}
+                          placeholder="AI analysis…"
+                          style={{ width: "100%", boxSizing: "border-box", fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, lineHeight: 1.6, color: "var(--ink)", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, padding: "10px 12px", resize: "vertical" }}
+                        />
+                        <textarea
+                          value={editComment}
+                          onChange={e => setEditComment(e.target.value)}
+                          rows={2}
+                          placeholder="Add your personal note (optional)…"
+                          style={{ width: "100%", boxSizing: "border-box", fontFamily: "var(--serif)", fontSize: 12, lineHeight: 1.6, color: "var(--ink-soft)", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, padding: "8px 12px", resize: "vertical" }}
+                        />
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button
+                            onClick={() => handleSave(r.id)}
+                            disabled={savingId === r.id}
+                            className="ca-btn ca-btn-primary"
+                            style={{ fontSize: 10, padding: "5px 14px" }}
+                          >
+                            {savingId === r.id ? "Saving…" : "Save"}
+                          </button>
+                          <button onClick={() => setEditingId(null)} className="ca-btn" style={{ fontSize: 10, padding: "5px 14px" }}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, padding: "12px 14px" }}>
+                        <p style={{ margin: 0, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, lineHeight: 1.65, color: "var(--ink-soft)" }}>
+                          {displayAnalysis || "Analysis pending…"}
+                        </p>
+                        {r.coach_comment && (
+                          <p style={{ margin: "10px 0 0 0", fontSize: 12, color: "var(--ink-mute)", fontFamily: "var(--serif)" }}>
+                            <em>Coach&apos;s note: {r.coach_comment}</em>
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action buttons */}
+                  {!isEditing && (
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        onClick={() => handleDismiss(r.id)}
+                        className="ca-btn"
+                        style={{ fontSize: 10, padding: "6px 14px", color: "var(--ink-mute)" }}
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        onClick={() => handleSend(r.id)}
+                        disabled={sendingId === r.id}
+                        className="ca-btn ca-btn-primary"
+                        style={{ fontSize: 10, padding: "6px 18px", marginLeft: "auto" }}
+                      >
+                        {sendingId === r.id ? "Sending…" : "Send to athlete →"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Athlete Card ─────────────────────────────────────────────────────────────
 
 function AthleteCard({ athlete, href }: { athlete: EnrichedAthlete; href: string; }) {
@@ -1249,6 +1488,10 @@ export default function DashboardShell({
   const [weeklyLoading, setWeeklyLoading] = useState(false);
   const [weeklyGenerating, setWeeklyGenerating] = useState(false);
 
+  // ── COA-107: Media review queue ──
+  const [mediaReviews, setMediaReviews] = useState<MediaReview[]>([]);
+  const [mediaLoading, setMediaLoading] = useState(false);
+
   // ── Real-time subscription ──
   useEffect(() => {
     const supabase = createBrowserSupabase();
@@ -1405,6 +1648,32 @@ export default function DashboardShell({
     }
   };
 
+  // ── COA-107: Load media reviews when media tab is active ──
+  useEffect(() => {
+    if (tab !== "media") return;
+    async function loadMedia() {
+      setMediaLoading(true);
+      try {
+        const res = await fetch("/api/media-reviews");
+        if (res.ok) {
+          const json = await res.json();
+          setMediaReviews(json.reviews ?? []);
+        }
+      } catch { /* non-fatal */ }
+      finally { setMediaLoading(false); }
+    }
+    loadMedia();
+  }, [tab]);
+
+  const handleRefreshMedia = async () => {
+    setMediaLoading(true);
+    try {
+      const res = await fetch("/api/media-reviews");
+      if (res.ok) setMediaReviews((await res.json()).reviews ?? []);
+    } catch { /* non-fatal */ }
+    finally { setMediaLoading(false); }
+  };
+
   // ── Fetch office hours when tab is active ──
   useEffect(() => {
     if (tab !== "officehours" || ohData !== null) return;
@@ -1540,6 +1809,7 @@ export default function DashboardShell({
           {([
             { id: "roster" as Tab, label: "The stable", badge: athletes.length },
             { id: "queue" as Tab, label: "Replies to approve", badge: totalPending, badgeAlert: totalPending > 0 },
+            { id: "media" as Tab, label: "Media queue", badge: mediaReviews.length, badgeAlert: mediaReviews.length > 0 },
             { id: "officehours" as Tab, label: "Office hours", badge: null },
           ] as { id: Tab; label: string; badge: number | null; badgeAlert?: boolean }[]).map(t => (
             <button key={t.id} className={`ca-tab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
@@ -1605,6 +1875,15 @@ export default function DashboardShell({
               onIgnore={handleIgnore}
               onRefine={s => setRefineTarget(s)}
               actionLoading={actionLoading}
+            />
+          )}
+
+          {/* COA-107: Media review queue */}
+          {tab === "media" && (
+            <MediaReviewQueue
+              reviews={mediaReviews}
+              loading={mediaLoading}
+              onRefresh={handleRefreshMedia}
             />
           )}
 

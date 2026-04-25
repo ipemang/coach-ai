@@ -238,6 +238,92 @@ class LLMClient:
 
         return EmbedResponse(embeddings=results, total_tokens=total_tokens, model=model)
 
+    def complete(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int | None = None,
+    ) -> LLMResponse:
+        """Convenience alias for chat_completions with named system_prompt/user_prompt args.
+
+        Overrides max_tokens if specified (creates a temporary config copy).
+        """
+        if max_tokens is not None and max_tokens != self.config.max_tokens:
+            import copy
+            cfg = copy.copy(self.config)
+            cfg.max_tokens = max_tokens
+            client = LLMClient(config=cfg)
+            return client.chat_completions(system=system_prompt, user=user_prompt)
+        return self.chat_completions(system=system_prompt, user=user_prompt)
+
+    def complete_with_vision(
+        self,
+        *,
+        system_prompt: str,
+        content_blocks: list[dict],
+        max_tokens: int | None = None,
+    ) -> LLMResponse:
+        """Vision call using pre-built content_blocks (list of {type, image_url|text} dicts).
+
+        Uses the VISION_MODEL env var (defaults to gpt-4o for OpenAI provider).
+        content_blocks follow the OpenAI multimodal format.
+        """
+        api_key = self.config.resolved_api_key()
+        if not api_key:
+            raise LLMClientError(
+                f"Missing API key for provider '{self.config.provider}'. "
+                "Set GROQ_API_KEY or OPENAI_API_KEY (or LLM_API_KEY)."
+            )
+        vision_model = os.getenv("VISION_MODEL", "gpt-4o" if self.config.provider == "openai" else self.config.model)
+        cfg_max = max_tokens or self.config.max_tokens
+
+        url = f"{self.config.resolved_base_url()}/chat/completions"
+        payload = {
+            "model": vision_model,
+            "temperature": self.config.temperature,
+            "max_tokens": cfg_max,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content_blocks},
+            ],
+        }
+        from urllib.request import Request as _Req, urlopen as _open
+        from urllib.error import HTTPError as _HE, URLError as _UE
+        import json as _json
+        import time as _time
+        req = _Req(
+            url,
+            data=_json.dumps(payload).encode("utf-8"),
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        t0 = _time.monotonic()
+        try:
+            with _open(req, timeout=self.config.timeout_seconds) as response:
+                body = response.read().decode("utf-8")
+        except _HE as exc:
+            err = exc.read().decode("utf-8", errors="replace")
+            raise LLMClientError(f"Vision LLM request failed: {exc.code}: {err}") from exc
+        except _UE as exc:
+            raise LLMClientError(f"Vision LLM request failed: {exc.reason}") from exc
+        finally:
+            latency_ms = int((_time.monotonic() - t0) * 1000)
+
+        data = _json.loads(body)
+        choices = data.get("choices") or []
+        if not choices:
+            raise LLMClientError("Vision LLM returned no choices")
+        content = (choices[0].get("message") or {}).get("content") or ""
+        usage = data.get("usage") or {}
+        return LLMResponse(
+            content=content,
+            input_tokens=int(usage.get("prompt_tokens", 0)),
+            output_tokens=int(usage.get("completion_tokens", 0)),
+            model=data.get("model", vision_model),
+            latency_ms=latency_ms,
+        )
+
     # Convenience alias
     chat = chat_completions
 
