@@ -1349,6 +1349,7 @@ function RefineModal({ suggestion, onClose, onSend }: {
 
 function InviteModal({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ invite_url: string; sent_whatsapp: boolean } | null>(null);
@@ -1357,7 +1358,7 @@ function InviteModal({ onClose }: { onClose: () => void }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || !email.trim()) return;
     setLoading(true);
     setError(null);
     try {
@@ -1369,8 +1370,8 @@ function InviteModal({ onClose }: { onClose: () => void }) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           full_name: name.trim(),
+          email: email.trim(),
           phone_number: phone.trim() || undefined,
-          expires_in_days: 30,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -1431,6 +1432,7 @@ function InviteModal({ onClose }: { onClose: () => void }) {
           <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
             {[
               { label: "Full name", value: name, set: setName, type: "text", placeholder: "Alex Thompson", required: true },
+              { label: "Email address", value: email, set: setEmail, type: "email", placeholder: "alex@example.com", required: true },
               { label: "WhatsApp number (optional)", value: phone, set: setPhone, type: "tel", placeholder: "+1 555 000 0000", required: false },
             ].map((f) => (
               <div key={f.label}>

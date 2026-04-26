@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
 
   let res: Response;
   try {
-    res = await fetch(`${BACKEND_URL}/api/v1/coach/athletes/invite`, {
+    res = await fetch(`${BACKEND_URL}/api/v1/athlete/auth/send-invite`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
