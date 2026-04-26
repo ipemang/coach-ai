@@ -34,7 +34,7 @@ declare global {
 }
 import { createBrowserSupabase } from "@/app/lib/supabase";
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "https://coach-ai-production-a5aa.up.railway.app";
 const TOTAL_STEPS = 4;
 const STEP_LABELS = ["Your info", "Sport profile", "Goals", "Health history"];
 
