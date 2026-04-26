@@ -494,7 +494,6 @@ async def link_athlete_account(
         supabase.table("athletes").update({
             "auth_user_id": principal.user_id,
             "email": invite["email"],
-            "status": "active",
         }).eq("id", athlete_id).execute()
     except Exception as exc:
         logger.exception("[link-account] Failed to update athlete row %s", athlete_id)
