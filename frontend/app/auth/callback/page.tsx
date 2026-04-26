@@ -22,7 +22,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserSupabase } from "@/app/lib/supabase";
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "https://coach-ai-production-a5aa.up.railway.app";
 
 function parseJwtClaims(token: string): Record<string, unknown> {
   try {

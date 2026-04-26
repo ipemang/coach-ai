@@ -781,7 +781,7 @@ function OnboardingInner() {
   }) {
     const token = await getToken();
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_BACKEND_URL ?? ""}/api/v1/coach/onboarding/profile`,
+      `${process.env.NEXT_PUBLIC_BACKEND_URL ?? "https://coach-ai-production-a5aa.up.railway.app"}/api/v1/coach/onboarding/profile`,
       {
         method: "POST",
         headers: {
@@ -811,7 +811,7 @@ function OnboardingInner() {
   async function handleMethodologyNext(data: { personaPrompt: string; methodology: string }) {
     const token = await getToken();
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_BACKEND_URL ?? ""}/api/v1/coach/onboarding/methodology`,
+      `${process.env.NEXT_PUBLIC_BACKEND_URL ?? "https://coach-ai-production-a5aa.up.railway.app"}/api/v1/coach/onboarding/methodology`,
       {
         method: "POST",
         headers: {
@@ -838,7 +838,7 @@ function OnboardingInner() {
     const token = await getToken();
     // Fire-and-forget athlete invites — don't block onboarding if this fails
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_BACKEND_URL ?? ""}/api/v1/coach/onboarding/athletes`,
+      `${process.env.NEXT_PUBLIC_BACKEND_URL ?? "https://coach-ai-production-a5aa.up.railway.app"}/api/v1/coach/onboarding/athletes`,
       {
         method: "POST",
         headers: {
