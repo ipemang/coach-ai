@@ -5,8 +5,33 @@
  * Identity → Sports → Goals → Health history → Done
  */
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+
+// ── Web Speech API Types ───────────────────────────────────────────────────────
+
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList;
+  resultIndex: number;
+}
+
+interface SpeechRecognitionInstance extends EventTarget {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  start(): void;
+  stop(): void;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  onend: (() => void) | null;
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition?: new () => SpeechRecognitionInstance;
+    webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+  }
+}
 import { createBrowserSupabase } from "@/app/lib/supabase";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
@@ -43,6 +68,87 @@ const selectSt: React.CSSProperties = {
   appearance: "none",
   cursor: "pointer",
 };
+
+// ── Voice Button ──────────────────────────────────────────────────────────────
+
+function VoiceButton({
+  onTranscript,
+  disabled,
+}: {
+  onTranscript: (text: string) => void;
+  disabled?: boolean;
+}) {
+  const [listening, setListening] = useState(false);
+  const [supported, setSupported] = useState(false);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+
+  useEffect(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    setSupported(!!SR);
+  }, []);
+
+  const startListening = useCallback(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    const recognition = new SR();
+    recognition.lang = "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let transcript = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      if (transcript.trim()) onTranscript(transcript.trim());
+    };
+    recognition.onerror = () => setListening(false);
+    recognition.onend = () => setListening(false);
+    recognitionRef.current = recognition;
+    recognition.start();
+    setListening(true);
+  }, [onTranscript]);
+
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
+    setListening(false);
+  }, []);
+
+  if (!supported) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={listening ? stopListening : startListening}
+      disabled={disabled}
+      title={listening ? "Stop recording" : "Dictate your answer"}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "4px 10px",
+        background: listening ? "var(--terracotta-deep)" : "var(--parchment)",
+        border: `1px solid ${listening ? "var(--terracotta-deep)" : "var(--rule)"}`,
+        borderRadius: 2,
+        color: listening ? "#fff" : "var(--ink-mute)",
+        fontSize: 11,
+        fontFamily: "var(--mono)",
+        letterSpacing: "0.06em",
+        cursor: disabled ? "not-allowed" : "pointer",
+        transition: "all 0.15s",
+        whiteSpace: "nowrap" as const,
+        flexShrink: 0,
+      }}
+    >
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+        <line x1="12" y1="19" x2="12" y2="23"/>
+        <line x1="8" y1="23" x2="16" y2="23"/>
+      </svg>
+      {listening ? "Recording…" : "Voice"}
+    </button>
+  );
+}
 
 function FieldLabel({ children, optional }: { children: React.ReactNode; optional?: boolean }) {
   return (
@@ -360,17 +466,26 @@ function StepGoals({ onNext, onBack }: { onNext: (d: object) => Promise<void>; o
       </div>
 
       <div>
-        <FieldLabel>Your main goal</FieldLabel>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+          <FieldLabel>Your main goal</FieldLabel>
+          <VoiceButton onTranscript={(t) => setGoal((prev) => prev ? `${prev} ${t}` : t)} />
+        </div>
         <textarea value={goal} onChange={(e) => setGoal(e.target.value)} rows={3} placeholder="e.g. Finish my first half ironman under 6 hours" style={textareaSt} />
       </div>
 
       <div>
-        <FieldLabel optional>How will you know you succeeded?</FieldLabel>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+          <FieldLabel optional>How will you know you succeeded?</FieldLabel>
+          <VoiceButton onTranscript={(t) => setSuccess((prev) => prev ? `${prev} ${t}` : t)} />
+        </div>
         <textarea value={success} onChange={(e) => setSuccess(e.target.value)} rows={2} placeholder="e.g. Cross the finish line feeling strong, not just survive it" style={textareaSt} />
       </div>
 
       <div>
-        <FieldLabel optional>Personal bests / past race times</FieldLabel>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+          <FieldLabel optional>Personal bests / past race times</FieldLabel>
+          <VoiceButton onTranscript={(t) => setBests((prev) => prev ? `${prev} ${t}` : t)} />
+        </div>
         <textarea value={bests} onChange={(e) => setBests(e.target.value)} rows={2} placeholder="e.g. 5K: 22 min, 70.3: 5:45" style={textareaSt} />
       </div>
 
@@ -407,17 +522,26 @@ function StepHistory({ onNext, onBack }: { onNext: (d: object) => Promise<void>;
       </p>
 
       <div>
-        <FieldLabel optional>Injury history</FieldLabel>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+          <FieldLabel optional>Injury history</FieldLabel>
+          <VoiceButton onTranscript={(t) => setInjuries((prev) => prev ? `${prev} ${t}` : t)} />
+        </div>
         <textarea value={injuries} onChange={(e) => setInjuries(e.target.value)} rows={3} placeholder="e.g. Right IT band flares up above 15K. Had a stress fracture in 2023, fully healed." style={textareaSt} />
       </div>
 
       <div>
-        <FieldLabel optional>Medical notes</FieldLabel>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+          <FieldLabel optional>Medical notes</FieldLabel>
+          <VoiceButton onTranscript={(t) => setMedical((prev) => prev ? `${prev} ${t}` : t)} />
+        </div>
         <textarea value={medical} onChange={(e) => setMedical(e.target.value)} rows={2} placeholder="e.g. Asthma — use inhaler before hard sessions." style={textareaSt} />
       </div>
 
       <div>
-        <FieldLabel optional>What&apos;s currently limiting your performance?</FieldLabel>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+          <FieldLabel optional>What&apos;s currently limiting your performance?</FieldLabel>
+          <VoiceButton onTranscript={(t) => setLimiters((prev) => prev ? `${prev} ${t}` : t)} />
+        </div>
         <textarea value={limiters} onChange={(e) => setLimiters(e.target.value)} rows={2} placeholder="e.g. Poor swim technique, limited morning training time" style={textareaSt} />
       </div>
 

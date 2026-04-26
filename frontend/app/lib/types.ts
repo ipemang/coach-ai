@@ -52,6 +52,7 @@ export interface PlanModificationPayload {
   change_type: string;
   change_value: string;
   reasoning: string;
+  coach_reasoning?: string;  // COA-81: set when coach edits the AI's plan modification
 }
 
 export interface Suggestion {

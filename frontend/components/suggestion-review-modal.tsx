@@ -6,8 +6,8 @@ import type { Suggestion } from "@/app/lib/types";
 interface Props {
   suggestion: Suggestion;
   onClose: () => void;
-  onSubmit: (id: string, action: "approved" | "ignored" | "modified", finalMessage?: string) => Promise<void>;
-  onPlanAction?: (id: string, planAction: "approved" | "rejected") => Promise<void>;
+  onSubmit: (id: string, action: "approved" | "ignored" | "modified", finalMessage?: string, rejectionReason?: string) => Promise<void>;
+  onPlanAction?: (id: string, planAction: "approved" | "rejected", reason?: string) => Promise<void>;
 }
 
 const CLASS_LABELS: Record<string, { label: string; color: string }> = {
@@ -62,6 +62,12 @@ export function SuggestionReviewModal({ suggestion: s, onClose, onSubmit, onPlan
   const [planEditError, setPlanEditError] = useState<string | null>(null);
   const [planEdited, setPlanEdited] = useState(!!s.plan_modification_original);
 
+  // COA-65: Rejection reason prompts
+  const [planRejectPrompt, setPlanRejectPrompt] = useState(false);
+  const [planRejectReason, setPlanRejectReason] = useState("");
+  const [msgIgnorePrompt, setMsgIgnorePrompt] = useState(false);
+  const [msgIgnoreReason, setMsgIgnoreReason] = useState("");
+
   async function handleSavePlanEdit() {
     if (!planEditValues.change_type.trim() || !planEditValues.change_value.trim()) {
       setPlanEditError("Change type and value are required.");
@@ -102,11 +108,11 @@ export function SuggestionReviewModal({ suggestion: s, onClose, onSubmit, onPlan
   const hasChanges = editedMessage.trim() !== displayText.trim();
   const classInfo = s.message_class ? CLASS_LABELS[s.message_class] : null;
 
-  async function handleAction(action: "approved" | "ignored" | "modified") {
+  async function handleAction(action: "approved" | "ignored" | "modified", reason?: string) {
     setLoading(action);
     setError(null);
     try {
-      await onSubmit(s.id, action, action === "modified" ? editedMessage : undefined);
+      await onSubmit(s.id, action, action === "modified" ? editedMessage : undefined, reason);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Action failed");
@@ -213,8 +219,7 @@ export function SuggestionReviewModal({ suggestion: s, onClose, onSubmit, onPlan
                       setPlanEditValues({
                         change_type: planPayload.change_type ?? "",
                         change_value: planPayload.change_value ?? "",
-                        reasoning: (planPayload as Record<string, unknown>).coach_reasoning as string
-                          ?? planPayload.reasoning ?? "",
+                        reasoning: planPayload.coach_reasoning ?? planPayload.reasoning ?? "",
                       });
                       setPlanEditError(null);
                       setIsPlanEditing(true);
@@ -290,11 +295,9 @@ export function SuggestionReviewModal({ suggestion: s, onClose, onSubmit, onPlan
                     {planPayload.change_type}:{" "}
                     <span className="font-normal text-slate-300">{planPayload.change_value}</span>
                   </p>
-                  {((planPayload as Record<string, unknown>).coach_reasoning as string | undefined
-                    ?? planPayload.reasoning) && (
+                  {(planPayload.coach_reasoning ?? planPayload.reasoning) && (
                     <p className="text-xs text-slate-400">
-                      {(planPayload as Record<string, unknown>).coach_reasoning as string
-                        ?? planPayload.reasoning}
+                      {planPayload.coach_reasoning ?? planPayload.reasoning}
                     </p>
                   )}
                   {planEdited && (
@@ -304,41 +307,73 @@ export function SuggestionReviewModal({ suggestion: s, onClose, onSubmit, onPlan
               )}
 
               {!isPlanEditing && onPlanAction && planDone === null && (
-                <div className="mt-2 flex gap-2">
-                  <button
-                    disabled={!!planLoading}
-                    onClick={async () => {
-                      setPlanLoading("approved");
-                      try {
-                        await onPlanAction(s.id, "approved");
-                        setPlanDone("approved");
-                      } catch {
-                        // error surfaced by parent if needed
-                      } finally {
-                        setPlanLoading(null);
-                      }
-                    }}
-                    className="flex-1 rounded-xl bg-amber-400/20 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-400/30 transition disabled:opacity-40"
-                  >
-                    {planLoading === "approved" ? "Applying…" : "✓ Apply change"}
-                  </button>
-                  <button
-                    disabled={!!planLoading}
-                    onClick={async () => {
-                      setPlanLoading("rejected");
-                      try {
-                        await onPlanAction(s.id, "rejected");
-                        setPlanDone("rejected");
-                      } catch {
-                        // error surfaced by parent if needed
-                      } finally {
-                        setPlanLoading(null);
-                      }
-                    }}
-                    className="rounded-xl bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-400 hover:bg-white/10 transition disabled:opacity-40"
-                  >
-                    {planLoading === "rejected" ? "…" : "✗ Reject"}
-                  </button>
+                <div className="mt-2 space-y-2">
+                  {/* Rejection reason prompt */}
+                  {planRejectPrompt && (
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 space-y-2">
+                      <p className="text-[11px] text-slate-500 font-medium uppercase tracking-widest">
+                        Rejection reason <span className="normal-case tracking-normal">(optional)</span>
+                      </p>
+                      <textarea
+                        value={planRejectReason}
+                        onChange={(e) => setPlanRejectReason(e.target.value)}
+                        rows={2}
+                        placeholder="e.g. Load is already appropriate for this week"
+                        className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 outline-none focus:border-slate-500/50 resize-none placeholder-slate-600"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          disabled={!!planLoading}
+                          onClick={async () => {
+                            setPlanLoading("rejected");
+                            try {
+                              await onPlanAction(s.id, "rejected", planRejectReason.trim() || undefined);
+                              setPlanDone("rejected");
+                              setPlanRejectPrompt(false);
+                            } catch { /* surfaced by parent */ } finally {
+                              setPlanLoading(null);
+                            }
+                          }}
+                          className="rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-400 hover:bg-white/10 transition disabled:opacity-40"
+                        >
+                          {planLoading === "rejected" ? "…" : "Confirm rejection"}
+                        </button>
+                        <button
+                          disabled={!!planLoading}
+                          onClick={() => { setPlanRejectPrompt(false); setPlanRejectReason(""); }}
+                          className="text-xs text-slate-600 hover:text-slate-400 transition"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      disabled={!!planLoading}
+                      onClick={async () => {
+                        setPlanLoading("approved");
+                        try {
+                          await onPlanAction(s.id, "approved");
+                          setPlanDone("approved");
+                        } catch { /* surfaced by parent */ } finally {
+                          setPlanLoading(null);
+                        }
+                      }}
+                      className="flex-1 rounded-xl bg-amber-400/20 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-400/30 transition disabled:opacity-40"
+                    >
+                      {planLoading === "approved" ? "Applying…" : "✓ Apply change"}
+                    </button>
+                    {!planRejectPrompt && (
+                      <button
+                        disabled={!!planLoading}
+                        onClick={() => setPlanRejectPrompt(true)}
+                        className="rounded-xl bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-400 hover:bg-white/10 transition disabled:opacity-40"
+                      >
+                        ✗ Reject
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
               {planDone === "approved" && (
@@ -406,25 +441,60 @@ export function SuggestionReviewModal({ suggestion: s, onClose, onSubmit, onPlan
         </div>
 
         {/* Footer actions */}
-        <div className="flex gap-3 px-6 pb-6 pt-4 border-t border-white/5 shrink-0">
-          <button
-            disabled={!!loading}
-            onClick={() => handleAction(hasChanges ? "modified" : "approved")}
-            className="flex-1 rounded-2xl bg-emerald-500/20 px-4 py-3 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/30 disabled:opacity-40"
-          >
-            {loading === "approved" || loading === "modified"
-              ? "Sending…"
-              : hasChanges
-              ? "✓ Send edited reply"
-              : "✓ Approve & Send"}
-          </button>
-          <button
-            disabled={!!loading}
-            onClick={() => handleAction("ignored")}
-            className="rounded-2xl bg-white/5 px-4 py-3 text-sm font-medium text-slate-400 transition hover:bg-white/10 disabled:opacity-40"
-          >
-            {loading === "ignored" ? "…" : "Ignore"}
-          </button>
+        <div className="px-6 pb-6 pt-4 border-t border-white/5 shrink-0 space-y-3">
+          {/* Ignore reason prompt */}
+          {msgIgnorePrompt && (
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 space-y-2">
+              <p className="text-[11px] text-slate-500 font-medium uppercase tracking-widest">
+                Ignore reason <span className="normal-case tracking-normal">(optional)</span>
+              </p>
+              <textarea
+                value={msgIgnoreReason}
+                onChange={(e) => setMsgIgnoreReason(e.target.value)}
+                rows={2}
+                placeholder="e.g. Not actionable at this time"
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 outline-none focus:border-slate-500/50 resize-none placeholder-slate-600"
+              />
+              <div className="flex gap-2">
+                <button
+                  disabled={!!loading}
+                  onClick={() => handleAction("ignored", msgIgnoreReason.trim() || undefined)}
+                  className="rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-400 hover:bg-white/10 transition disabled:opacity-40"
+                >
+                  {loading === "ignored" ? "…" : "Confirm ignore"}
+                </button>
+                <button
+                  disabled={!!loading}
+                  onClick={() => { setMsgIgnorePrompt(false); setMsgIgnoreReason(""); }}
+                  className="text-xs text-slate-600 hover:text-slate-400 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <button
+              disabled={!!loading}
+              onClick={() => handleAction(hasChanges ? "modified" : "approved")}
+              className="flex-1 rounded-2xl bg-emerald-500/20 px-4 py-3 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/30 disabled:opacity-40"
+            >
+              {loading === "approved" || loading === "modified"
+                ? "Sending…"
+                : hasChanges
+                ? "✓ Send edited reply"
+                : "✓ Approve & Send"}
+            </button>
+            {!msgIgnorePrompt && (
+              <button
+                disabled={!!loading}
+                onClick={() => setMsgIgnorePrompt(true)}
+                className="rounded-2xl bg-white/5 px-4 py-3 text-sm font-medium text-slate-400 transition hover:bg-white/10 disabled:opacity-40"
+              >
+                Ignore
+              </button>
+            )}
+          </div>
         </div>
 
       </div>

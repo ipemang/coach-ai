@@ -49,38 +49,8 @@ async function getData() {
     workoutsByAthlete[id].push(w as { scheduled_date: string; status: string; distance_km: number | null });
   }
 
-  // Enrich athletes with counts
-  const enriched = await Promise.all(
-    athletes.map(async (a) => {
-      const [pendingRes, checkinRes, lastCheckinRes] = await Promise.all([
-        supabase
-          .from("suggestions")
-          .select("id", { count: "exact", head: true })
-          .eq("athlete_id", a.id)
-          .eq("status", "pending"),
-        supabase
-          .from("athlete_checkins")
-          .select("id", { count: "exact", head: true })
-          .eq("athlete_id", a.id),
-        supabase
-          .from("athlete_checkins")
-          .select("created_at")
-          .eq("athlete_id", a.id)
-          .order("created_at", { ascending: false })
-          .limit(1),
-      ]);
-      return {
-        ...a,
-        pending_suggestions: pendingRes.count ?? 0,
-        total_checkins: checkinRes.count ?? 0,
-        last_checkin_at: lastCheckinRes.data?.[0]?.created_at ?? null,
-        week_workouts: workoutsByAthlete[a.id] ?? [],
-        biometric_baseline: baselineByAthlete[a.id] ?? null,
-      };
-    }),
-  );
-
   // COA-101: Batch-fetch last 30 days of biometric snapshots for all athletes
+  // NOTE: Must be computed BEFORE the enriched block so baselineByAthlete is defined.
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split("T")[0];
@@ -111,6 +81,37 @@ async function getData() {
       };
     }
   }
+
+  // Enrich athletes with counts
+  const enriched = await Promise.all(
+    athletes.map(async (a) => {
+      const [pendingRes, checkinRes, lastCheckinRes] = await Promise.all([
+        supabase
+          .from("suggestions")
+          .select("id", { count: "exact", head: true })
+          .eq("athlete_id", a.id)
+          .eq("status", "pending"),
+        supabase
+          .from("athlete_checkins")
+          .select("id", { count: "exact", head: true })
+          .eq("athlete_id", a.id),
+        supabase
+          .from("athlete_checkins")
+          .select("created_at")
+          .eq("athlete_id", a.id)
+          .order("created_at", { ascending: false })
+          .limit(1),
+      ]);
+      return {
+        ...a,
+        pending_suggestions: pendingRes.count ?? 0,
+        total_checkins: checkinRes.count ?? 0,
+        last_checkin_at: lastCheckinRes.data?.[0]?.created_at ?? null,
+        week_workouts: workoutsByAthlete[a.id] ?? [],
+        biometric_baseline: baselineByAthlete[a.id] ?? null,
+      };
+    }),
+  );
 
   // Fetch pending suggestions with athlete message
   const rawSuggestions = (

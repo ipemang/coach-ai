@@ -178,12 +178,17 @@ export function SuggestionQueue({ suggestions: initial }: { suggestions: Suggest
   async function callApi(
     id: string,
     action: "approved" | "ignored" | "modified",
-    finalMessage?: string
+    finalMessage?: string,
+    rejectionReason?: string
   ) {
     const res = await fetch(`/api/suggestions/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, coach_reply: finalMessage }),
+      body: JSON.stringify({
+        action,
+        coach_reply: finalMessage,
+        ...(rejectionReason ? { rejection_reason: rejectionReason } : {}),
+      }),
     });
     if (!res.ok) throw new Error(await res.text());
     setSuggestions((prev) => prev.filter((s) => s.id !== id));
@@ -204,16 +209,20 @@ export function SuggestionQueue({ suggestions: initial }: { suggestions: Suggest
   async function handleModalSubmit(
     id: string,
     action: "approved" | "ignored" | "modified",
-    finalMessage?: string
+    finalMessage?: string,
+    rejectionReason?: string
   ) {
-    await callApi(id, action, finalMessage);
+    await callApi(id, action, finalMessage, rejectionReason);
   }
 
-  async function handlePlanAction(id: string, planAction: "approved" | "rejected") {
+  async function handlePlanAction(id: string, planAction: "approved" | "rejected", reason?: string) {
     const res = await fetch(`/api/suggestions/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan_action: planAction }),
+      body: JSON.stringify({
+        plan_action: planAction,
+        ...(reason ? { plan_rejection_reason: reason } : {}),
+      }),
     });
     if (!res.ok) throw new Error(await res.text());
     // Suggestion stays in queue — message approval is a separate action

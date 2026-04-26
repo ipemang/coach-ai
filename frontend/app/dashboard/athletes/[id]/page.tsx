@@ -8,6 +8,7 @@ import { AthleteHistory } from "@/components/athlete-history";
 import { ResendPlanButton } from "@/components/resend-plan-button";
 import { SessionNotePanel } from "@/components/session-note-panel";
 import { AthleteDocumentVault } from "@/components/athlete-document-vault";
+import { TrainingLoadChart } from "@/components/training-load-chart";
 import Link from "next/link";
 
 function getSupabase() {
@@ -267,6 +268,8 @@ export default async function AthleteProfilePage({
               weekEnd={weekEnd}
             />
             <AthleteHistory checkins={checkins} suggestions={suggestions} />
+            {/* COA-79: Training load chart */}
+            <TrainingLoadChart athleteId={id} />
             {/* COA-106: Session notes */}
             <SessionNotePanel athleteId={id} />
             {/* COA-66: Document vault */}

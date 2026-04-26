@@ -15,10 +15,13 @@ export async function PATCH(
 
   const { id } = await params;
   const body = await req.json();
-  const { action, coach_reply, plan_action, edit_plan_mod, change_type, change_value, reasoning } = body as {
+  const { action, coach_reply, plan_action, edit_plan_mod, change_type, change_value, reasoning, rejection_reason, plan_rejection_reason } = body as {
     action?: "approved" | "ignored" | "modified";
     coach_reply?: string;
     plan_action?: "approved" | "rejected";
+    // COA-65: rejection reasons
+    rejection_reason?: string;
+    plan_rejection_reason?: string;
     // COA-81: inline plan modification edit
     edit_plan_mod?: boolean;
     change_type?: string;
@@ -105,6 +108,7 @@ export async function PATCH(
           body: JSON.stringify({
             action: plan_action,
             decision_type: "plan_modification",
+            ...(plan_rejection_reason ? { rejection_reason: plan_rejection_reason } : {}),
           }),
         }
       );
@@ -159,7 +163,7 @@ export async function PATCH(
       decidePayload.final_message = coach_reply;
     }
     if (action === "ignored") {
-      decidePayload.rejection_reason = "coach_dismissed";
+      decidePayload.rejection_reason = rejection_reason ?? "coach_dismissed";
     }
 
     const decideRes = await fetch(
