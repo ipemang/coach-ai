@@ -239,25 +239,70 @@ def resolve_coach_scope(
     return DataScope(organization_id=principal.organization_id, coach_id=principal.coach_id)
 
 
+def _lookup_athlete_by_user_id(user_id: str) -> tuple[str, str] | None:
+    """Fallback DB lookup when JWT hook hasn't stamped athlete claims yet.
+
+    The custom_access_token_hook only adds athlete_id/coach_id when auth_user_id
+    is already set on the athletes row. During the first onboarding visit the
+    hook may have fired before link-account ran, so JWT claims are stale.
+    This uses the service role key to bypass RLS and look up the athlete directly.
+    COA-100.
+    """
+    settings = get_settings()
+    if not settings.supabase_url or not settings.supabase_service_role_key:
+        return None
+    url = f"{settings.supabase_url.rstrip('/')}/rest/v1/athletes?auth_user_id=eq.{user_id}&archived_at=is.null&select=id,coach_id&limit=1"
+    request = Request(
+        url,
+        method="GET",
+        headers={
+            "apikey": settings.supabase_service_role_key,
+            "Authorization": f"Bearer {settings.supabase_service_role_key}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            rows = json.loads(response.read().decode("utf-8"))
+            if rows and isinstance(rows, list):
+                row = rows[0]
+                athlete_id = _string_value(row.get("id"))
+                coach_id = _string_value(row.get("coach_id"))
+                if athlete_id and coach_id:
+                    return athlete_id, coach_id
+    except Exception:
+        pass
+    return None
+
+
 def resolve_athlete_scope(principal: AuthenticatedPrincipal) -> tuple[str, str]:
     """Return (athlete_id, coach_id) for an authenticated athlete principal.
 
-    Raises 403 if the principal is not an athlete or claims are missing.
-    COA-93.
+    Fast path: JWT claims already have role="athlete" + athlete_id + coach_id.
+    Fallback: DB lookup by auth_user_id when hook fired before link-account ran
+    (e.g. first onboarding visit immediately after account creation). COA-100.
     """
-    if not principal.has_role("athlete"):
+    # Fast path — JWT has up-to-date claims
+    if principal.has_role("athlete") and principal.athlete_id and principal.coach_id:
+        return principal.athlete_id, principal.coach_id
+
+    # Fallback — look up athlete by Supabase user_id (service role bypasses RLS)
+    result = _lookup_athlete_by_user_id(principal.user_id)
+    if result:
+        return result
+
+    # Hard failures
+    if not principal.has_role("athlete") and not principal.athlete_id:
         raise HTTPException(status_code=403, detail="Athlete access required")
     if not principal.athlete_id:
         raise HTTPException(
             status_code=403,
             detail="Athlete scope not configured — complete account linking first",
         )
-    if not principal.coach_id:
-        raise HTTPException(
-            status_code=403,
-            detail="Athlete has no coach association in JWT claims",
-        )
-    return principal.athlete_id, principal.coach_id
+    raise HTTPException(
+        status_code=403,
+        detail="Athlete has no coach association in JWT claims",
+    )
 
 
 def verify_whatsapp_signature(request: FastAPIRequest, raw_body: bytes | None = None) -> None:

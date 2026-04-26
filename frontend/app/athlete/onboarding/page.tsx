@@ -694,8 +694,12 @@ function OnboardingInner() {
 
   async function getToken(): Promise<string> {
     const supabase = createBrowserSupabase();
-    const { data } = await supabase.auth.getSession();
-    const token = data.session?.access_token;
+    // Always refresh so the JWT contains up-to-date role="athlete" claims
+    // (the custom_access_token_hook only stamps claims when auth_user_id is set
+    // on the athletes row, which happens in /auth/callback → link-account just
+    // before we land here).
+    const { data: refreshData } = await supabase.auth.refreshSession();
+    const token = refreshData.session?.access_token;
     if (!token) throw new Error("Session expired. Please sign in again.");
     return token;
   }
