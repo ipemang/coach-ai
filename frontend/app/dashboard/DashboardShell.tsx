@@ -1350,11 +1350,22 @@ function RefineModal({ suggestion, onClose, onSend }: {
 function InviteModal({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const [countryCode, setCountryCode] = useState("");
+  const [phoneLocal, setPhoneLocal] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ invite_url: string; sent_whatsapp: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Combine country code + local number into a single string for the API.
+  // Both parts are free-form — no formatting enforced.
+  function buildPhoneNumber(): string | undefined {
+    const cc = countryCode.trim();
+    const local = phoneLocal.trim();
+    if (!local) return undefined;
+    if (cc) return `${cc}${local}`;
+    return local;
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -1371,7 +1382,7 @@ function InviteModal({ onClose }: { onClose: () => void }) {
         body: JSON.stringify({
           full_name: name.trim(),
           email: email.trim(),
-          phone_number: phone.trim() || undefined,
+          phone_number: buildPhoneNumber(),
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -1394,6 +1405,18 @@ function InviteModal({ onClose }: { onClose: () => void }) {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  const inputStyle: React.CSSProperties = {
+    padding: "9px 12px",
+    background: "var(--parchment)",
+    border: "1px solid var(--rule)",
+    borderRadius: 2,
+    fontFamily: "var(--body)",
+    fontSize: 13,
+    color: "var(--ink)",
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "oklch(0.28 0.022 55 / 0.4)", backdropFilter: "blur(4px)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={onClose}>
       <div className="ca-panel" style={{ width: "100%", maxWidth: 440, padding: 32 }} onClick={e => e.stopPropagation()}>
@@ -1415,11 +1438,7 @@ function InviteModal({ onClose }: { onClose: () => void }) {
               {result.invite_url}
             </div>
             <div style={{ display: "flex", gap: 10 }}>
-              <button
-                className="ca-btn ca-btn-primary"
-                style={{ flex: 1 }}
-                onClick={handleCopy}
-              >
+              <button className="ca-btn ca-btn-primary" style={{ flex: 1 }} onClick={handleCopy}>
                 {copied ? "✓ Copied!" : "Copy link"}
               </button>
               <button className="ca-btn ca-btn-ghost" onClick={onClose}>Done</button>
@@ -1430,23 +1449,51 @@ function InviteModal({ onClose }: { onClose: () => void }) {
           </div>
         ) : (
           <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
-            {[
-              { label: "Full name", value: name, set: setName, type: "text", placeholder: "Alex Thompson", required: true },
-              { label: "Email address", value: email, set: setEmail, type: "email", placeholder: "alex@example.com", required: true },
-              { label: "WhatsApp number (optional)", value: phone, set: setPhone, type: "tel", placeholder: "+1 555 000 0000", required: false },
-            ].map((f) => (
-              <div key={f.label}>
-                <label style={{ display: "block", fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.15em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 6 }}>{f.label}</label>
-                <input type={f.type} value={f.value} onChange={e => f.set(e.target.value)} required={f.required} placeholder={f.placeholder}
-                  style={{ width: "100%", padding: "9px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)", outline: "none", boxSizing: "border-box" }} />
+
+            {/* Full name */}
+            <div>
+              <label style={{ display: "block", fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.15em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 6 }}>Full name</label>
+              <input type="text" value={name} onChange={e => setName(e.target.value)} required placeholder="Alex Thompson" style={{ ...inputStyle, width: "100%" }} />
+            </div>
+
+            {/* Email */}
+            <div>
+              <label style={{ display: "block", fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.15em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 6 }}>Email address</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="alex@example.com" style={{ ...inputStyle, width: "100%" }} />
+            </div>
+
+            {/* WhatsApp — country code + free-form number */}
+            <div>
+              <label style={{ display: "block", fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.15em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 6 }}>
+                WhatsApp number <span style={{ fontWeight: 400, opacity: 0.6 }}>(optional)</span>
+              </label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  type="text"
+                  value={countryCode}
+                  onChange={e => setCountryCode(e.target.value)}
+                  placeholder="+1"
+                  style={{ ...inputStyle, width: 64, flexShrink: 0 }}
+                />
+                <input
+                  type="text"
+                  value={phoneLocal}
+                  onChange={e => setPhoneLocal(e.target.value)}
+                  placeholder="5550001234"
+                  style={{ ...inputStyle, flex: 1 }}
+                />
               </div>
-            ))}
+              <p style={{ marginTop: 5, fontSize: 11, color: "var(--ink-mute)", fontFamily: "var(--serif)", fontStyle: "italic" }}>
+                Any format is fine — spaces, dashes, parentheses all work.
+              </p>
+            </div>
+
             <p style={{ fontSize: 12, color: "var(--ink-mute)", fontFamily: "var(--serif)", fontStyle: "italic", margin: 0 }}>
               If a WhatsApp number is provided, the invite link is sent automatically. Otherwise you&apos;ll get a link to share manually.
             </p>
             {error && <div style={{ padding: "10px 14px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13 }}>{error}</div>}
             <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-              <button type="submit" disabled={loading || !name.trim()} className="ca-btn ca-btn-terra" style={{ flex: 1 }}>{loading ? "Creating…" : "Create invite →"}</button>
+              <button type="submit" disabled={loading || !name.trim() || !email.trim()} className="ca-btn ca-btn-terra" style={{ flex: 1 }}>{loading ? "Creating…" : "Send invite →"}</button>
               <button type="button" className="ca-btn ca-btn-ghost" onClick={onClose}>Cancel</button>
             </div>
           </form>
