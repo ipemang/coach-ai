@@ -250,20 +250,32 @@ function JoinInner() {
     setSubmitting(true);
     try {
       const supabase = createBrowserSupabase();
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email: invite!.email!,
         password,
         options: {
           data: { full_name: invite?.athlete_name ?? "" },
           // Pass the invite token in the redirect URL as a fallback for
-        // incognito / private-browsing sessions where localStorage is wiped
-        // when the window closes. /auth/callback reads this if localStorage
-        // is empty.
-        emailRedirectTo: `${window.location.origin}/auth/callback?invite=${encodeURIComponent(token)}`,
+          // incognito / private-browsing sessions where localStorage is wiped
+          // when the window closes. /auth/callback reads this if localStorage
+          // is empty.
+          emailRedirectTo: `${window.location.origin}/auth/callback?invite=${encodeURIComponent(token)}`,
         },
       });
       if (error) { setFormError(error.message); setSubmitting(false); return; }
+
+      // Always save the invite token to localStorage so /auth/callback can
+      // find it whether the user confirms via email or gets an immediate session.
       localStorage.setItem("pending_athlete_invite", token);
+
+      if (data.session) {
+        // Email confirmation is disabled in Supabase — user is immediately
+        // signed in. Route through /auth/callback so the link-account logic runs.
+        window.location.href = `/auth/callback?invite=${encodeURIComponent(token)}`;
+        return;
+      }
+
+      // Email confirmation is enabled — show "check your email" screen.
       setDone(true);
     } catch {
       setFormError("Something went wrong. Please try again.");
