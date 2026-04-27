@@ -50,7 +50,8 @@ export async function middleware(request: NextRequest) {
   // ── Protect athlete routes ───────────────────────────────────────────────
   if (
     (pathname.startsWith("/athlete/dashboard") ||
-      pathname.startsWith("/athlete/onboarding")) &&
+      pathname.startsWith("/athlete/onboarding") ||
+      pathname.startsWith("/athlete/profile-update")) &&
     !user
   ) {
     const loginUrl = request.nextUrl.clone();

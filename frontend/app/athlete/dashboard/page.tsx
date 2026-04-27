@@ -395,6 +395,13 @@ export default function AthleteDashboardPage() {
             {profile?.full_name ?? ""}
           </span>
           <button
+            onClick={() => router.push("/athlete/profile-update")}
+            className="ca-btn ca-btn-ghost"
+            style={{ padding: "4px 10px", fontSize: 11 }}
+          >
+            Update profile
+          </button>
+          <button
             onClick={handleSignOut}
             className="ca-btn ca-btn-ghost"
             style={{ padding: "4px 10px", fontSize: 11 }}
