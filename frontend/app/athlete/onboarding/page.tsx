@@ -92,7 +92,7 @@ function VoiceButton({
     if (!SR) return;
     const recognition = new SR();
     recognition.lang = "en-US";
-    recognition.continuous = true;
+    recognition.continuous = false;   // stop after first utterance — prevents looping append (COA-100)
     recognition.interimResults = false;
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let transcript = "";
