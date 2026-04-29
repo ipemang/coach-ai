@@ -254,6 +254,7 @@ function FileUploadZone({ token, category, label, hint, accept }: {
 function StepTypeFork({ coachName, onSelect }: { coachName: string; onSelect: (type: string) => Promise<void> }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const options = [
     {
@@ -277,7 +278,13 @@ function StepTypeFork({ coachName, onSelect }: { coachName: string; onSelect: (t
     e.preventDefault();
     if (!selected) return;
     setLoading(true);
-    try { await onSelect(selected); } finally { setLoading(false); }
+    setError(null);
+    try {
+      await onSelect(selected);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setLoading(false);
+    }
   }
 
   return (
@@ -288,7 +295,7 @@ function StepTypeFork({ coachName, onSelect }: { coachName: string; onSelect: (t
       {options.map((o) => (
         <button
           key={o.key} type="button"
-          onClick={() => setSelected(o.key)}
+          onClick={() => { setSelected(o.key); setError(null); }}
           style={{
             textAlign: "left", padding: "14px 16px", borderRadius: 2, cursor: "pointer",
             border: `1.5px solid ${selected === o.key ? "var(--aegean-deep)" : "var(--rule)"}`,
@@ -300,6 +307,7 @@ function StepTypeFork({ coachName, onSelect }: { coachName: string; onSelect: (t
           <p style={{ margin: "3px 0 0", fontSize: 12, color: "var(--ink-soft)" }}>{o.desc}</p>
         </button>
       ))}
+      {error && <ErrorBanner msg={error} />}
       <button type="submit" disabled={!selected || loading} className="ca-btn ca-btn-primary"
         style={{ width: "100%", justifyContent: "center", padding: "11px", fontSize: 13, marginTop: 4, opacity: !selected || loading ? 0.5 : 1 }}>
         {loading ? "Saving…" : "Continue →"}
