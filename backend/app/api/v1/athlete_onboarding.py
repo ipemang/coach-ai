@@ -296,16 +296,26 @@ def _generate_ai_profile(athlete_data: dict) -> str:
     avail_time = availability.get("preferred_time", "not specified")
     avail_constraints = availability.get("constraints", "none")
 
+    existing_memory = (athlete_data.get("memory_summary") or "").strip()
+
     system_prompt = (
         "You are an expert endurance sports coach AI. "
         "Write a concise, factual athlete profile (4-6 sentences) based on the onboarding data. "
         "The profile is used as permanent context for AI coaching decisions — be specific and accurate. "
         "Do not invent details not present in the input. Write in third person. "
         "Prioritise: current level, training context, primary goal, key health/limiter notes, and coaching expectations. "
+        "If existing memory context is provided, incorporate and update it — do not discard prior knowledge. "
         "No greetings or sign-offs."
     )
 
-    user_prompt = f"""Generate an athlete profile for {name}:
+    memory_prefix = ""
+    if existing_memory:
+        memory_prefix = (
+            "EXISTING MEMORY CONTEXT (prior accumulated knowledge about this athlete — incorporate and update):\n"
+            f"{existing_memory}\n\n---\n\n"
+        )
+
+    user_prompt = f"""{memory_prefix}Generate an athlete profile for {name}:
 
 RELATIONSHIP: {athlete_type.replace("_", " ")} {f"({relationship_duration} with coach)" if relationship_duration != "not specified" else ""}
 SPORT: {sport} | LEVEL: {level} | YEARS TRAINING: {years if years is not None else "unknown"}
@@ -374,10 +384,8 @@ async def onboarding_complete(
         "onboarding_step": 7,
         "onboarding_complete": True,
         "ai_profile_summary": ai_profile,
+        "memory_summary": ai_profile,  # always refresh — AI profile already incorporates prior memory
     }
-    existing_memory = (row.data.get("memory_summary") or "").strip()
-    if not existing_memory:
-        update_payload["memory_summary"] = ai_profile
 
     _update_athlete(supabase, athlete_id, update_payload)
 

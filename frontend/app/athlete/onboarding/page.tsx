@@ -412,6 +412,7 @@ function StepAthleticBackground({ athleteType, onNext, onBack }: {
     e.preventDefault();
     if (!primarySport) { setError("Please select your primary sport."); return; }
     if (!fitnessLevel) { setError("Please select your current fitness level."); return; }
+    if (!competitiveHistory.trim()) { setError("Please describe your competitive history and race experience."); return; }
     setLoading(true); setError(null);
     try {
       await onNext({
@@ -456,7 +457,7 @@ function StepAthleticBackground({ athleteType, onNext, onBack }: {
       </div>
       <VoiceField
         label={isExisting ? "Your competitive history & key accomplishments" : "Competitive history & race experience"}
-        optional value={competitiveHistory} onChange={setCompetitiveHistory} rows={4}
+        value={competitiveHistory} onChange={setCompetitiveHistory} rows={4}
         placeholder="e.g. Completed 3 half marathons, best time 1:52. First triathlon 2022 (Olympic distance). DNF at 70.3 Miami in 2024 due to cramp."
       />
       {error && <ErrorBanner msg={error} />}
@@ -731,6 +732,13 @@ function StepLifestyle({ onNext, onBack }: { onNext: (d: object) => Promise<void
       </div>
       <VoiceField label="What do you want most from this coaching relationship?" optional value={expectations} onChange={setExpectations} rows={3}
         placeholder="e.g. A structured plan I can actually follow given my schedule. Accountability. Help with pacing strategy. Honest feedback on my weaknesses." />
+      <div style={{ display: "flex", gap: 10, padding: "10px 14px", background: "var(--linen)", border: "1px solid var(--rule)", borderRadius: 2, fontSize: 11, color: "var(--ink-mute)", lineHeight: 1.65 }}>
+        <span style={{ flexShrink: 0, fontSize: 14 }}>🔒</span>
+        <span>
+          <strong style={{ color: "var(--ink-soft)", fontWeight: 600 }}>Your data is protected.</strong>{" "}
+          All information you share — including health, medical, and lifestyle details — is stored securely and used exclusively to personalise your coaching experience. It is never sold, shared with third parties, or used for advertising. Health data is handled with the same care and confidentiality as protected health information (PHI) under applicable data protection standards.
+        </span>
+      </div>
       {error && <ErrorBanner msg={error} />}
       <NavButtons onBack={onBack} loading={loading} label="Continue →" />
     </form>

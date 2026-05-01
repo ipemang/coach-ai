@@ -235,6 +235,16 @@ async def upload_athlete_file(
         logger.error("[athlete_files] DB insert failed: %s", exc)
         raise HTTPException(status_code=500, detail="Database insert failed")
 
+    # Append file upload note to memory_summary immediately (before ingestion)
+    try:
+        cat_label = category or "general"
+        mem_note = f"\n\n[Document uploaded: {original_filename} (category: {cat_label}, size: {len(file_bytes) // 1024} KB)]"
+        athlete_row = supabase.table("athletes").select("memory_summary").eq("id", athlete_id).single().execute()
+        current_mem = (athlete_row.data.get("memory_summary") or "") if athlete_row.data else ""
+        supabase.table("athletes").update({"memory_summary": current_mem + mem_note}).eq("id", athlete_id).execute()
+    except Exception as mem_exc:
+        logger.warning("[athlete_files] Could not update memory_summary for athlete=%s: %s", athlete_id[:8], mem_exc)
+
     # Trigger ingestion asynchronously (only for text-extractable types)
     if file_ext in {"pdf", "txt", "md", "markdown"}:
         async def _ingest_bg():
