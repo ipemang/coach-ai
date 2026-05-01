@@ -192,6 +192,66 @@ function weeksUntil(dateStr: string): number {
   return Math.max(0, Math.round(diff / (7*24*60*60*1000)));
 }
 
+// ─── Week helpers + API mapping (COA-116) ─────────────────────────────────────
+function getWeekBounds(offsetWeeks: number): { start: string; end: string; label: string } {
+  const now = new Date();
+  const dow = now.getDay();
+  const daysToMon = dow === 0 ? -6 : 1 - dow;
+  const mon = new Date(now);
+  mon.setDate(now.getDate() + daysToMon + offsetWeeks * 7);
+  const sun = new Date(mon);
+  sun.setDate(mon.getDate() + 6);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const label = `${mon.toLocaleDateString('en-US', {month:'short', day:'numeric'})} – ${sun.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'})}`;
+  return { start: fmt(mon), end: fmt(sun), label };
+}
+function minsToDuration(m: number | null | undefined): string {
+  if (!m) return '';
+  const h = Math.floor(m / 60);
+  const min = Math.round(m % 60);
+  return `${h}:${String(min).padStart(2, '0')}:00`;
+}
+interface ApiWorkout {
+  id: string; athlete_id: string; scheduled_date: string; session_type: string;
+  title: string | null; distance_km: number | null; duration_min: number | null;
+  coaching_notes: string | null; athlete_notes: string | null;
+  status: string; compliance_pct: number | null;
+  actual_duration_min: number | null; actual_distance_km: number | null;
+}
+function apiWorkoutToItem(w: ApiWorkout): WorkoutItem {
+  const statusMap: Record<string, string> = { planned:'planned', completed:'met', missed:'missed', skipped:'missed' };
+  const hasActual = w.actual_duration_min != null || w.actual_distance_km != null;
+  return {
+    id: w.id,
+    date: w.scheduled_date,
+    sport: w.session_type || 'other',
+    title: w.title || w.session_type || 'Workout',
+    status: statusMap[w.status] || 'planned',
+    planned: {
+      duration: minsToDuration(w.duration_min) || undefined,
+      distance: w.distance_km != null ? `${w.distance_km}km` : undefined,
+    },
+    actual: hasActual ? {
+      duration: minsToDuration(w.actual_duration_min) || undefined,
+      distance: w.actual_distance_km != null ? `${w.actual_distance_km}km` : undefined,
+    } : null,
+    description: '',
+    coachNote: w.coaching_notes || null,
+    voiceMemos: [],
+    comments: w.athlete_notes ? [{ id:'an0', author:'felipe', text:w.athlete_notes, at:'' }] : [],
+    compliance: w.compliance_pct != null ? w.compliance_pct / 100 : null,
+  };
+}
+async function postMemoryEvent(token: string, kind: string, text: string): Promise<void> {
+  try {
+    await fetch(`${BACKEND}/api/v1/athlete/memory-events`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event_type: kind, content: text }),
+    });
+  } catch {}
+}
+
 // ─── App state (localStorage) ─────────────────────────────────────────────────
 const STATE_KEY = 'andes:state:v1';
 const DEFAULT_STATE: AppState = {
@@ -355,7 +415,7 @@ function TodaySnapshot({today, onOpen, onMarkComplete}: {today:WorkoutItem;onOpe
 function WeekMosaic({week, weekStart, weekLabel, weekOffset, onPrev, onNext, onThisWeek, onOpen, onMove}: {week:WorkoutItem[];weekStart:string;weekLabel:string;weekOffset:number;onPrev:()=>void;onNext:()=>void;onThisWeek:()=>void;onOpen:(w:WorkoutItem)=>void;onMove:(id:string,date:string)=>void}) {
   const [drag, setDrag] = useState<string|null>(null);
   const [over, setOver] = useState<string|null>(null);
-  const TODAY_KEY = '2026-04-27';
+  const TODAY_KEY = useMemo(()=>new Date().toISOString().slice(0,10), []);
   const days = useMemo(() => {
     const start = parseLocalDate(weekStart);
     return Array.from({length:7},(_,i) => { const d=new Date(start); d.setDate(start.getDate()+i); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; });
@@ -998,7 +1058,7 @@ function TopNav({active, onNav, onRefresh, refreshing, pendingCount, onLogout, a
 }
 
 // ─── Dashboard inner ──────────────────────────────────────────────────────────
-function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDeleteFile, uploadError}: {athlete:LiveAthlete;files:AthleteFile[];onSignOut:()=>void;uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;uploadError:string|null}) {
+function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDeleteFile, uploadError, initialCurrentWeek, initialLastWeek, authToken}: {athlete:LiveAthlete;files:AthleteFile[];onSignOut:()=>void;uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;uploadError:string|null;initialCurrentWeek:WorkoutItem[];initialLastWeek:WorkoutItem[];authToken:string|null}) {
   const [page, setPage] = useState<string>('today');
   const [profileTab, setProfileTab] = useState('report');
   const [settingsSection, setSettingsSection] = useState('Profile');
@@ -1011,14 +1071,38 @@ function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDelet
   const [seasonData, setSeasonData] = useState<Record<string,WorkoutItem[]>>({});
   const [blockOverrides, setBlockOverrides] = useState<Record<string,{order?:number}>>({});
   const [appState, updateState, logMemory] = useAppState();
+  const [dbMemory, setDbMemory] = useState<{at:number;kind:string;text:string}[]>([]);
 
   useEffect(()=>{ setSeasonData(buildSeasonData()); },[]);
 
-  const currentWeek = useMemo(()=>mergeWorkouts(CURRENT_WEEK, appState.workouts),[appState.workouts]);
-  const week = weekOffset===0?currentWeek:weekOffset===-1?LAST_WEEK:currentWeek;
-  const weekStart = weekOffset===0?'2026-04-27':weekOffset===-1?'2026-04-20':'2026-04-27';
-  const weekLabel = weekOffset===0?'Apr 27 – May 3, 2026':weekOffset===-1?'Apr 20–26, 2026':'Apr 27 – May 3, 2026';
-  const today = currentWeek.find(w=>w.date==='2026-04-27')||null;
+  // COA-117: load memory events from API on mount
+  useEffect(()=>{
+    if(!authToken) return;
+    fetch(`${BACKEND}/api/v1/athlete/memory-events?limit=100`,{headers:{Authorization:`Bearer ${authToken}`}})
+      .then(r=>r.ok?r.json():null)
+      .then(data=>{
+        if(!data) return;
+        setDbMemory((data as {id:string;event_type:string;content:string;created_at:string}[]).map(e=>({
+          at: new Date(e.created_at).getTime(),
+          kind: e.event_type,
+          text: e.content,
+        })));
+      }).catch(()=>{});
+  },[authToken]);
+
+  function pushDbMemory(kind:string, text:string) {
+    setDbMemory(prev=>[{at:Date.now(),kind,text},...prev]);
+  }
+
+  const todayStr = useMemo(()=>new Date().toISOString().slice(0,10), []);
+  const curBounds = useMemo(()=>getWeekBounds(0), []);
+  const prevBounds = useMemo(()=>getWeekBounds(-1), []);
+  const currentWeek = useMemo(()=>mergeWorkouts(initialCurrentWeek.length>0?initialCurrentWeek:CURRENT_WEEK, appState.workouts),[initialCurrentWeek, appState.workouts]);
+  const lastWeek = useMemo(()=>initialLastWeek.length>0?initialLastWeek:LAST_WEEK, [initialLastWeek]);
+  const week = weekOffset===0?currentWeek:weekOffset===-1?lastWeek:currentWeek;
+  const weekStart = weekOffset===0?curBounds.start:weekOffset===-1?prevBounds.start:curBounds.start;
+  const weekLabel = weekOffset===0?curBounds.label:weekOffset===-1?prevBounds.label:curBounds.label;
+  const today = currentWeek.find(w=>w.date===todayStr)||null;
 
   function handleNav(target:string) {
     if(target.startsWith('settings:')){setPage('settings');setSettingsSection(target.slice(9));}
@@ -1029,6 +1113,11 @@ function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDelet
     updateState(prev=>({...prev,workouts:{...prev.workouts,[w.id]:{...(prev.workouts[w.id]||{}),status:'met',compliance:1.0}}}));
     logMemory('complete',`Marked "${w.title}" as complete.`);
     setConfetti(true);setToast({title:'Workout complete ✓',body:`${w.title} logged.`});setSelectedWorkout(null);
+    if(authToken){
+      fetch(`${BACKEND}/api/v1/athlete/workouts/${w.id}/complete`,{method:'PATCH',headers:{Authorization:`Bearer ${authToken}`,'Content-Type':'application/json'},body:JSON.stringify({})}).catch(()=>{});
+      postMemoryEvent(authToken,'complete',`Marked "${w.title}" as complete.`);
+      pushDbMemory('complete',`Marked "${w.title}" as complete.`);
+    }
   }
   function handleMoveWorkout(id:string,date:string) {
     updateState(prev=>({...prev,workouts:{...prev.workouts,[id]:{...(prev.workouts[id]||{}),date}}}));
@@ -1038,11 +1127,20 @@ function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDelet
     const c:WComment={id:'c'+Date.now(),author:'felipe',text,at:new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}),pending:true};
     updateState(prev=>{const ex=prev.workouts[w.id]||{};return{...prev,workouts:{...prev.workouts,[w.id]:{...ex,comments:[...(ex.comments||w.comments||[]),c]}},pendingCount:prev.pendingCount+1};});
     logMemory('comment',`Comment on "${w.title}": "${text}"`);
+    if(authToken){
+      fetch(`${BACKEND}/api/v1/athlete/workouts/${w.id}/notes`,{method:'PATCH',headers:{Authorization:`Bearer ${authToken}`,'Content-Type':'application/json'},body:JSON.stringify({notes:text})}).catch(()=>{});
+      postMemoryEvent(authToken,'comment',`Comment on "${w.title}": "${text}"`);
+      pushDbMemory('comment',`Comment on "${w.title}": "${text}"`);
+    }
   }
   function handleAddVoiceMemo(w:WorkoutItem,len:number) {
     const m:VoiceMemo={id:'v'+Date.now(),length:len,transcript:'(transcribing…)',at:new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})};
     updateState(prev=>{const ex=prev.workouts[w.id]||{};return{...prev,workouts:{...prev.workouts,[w.id]:{...ex,voiceMemos:[...(ex.voiceMemos||w.voiceMemos||[]),m]}},pendingCount:prev.pendingCount+1};});
     logMemory('voice',`Voice memo (${len}s) on "${w.title}".`);
+    if(authToken){
+      postMemoryEvent(authToken,'voice_memo',`Voice memo (${len}s) on "${w.title}".`);
+      pushDbMemory('voice_memo',`Voice memo (${len}s) on "${w.title}".`);
+    }
   }
 
   return (
@@ -1063,7 +1161,7 @@ function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDelet
           </div>
         )}
         {page==='season'&&<Season onOpenWorkout={setSelectedWorkout} blockOverrides={blockOverrides} onMoveBlock={(id,order)=>setBlockOverrides(prev=>({...prev,[id]:{...prev[id],order}}))} seasonData={seasonData}/>}
-        {page==='profile'&&<Profile tab={profileTab} onTab={setProfileTab} memory={appState.memory} athlete={athlete} files={files} uploading={uploading} onUpload={onUpload} onDeleteFile={onDeleteFile} uploadError={uploadError}/>}
+        {page==='profile'&&<Profile tab={profileTab} onTab={setProfileTab} memory={dbMemory.length>0?dbMemory:appState.memory} athlete={athlete} files={files} uploading={uploading} onUpload={onUpload} onDeleteFile={onDeleteFile} uploadError={uploadError}/>}
         {page==='settings'&&<Settings tweaks={tweaks} setTweak={(k,v)=>setTweaks(prev=>({...prev,[k]:v}))} section={settingsSection} onSection={setSettingsSection} onLogout={onSignOut} athlete={athlete}/>}
       </main>
       {selectedWorkout&&<WorkoutDetail workout={selectedWorkout} onClose={()=>setSelectedWorkout(null)} onAddComment={text=>handleAddComment(selectedWorkout,text)} onAddVoiceMemo={len=>handleAddVoiceMemo(selectedWorkout,len)} onMarkComplete={()=>handleMarkComplete(selectedWorkout)} athleteInitials={athlete.initials}/>}
@@ -1081,6 +1179,9 @@ export default function AthleteDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string|null>(null);
+  const [currentWeekWorkouts, setCurrentWeekWorkouts] = useState<WorkoutItem[]>([]);
+  const [lastWeekWorkouts, setLastWeekWorkouts] = useState<WorkoutItem[]>([]);
+  const [authToken, setAuthToken] = useState<string|null>(null);
 
   async function getToken() {
     const sb = createBrowserSupabase();
@@ -1094,6 +1195,7 @@ export default function AthleteDashboardPage() {
       const {data:{session}} = await sb.auth.getSession();
       if(!session){router.replace('/login');return;}
       const token = session.access_token;
+      setAuthToken(token);
       try {
         const statusRes = await fetch(`${BACKEND}/api/v1/athlete/onboarding/status`,{headers:{Authorization:`Bearer ${token}`}});
         if(statusRes.ok){const d=await statusRes.json();if(!d.onboarding_complete){router.replace('/athlete/onboarding');return;}}
@@ -1101,9 +1203,13 @@ export default function AthleteDashboardPage() {
       let athleteId: string|null = null;
       try {const b64=token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');athleteId=JSON.parse(atob(b64+'=='.slice((b64.length%4)||4))).athlete_id;} catch{}
       if(!athleteId){router.replace('/athlete/onboarding');return;}
-      const [profRes,filesRes] = await Promise.allSettled([
+      const {start:curStart,end:curEnd} = getWeekBounds(0);
+      const {start:prevStart,end:prevEnd} = getWeekBounds(-1);
+      const [profRes,filesRes,curWRes,prevWRes] = await Promise.allSettled([
         sb.from('athletes').select('id,full_name,email,primary_sport,ai_profile_summary,target_event_name,target_event_date').eq('id',athleteId).single(),
         fetch(`${BACKEND}/api/v1/athlete/files`,{headers:{Authorization:`Bearer ${token}`}}),
+        fetch(`${BACKEND}/api/v1/athlete/workouts?from=${curStart}&to=${curEnd}`,{headers:{Authorization:`Bearer ${token}`}}),
+        fetch(`${BACKEND}/api/v1/athlete/workouts?from=${prevStart}&to=${prevEnd}`,{headers:{Authorization:`Bearer ${token}`}}),
       ]);
       if(profRes.status==='fulfilled'&&profRes.value.data){
         const p = profRes.value.data as Record<string,string>;
@@ -1126,6 +1232,12 @@ export default function AthleteDashboardPage() {
       }
       if(filesRes.status==='fulfilled'&&(filesRes.value as Response).ok){
         const d=await (filesRes.value as Response).json();setFiles(d);
+      }
+      if(curWRes.status==='fulfilled'&&(curWRes.value as Response).ok){
+        const d=await (curWRes.value as Response).json();setCurrentWeekWorkouts(d.map(apiWorkoutToItem));
+      }
+      if(prevWRes.status==='fulfilled'&&(prevWRes.value as Response).ok){
+        const d=await (prevWRes.value as Response).json();setLastWeekWorkouts(d.map(apiWorkoutToItem));
       }
       setLoading(false);
     }
@@ -1166,7 +1278,7 @@ export default function AthleteDashboardPage() {
     );
   }
 
-  return <DashboardInner athlete={athlete} files={files} onSignOut={handleSignOut} uploading={uploading} onUpload={handleUpload} onDeleteFile={handleDeleteFile} uploadError={uploadError}/>;
+  return <DashboardInner athlete={athlete} files={files} onSignOut={handleSignOut} uploading={uploading} onUpload={handleUpload} onDeleteFile={handleDeleteFile} uploadError={uploadError} initialCurrentWeek={currentWeekWorkouts} initialLastWeek={lastWeekWorkouts} authToken={authToken}/>;
 }
 
 // ─── Stat / Field / Comment helpers ──────────────────────────────────────────
