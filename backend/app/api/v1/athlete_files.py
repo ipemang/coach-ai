@@ -44,9 +44,11 @@ class AthleteFileOut(BaseModel):
     file_type: str
     category: Optional[str]
     description: Optional[str]
-    document_type: Optional[str]   # COA-66: dexa | blood_work | doctor_notes | training_plan | race_results | other
+    document_type: Optional[str]   # COA-66/119: dexa | blood_work | doctor_notes | training_plan | race_results | injury_history | other
     uploaded_by: Optional[str]     # COA-66: athlete | coach
     ai_accessible: bool
+    ai_summary: Optional[str]      # COA-119: AI-extracted key facts
+    ai_categorized: bool           # COA-119: true once AI has classified this file
     status: str
     size_bytes: Optional[int]
     chunk_count: Optional[int]
@@ -59,6 +61,111 @@ def _ext(filename: str) -> str:
     return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
 
+_VALID_DOC_TYPES = frozenset([
+    "dexa", "blood_work", "doctor_notes", "training_plan",
+    "race_results", "injury_history", "other"
+])
+
+
+def _ai_categorize_file(
+    supabase,
+    file_id: str,
+    text: str,
+    athlete_id: str,
+    coach_id: str,
+    original_filename: str,
+) -> None:
+    """COA-119: Run AI categorization + content extraction on an uploaded file.
+
+    Updates athlete_files.document_type, .ai_summary, .ai_categorized.
+    Also writes to athlete_memory_events with the AI summary.
+    Called from within _ingest_athlete_file after embedding succeeds.
+    """
+    from app.services.llm_client import LLMClient, LLMClientError
+    import json as _json
+
+    snippet = text[:3000].strip()
+    if not snippet:
+        return
+
+    system_prompt = (
+        "You are analyzing a health or training document uploaded to a sports coaching platform. "
+        "The athlete is an endurance athlete (triathlon, running, cycling). "
+        "Output ONLY a valid JSON object — no markdown, no explanation, no extra text. "
+        'Keys: "document_type" (string, one of: dexa|blood_work|doctor_notes|training_plan|race_results|injury_history|other), '
+        '"summary" (string, 2-4 sentences of the most training-relevant facts; flag anything requiring immediate coach attention).'
+    )
+    user_prompt = (
+        f"Filename: {original_filename}\n\n"
+        f"Document text (first 3000 characters):\n{snippet}"
+    )
+
+    try:
+        llm = LLMClient()
+        resp = llm.chat_completions(system=system_prompt, user=user_prompt)
+        raw = resp.content.strip()
+
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        parsed = _json.loads(raw)
+
+        doc_type = str(parsed.get("document_type", "other")).lower().strip()
+        if doc_type not in _VALID_DOC_TYPES:
+            doc_type = "other"
+        ai_summary = str(parsed.get("summary", "")).strip()[:1000]
+
+    except (LLMClientError, _json.JSONDecodeError, Exception) as exc:
+        logger.warning("[coa119] AI categorization failed for file=%s: %s", file_id[:8], exc)
+        return
+
+    if not ai_summary:
+        return
+
+    # Update athlete_files
+    try:
+        supabase.table("athlete_files").update({
+            "document_type": doc_type,
+            "ai_summary": ai_summary,
+            "ai_categorized": True,
+        }).eq("id", file_id).execute()
+    except Exception as exc:
+        logger.warning("[coa119] Failed to persist AI categorization for file=%s: %s", file_id[:8], exc)
+        return
+
+    # Write AI summary to memory_summary (replace generic note if present)
+    try:
+        mem_line = f"[{doc_type.replace('_', ' ').title()} uploaded: {ai_summary}]"
+        athlete_row = supabase.table("athletes").select("memory_summary").eq("id", athlete_id).single().execute()
+        current_mem = (athlete_row.data.get("memory_summary") or "") if athlete_row.data else ""
+        # Trim to keep under 4000 chars
+        combined = (current_mem + "\n\n" + mem_line).strip()
+        if len(combined) > 4000:
+            combined = combined[-4000:]
+        supabase.table("athletes").update({"memory_summary": combined}).eq("id", athlete_id).execute()
+    except Exception as exc:
+        logger.warning("[coa119] Failed to update memory_summary for athlete=%s: %s", athlete_id[:8], exc)
+
+    # Write to athlete_memory_events
+    try:
+        supabase.table("athlete_memory_events").insert({
+            "athlete_id": athlete_id,
+            "event_type": "file_upload",
+            "content": ai_summary[:500],
+            "metadata": {
+                "file_id": file_id,
+                "document_type": doc_type,
+                "filename": original_filename,
+            },
+        }).execute()
+    except Exception as exc:
+        logger.warning("[coa119] Failed to write file_upload memory event for file=%s: %s", file_id[:8], exc)
+
+    logger.info("[coa119] File=%s categorized as '%s' with AI summary", file_id[:8], doc_type)
+
+
 def _ingest_athlete_file(
     supabase,
     file_id: str,
@@ -66,6 +173,7 @@ def _ingest_athlete_file(
     file_type: str,
     athlete_id: str,
     coach_id: str,
+    original_filename: str = "document",
 ) -> int:
     """Synchronous ingestion — run via run_in_threadpool.
     Reuses the same extract/chunk/embed pipeline as coach documents,
@@ -147,6 +255,20 @@ def _ingest_athlete_file(
         }).eq("id", file_id).execute()
 
         logger.info("[athlete_ingest] file=%s processed — %d chunks stored", file_id[:8], len(chunks))
+
+        # COA-119: AI categorization + content extraction (non-fatal)
+        try:
+            _ai_categorize_file(
+                supabase=supabase,
+                file_id=file_id,
+                text=text,
+                athlete_id=athlete_id,
+                coach_id=coach_id,
+                original_filename=original_filename,
+            )
+        except Exception as cat_exc:
+            logger.warning("[athlete_ingest] AI categorization raised unexpectedly for file=%s: %s", file_id[:8], cat_exc)
+
         return len(chunks)
 
     except RuntimeError:
@@ -250,7 +372,8 @@ async def upload_athlete_file(
         async def _ingest_bg():
             try:
                 count = await run_in_threadpool(
-                    _ingest_athlete_file, supabase, file_id, file_bytes, file_ext, athlete_id, coach_id
+                    _ingest_athlete_file, supabase, file_id, file_bytes, file_ext,
+                    athlete_id, coach_id, original_filename,
                 )
                 logger.info("[athlete_files] Ingestion complete: file=%s chunks=%d", file_id[:8], count)
             except Exception as exc:
@@ -274,6 +397,8 @@ async def upload_athlete_file(
         document_type=row.get("document_type"),
         uploaded_by=row.get("uploaded_by", "athlete"),
         ai_accessible=row.get("ai_accessible", True),
+        ai_summary=row.get("ai_summary"),
+        ai_categorized=bool(row.get("ai_categorized", False)),
         status=row.get("status", "pending"),
         size_bytes=row.get("size_bytes"),
         chunk_count=row.get("chunk_count"),
@@ -318,6 +443,8 @@ async def list_athlete_files(
             document_type=r.get("document_type"),
             uploaded_by=r.get("uploaded_by", "athlete"),
             ai_accessible=r.get("ai_accessible", True),
+            ai_summary=r.get("ai_summary"),
+            ai_categorized=bool(r.get("ai_categorized", False)),
             status=r.get("status", "pending"),
             size_bytes=r.get("size_bytes"),
             chunk_count=r.get("chunk_count"),
@@ -381,6 +508,77 @@ async def delete_athlete_file(
     return {"deleted": True, "file_id": file_id}
 
 
+# ── COA-119: Athlete toggles AI access on their own file ─────────────────────
+
+class AthleteFilePrivacyRequest(BaseModel):
+    ai_accessible: bool
+
+
+@router.patch(
+    "/api/v1/athlete/files/{file_id}",
+    response_model=AthleteFileOut,
+    summary="Athlete toggles AI access on a file (COA-119)",
+)
+async def athlete_patch_file(
+    file_id: str,
+    body: AthleteFilePrivacyRequest,
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(require_roles("athlete", "authenticated")),
+):
+    """Toggle ai_accessible on one of the athlete's own files.
+
+    When ai_accessible=false the file stays in storage and is visible to the coach,
+    but its embedding chunks are excluded from all RAG queries.
+    """
+    supabase = getattr(request.app.state, "supabase_client", None)
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    athlete_id, _ = resolve_athlete_scope(principal)
+
+    # Verify ownership
+    try:
+        row_res = supabase.table("athlete_files").select("*").eq(
+            "id", file_id
+        ).eq("athlete_id", athlete_id).single().execute()
+        if not row_res.data:
+            raise HTTPException(status_code=404, detail="File not found")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        result = supabase.table("athlete_files").update({
+            "ai_accessible": body.ai_accessible,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", file_id).execute()
+        r = result.data[0] if result.data else {**row_res.data, "ai_accessible": body.ai_accessible}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to update file") from exc
+
+    logger.info(
+        "[coa119] Athlete=%s set ai_accessible=%s on file=%s",
+        athlete_id[:8], body.ai_accessible, file_id[:8],
+    )
+    return AthleteFileOut(
+        id=r["id"],
+        original_filename=r["original_filename"],
+        file_type=r["file_type"],
+        category=r.get("category"),
+        description=r.get("description"),
+        document_type=r.get("document_type"),
+        uploaded_by=r.get("uploaded_by", "athlete"),
+        ai_accessible=r.get("ai_accessible", True),
+        ai_summary=r.get("ai_summary"),
+        ai_categorized=bool(r.get("ai_categorized", False)),
+        status=r.get("status", "pending"),
+        size_bytes=r.get("size_bytes"),
+        chunk_count=r.get("chunk_count"),
+        created_at=str(r.get("created_at") or ""),
+    )
+
+
 # ── Coach: view an athlete's files ───────────────────────────────────────────
 
 @router.get(
@@ -433,6 +631,8 @@ async def coach_list_athlete_files(
             document_type=r.get("document_type"),
             uploaded_by=r.get("uploaded_by", "athlete"),
             ai_accessible=r.get("ai_accessible", True),
+            ai_summary=r.get("ai_summary"),
+            ai_categorized=bool(r.get("ai_categorized", False)),
             status=r.get("status", "pending"),
             size_bytes=r.get("size_bytes"),
             chunk_count=r.get("chunk_count"),
@@ -536,7 +736,7 @@ async def coach_upload_athlete_file(
             try:
                 count = await run_in_threadpool(
                     _ingest_athlete_file, supabase, file_id, file_bytes, file_ext,
-                    athlete_id, str(scope.coach_id),
+                    athlete_id, str(scope.coach_id), original_filename,
                 )
                 logger.info("[coa66] Coach upload ingestion: file=%s chunks=%d", file_id[:8], count)
             except Exception as exc:
@@ -560,6 +760,8 @@ async def coach_upload_athlete_file(
         document_type=row.get("document_type"),
         uploaded_by=row.get("uploaded_by", "coach"),
         ai_accessible=row.get("ai_accessible", True),
+        ai_summary=row.get("ai_summary"),
+        ai_categorized=bool(row.get("ai_categorized", False)),
         status=row.get("status", "pending"),
         size_bytes=row.get("size_bytes"),
         chunk_count=row.get("chunk_count"),
@@ -637,6 +839,8 @@ async def coach_patch_athlete_file(
         document_type=r.get("document_type"),
         uploaded_by=r.get("uploaded_by", "athlete"),
         ai_accessible=r.get("ai_accessible", True),
+        ai_summary=r.get("ai_summary"),
+        ai_categorized=bool(r.get("ai_categorized", False)),
         status=r.get("status", "pending"),
         size_bytes=r.get("size_bytes"),
         chunk_count=r.get("chunk_count"),

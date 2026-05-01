@@ -101,7 +101,7 @@ interface WorkoutItem {
   description: string; coachNote: string | null;
   voiceMemos: VoiceMemo[]; comments: WComment[]; compliance: number | null;
 }
-interface AthleteFile { id: string; original_filename: string; file_type: string; category: string; status: string; size_bytes: number; created_at: string; }
+interface AthleteFile { id: string; original_filename: string; file_type: string; category: string | null; status: string; size_bytes: number; created_at: string; document_type?: string | null; ai_summary?: string | null; ai_categorized?: boolean; ai_accessible?: boolean; uploaded_by?: string; }
 interface LiveAthlete { firstName: string; fullName: string; initials: string; email: string; type: string; goal: string; goalDate: string; weeksOut: number; aiProfile: string; ftp: number; thresholdPace: string; cssPace: string; }
 interface AppState { workouts: Record<string, Partial<WorkoutItem>>; blocks: Record<string, {order?:number}>; memory: {at:number;kind:string;text:string}[]; lastSync: Record<string,number>; pendingCount: number; }
 interface CoachProfile { id: string; name: string; initials: string; whatsapp: string | null; email: string | null; }
@@ -718,7 +718,7 @@ function CadenceBadge({cadence}: {cadence:string}) {
   return <span className="mono" style={{fontSize:9,padding:'2px 7px',background:k.bg,color:k.fg,border:`1px solid ${k.bd}`,borderRadius:2,textTransform:'uppercase',letterSpacing:'0.1em'}}>{k.label}</span>;
 }
 
-function Profile({tab, onTab, memory, athlete, files, uploading, onUpload, onDeleteFile, uploadError, coach}: {tab:string;onTab:(t:string)=>void;memory:{at:number;kind:string;text:string}[];athlete:LiveAthlete;files:AthleteFile[];uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;uploadError:string|null;coach:ReturnType<typeof buildCoachDisplay>}) {
+function Profile({tab, onTab, memory, athlete, files, uploading, onUpload, onDeleteFile, onToggleAiAccess, uploadError, coach}: {tab:string;onTab:(t:string)=>void;memory:{at:number;kind:string;text:string}[];athlete:LiveAthlete;files:AthleteFile[];uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;onToggleAiAccess:(id:string,val:boolean)=>void;uploadError:string|null;coach:ReturnType<typeof buildCoachDisplay>}) {
   const r = WEEKLY_REPORT;
   const [reportExpanded, setReportExpanded] = useState(false);
   const [openPast, setOpenPast] = useState<typeof PAST_REPORTS[0]|null>(null);
@@ -856,7 +856,7 @@ function Profile({tab, onTab, memory, athlete, files, uploading, onUpload, onDel
         {tab==='files'&&(
           <div className="panel" style={{padding:28}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
-              <div><span className="eyebrow">My files</span><p style={{margin:'4px 0 0',fontSize:12.5,color:'var(--ink-soft)'}}>Visible to you and Coach Andes.</p></div>
+              <div><span className="eyebrow">My files</span><p style={{margin:'4px 0 0',fontSize:12.5,color:'var(--ink-soft)'}}>Visible to you and your coach. Toggle AI access per file below.</p></div>
               <label style={{display:'inline-flex',alignItems:'center',gap:6,padding:'8px 14px',background:uploading?'var(--linen-deep)':'var(--ink)',border:'1px solid',borderColor:uploading?'var(--rule)':'var(--ink)',borderRadius:2,color:uploading?'var(--ink-mute)':'var(--parchment)',fontSize:12,fontFamily:'var(--body)',fontWeight:500,cursor:uploading?'not-allowed':'pointer'}}>
                 {uploading?'Uploading…':'+ Upload'}
                 <input type="file" accept=".pdf,.txt,.md,.csv" onChange={e=>{const f=e.target.files?.[0];if(f)onUpload(f);e.target.value='';}} disabled={uploading} style={{display:'none'}}/>
@@ -865,14 +865,64 @@ function Profile({tab, onTab, memory, athlete, files, uploading, onUpload, onDel
             {uploadError&&<div style={{padding:'8px 12px',background:'var(--terracotta-wash)',border:'1px solid var(--terracotta-soft)',borderRadius:2,fontSize:12,color:'var(--terracotta-deep)',marginBottom:12}}>{uploadError}</div>}
             <p className="mono" style={{fontSize:10,color:'var(--ink-mute)',margin:'0 0 16px'}}>PDF · TXT · MD · CSV · max 50 MB</p>
             {files.length===0?<div style={{textAlign:'center',padding:'2rem',color:'var(--ink-mute)'}}><p style={{fontSize:28,margin:'0 0 8px'}}>📁</p><p className="mono" style={{fontSize:11}}>No files uploaded yet</p></div>:(
-              <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                {files.map(f=>(
-                  <div key={f.id} style={{display:'flex',alignItems:'center',gap:14,padding:'12px 14px',border:'1px solid var(--rule-soft)',borderRadius:3,background:'var(--linen)'}}>
-                    <div className="placeholder-stripe" style={{width:32,height:40,borderRadius:2,fontSize:8}}>{f.file_type?.toUpperCase()||'FILE'}</div>
-                    <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,color:'var(--ink)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.original_filename}</div><div className="mono" style={{fontSize:10,color:'var(--ink-mute)',marginTop:2}}>{f.size_bytes?(f.size_bytes<1024*1024?`${(f.size_bytes/1024).toFixed(0)} KB`:`${(f.size_bytes/(1024*1024)).toFixed(1)} MB`):''} · {new Date(f.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})} {f.status==='processed'?'· ✓ Indexed':f.status==='pending'?'· Indexing…':''}</div></div>
-                    <button onClick={()=>onDeleteFile(f.id)} className="btn btn-ghost" style={{color:'var(--terracotta-deep)',flexShrink:0}}>×</button>
-                  </div>
-                ))}
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                {files.map(f=>{
+                  const aiOn = f.ai_accessible !== false;
+                  const docTypeLabel: Record<string,string> = {dexa:'DEXA',blood_work:'Blood Work',doctor_notes:'Doctor Notes',training_plan:'Training Plan',race_results:'Race Results',injury_history:'Injury History',other:'Other'};
+                  const sizeFmt = f.size_bytes?(f.size_bytes<1024*1024?`${(f.size_bytes/1024).toFixed(0)} KB`:`${(f.size_bytes/(1024*1024)).toFixed(1)} MB`):'';
+                  return (
+                    <div key={f.id} style={{padding:'12px 14px',border:'1px solid var(--rule-soft)',borderRadius:3,background:'var(--linen)'}}>
+                      {/* Top row: icon + name + type badge + delete */}
+                      <div style={{display:'flex',alignItems:'flex-start',gap:12}}>
+                        <div className="placeholder-stripe" style={{width:28,height:36,borderRadius:2,fontSize:7,flexShrink:0}}>{f.file_type?.toUpperCase()||'FILE'}</div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                            <span style={{fontSize:13,color:'var(--ink)',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'calc(100% - 80px)'}}>{f.original_filename}</span>
+                            {f.document_type&&f.ai_categorized&&(
+                              <span style={{fontSize:9,fontFamily:'var(--mono)',padding:'1px 6px',border:'1px solid var(--aegean-soft)',borderRadius:2,color:'var(--aegean-deep)',background:'var(--aegean-wash)',flexShrink:0}}>
+                                {docTypeLabel[f.document_type]||f.document_type}
+                              </span>
+                            )}
+                            {f.status==='pending'&&!f.ai_categorized&&(
+                              <span style={{fontSize:9,fontFamily:'var(--mono)',color:'var(--ink-mute)',flexShrink:0}}>Processing…</span>
+                            )}
+                          </div>
+                          <div className="mono" style={{fontSize:10,color:'var(--ink-mute)',marginTop:3}}>
+                            {sizeFmt}{sizeFmt&&' · '}{new Date(f.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}
+                            {f.status==='processed'&&f.ai_categorized?' · ✦ AI categorized':f.status==='processed'?' · ✓ Indexed':''}
+                          </div>
+                          {/* AI Summary */}
+                          {f.ai_summary&&(
+                            <p style={{margin:'6px 0 0',fontSize:11.5,color:'var(--ink-mute)',lineHeight:1.5,fontStyle:'italic'}}>
+                              {f.ai_summary.length>160?f.ai_summary.slice(0,160)+'…':f.ai_summary}
+                            </p>
+                          )}
+                        </div>
+                        <button onClick={()=>onDeleteFile(f.id)} className="btn btn-ghost" style={{color:'var(--terracotta-deep)',flexShrink:0,alignSelf:'flex-start'}}>×</button>
+                      </div>
+                      {/* Privacy toggle row */}
+                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginTop:10,paddingTop:8,borderTop:'1px solid var(--rule-soft)'}}>
+                        <span style={{fontSize:10.5,color:'var(--ink-mute)',fontFamily:'var(--mono)'}}>
+                          {aiOn?'🤖 AI can read this':'🔒 AI blocked'}
+                        </span>
+                        <button
+                          onClick={()=>onToggleAiAccess(f.id,!aiOn)}
+                          title={aiOn?'Click to block AI access':'Click to allow AI access'}
+                          style={{
+                            width:36,height:20,borderRadius:10,border:'none',cursor:'pointer',
+                            background:aiOn?'var(--aegean-deep)':'var(--rule)',
+                            position:'relative',transition:'background 200ms',padding:0,flexShrink:0,
+                          }}
+                        >
+                          <span style={{
+                            display:'block',width:14,height:14,borderRadius:'50%',background:'white',
+                            position:'absolute',top:3,left:aiOn?'calc(100% - 17px)':'3px',transition:'left 200ms',
+                          }}/>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1108,7 +1158,7 @@ function TopNav({active, onNav, onRefresh, refreshing, pendingCount, onLogout, a
 }
 
 // ─── Dashboard inner ──────────────────────────────────────────────────────────
-function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDeleteFile, uploadError, initialCurrentWeek, initialLastWeek, authToken, coachProfile}: {athlete:LiveAthlete;files:AthleteFile[];onSignOut:()=>void;uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;uploadError:string|null;initialCurrentWeek:WorkoutItem[];initialLastWeek:WorkoutItem[];authToken:string|null;coachProfile:CoachProfile|null}) {
+function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDeleteFile, onToggleAiAccess, uploadError, initialCurrentWeek, initialLastWeek, authToken, coachProfile}: {athlete:LiveAthlete;files:AthleteFile[];onSignOut:()=>void;uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;onToggleAiAccess:(id:string,val:boolean)=>void;uploadError:string|null;initialCurrentWeek:WorkoutItem[];initialLastWeek:WorkoutItem[];authToken:string|null;coachProfile:CoachProfile|null}) {
   const [page, setPage] = useState<string>('today');
   const [profileTab, setProfileTab] = useState('report');
   const [settingsSection, setSettingsSection] = useState('Profile');
@@ -1217,7 +1267,7 @@ function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDelet
           </div>
         )}
         {page==='season'&&<Season onOpenWorkout={setSelectedWorkout} blockOverrides={blockOverrides} onMoveBlock={(id,order)=>setBlockOverrides(prev=>({...prev,[id]:{...prev[id],order}}))} seasonData={seasonData}/>}
-        {page==='profile'&&<Profile tab={profileTab} onTab={setProfileTab} memory={dbMemory.length>0?dbMemory:appState.memory} athlete={athlete} files={files} uploading={uploading} onUpload={onUpload} onDeleteFile={onDeleteFile} uploadError={uploadError} coach={coach}/>}
+        {page==='profile'&&<Profile tab={profileTab} onTab={setProfileTab} memory={dbMemory.length>0?dbMemory:appState.memory} athlete={athlete} files={files} uploading={uploading} onUpload={onUpload} onDeleteFile={onDeleteFile} onToggleAiAccess={onToggleAiAccess} uploadError={uploadError} coach={coach}/>}
         {page==='settings'&&<Settings tweaks={tweaks} setTweak={(k,v)=>setTweaks(prev=>({...prev,[k]:v}))} section={settingsSection} onSection={setSettingsSection} onLogout={onSignOut} athlete={athlete} coach={coach} onSaveProfile={handleSaveProfile}/>}
       </main>
       {selectedWorkout&&<WorkoutDetail workout={selectedWorkout} onClose={()=>setSelectedWorkout(null)} onAddComment={text=>handleAddComment(selectedWorkout,text)} onAddVoiceMemo={len=>handleAddVoiceMemo(selectedWorkout,len)} onMarkComplete={()=>handleMarkComplete(selectedWorkout)} athleteInitials={athlete.initials} coachInitials={coach.initials} coachName={coach.name}/>}
@@ -1323,6 +1373,21 @@ export default function AthleteDashboardPage() {
     try{await fetch(`${BACKEND}/api/v1/athlete/files/${id}`,{method:'DELETE',headers:{Authorization:`Bearer ${token}`}});setFiles(prev=>prev.filter(f=>f.id!==id));}catch{}
   }
 
+  async function handleToggleAiAccess(id:string, val:boolean) {
+    // Optimistic local update
+    setFiles(prev=>prev.map(f=>f.id===id?{...f,ai_accessible:val}:f));
+    const token=await getToken();if(!token)return;
+    try{
+      const res=await fetch(`${BACKEND}/api/v1/athlete/files/${id}`,{
+        method:'PATCH',
+        headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},
+        body:JSON.stringify({ai_accessible:val}),
+      });
+      if(res.ok){const updated=await res.json();setFiles(prev=>prev.map(f=>f.id===id?updated:f));}
+      else{setFiles(prev=>prev.map(f=>f.id===id?{...f,ai_accessible:!val}:f));} // revert on error
+    }catch{setFiles(prev=>prev.map(f=>f.id===id?{...f,ai_accessible:!val}:f));}
+  }
+
   async function handleSignOut() {
     const sb=createBrowserSupabase();await sb.auth.signOut();router.replace('/login');
   }
@@ -1339,7 +1404,7 @@ export default function AthleteDashboardPage() {
     );
   }
 
-  return <DashboardInner athlete={athlete} files={files} onSignOut={handleSignOut} uploading={uploading} onUpload={handleUpload} onDeleteFile={handleDeleteFile} uploadError={uploadError} initialCurrentWeek={currentWeekWorkouts} initialLastWeek={lastWeekWorkouts} authToken={authToken} coachProfile={coachProfile}/>;
+  return <DashboardInner athlete={athlete} files={files} onSignOut={handleSignOut} uploading={uploading} onUpload={handleUpload} onDeleteFile={handleDeleteFile} onToggleAiAccess={handleToggleAiAccess} uploadError={uploadError} initialCurrentWeek={currentWeekWorkouts} initialLastWeek={lastWeekWorkouts} authToken={authToken} coachProfile={coachProfile}/>;
 }
 
 // ─── Stat / Field / Comment helpers ──────────────────────────────────────────
