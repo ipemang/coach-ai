@@ -104,6 +104,7 @@ interface WorkoutItem {
 interface AthleteFile { id: string; original_filename: string; file_type: string; category: string; status: string; size_bytes: number; created_at: string; }
 interface LiveAthlete { firstName: string; fullName: string; initials: string; email: string; type: string; goal: string; goalDate: string; weeksOut: number; aiProfile: string; ftp: number; thresholdPace: string; cssPace: string; }
 interface AppState { workouts: Record<string, Partial<WorkoutItem>>; blocks: Record<string, {order?:number}>; memory: {at:number;kind:string;text:string}[]; lastSync: Record<string,number>; pendingCount: number; }
+interface CoachProfile { id: string; name: string; initials: string; whatsapp: string | null; email: string | null; }
 
 // ─── Static data ──────────────────────────────────────────────────────────────
 const SPORT_GLYPHS: Record<string,string> = { run:'↗', bike:'◐', swim:'≈', strength:'▤', brick:'⊕', rest:'○', yoga:'◇' };
@@ -167,7 +168,21 @@ const PAST_REPORTS = [
   {id:'r3',weekOf:'2026-03-30',cadence:'block',title:'Build II block report (4 weeks)',summary:'FTP test confirmed +6W (242→248). Run threshold pace dropped 4 sec/km.',compliance:0.84,hours:44.1,hoursPlanned:52.0},
 ];
 
-const STATIC_COACH = { name:'Coach Andes', initials:'MA', title:'Head Coach · Endurance', bio:'Former pro triathlete (2009–2018). Coaches Ironman athletes with a polarized, periodized approach. Believes the long, easy work is the work.', philosophy:"Discipline is freedom. The plan is the plan — until it isn't.", whatsapp:'+15551234567', whatsappLabel:'+1 (555) 123-4567', reportCadence:'weekly', reportDay:'Monday', email:'marco@andes.coaching' };
+const STATIC_COACH = { name:'Coach Andes', initials:'CA', title:'Head Coach · Endurance', bio:'Coaches endurance athletes with a polarized, periodized approach. Believes the long, easy work is the work.', philosophy:"Discipline is freedom. The plan is the plan — until it isn't.", whatsapp:'+15551234567', whatsappLabel:'+1 (555) 123-4567', reportCadence:'weekly', reportDay:'Monday', email:'coach@andes.ia' };
+function buildCoachDisplay(live: CoachProfile | null) {
+  if (!live) return STATIC_COACH;
+  const wa = live.whatsapp || STATIC_COACH.whatsapp;
+  const waDigits = wa?.replace(/\D/g,'') || '';
+  const waLabel = waDigits.length >= 10 ? `+${waDigits.slice(0,1)} (${waDigits.slice(1,4)}) ${waDigits.slice(4,7)}-${waDigits.slice(7)}` : wa || '';
+  return {
+    ...STATIC_COACH,
+    name: live.name,
+    initials: live.initials,
+    email: live.email || STATIC_COACH.email,
+    whatsapp: wa || STATIC_COACH.whatsapp,
+    whatsappLabel: waLabel,
+  };
+}
 
 const BIOMETRICS = { connected:true, device:'Whoop 4.0', recovery:78, strain:14.2, hrv:62, rhr:48, sleepScore:91, sleepHours:7.8, trend7:[62,71,65,80,74,70,78] };
 
@@ -373,7 +388,7 @@ function WorkoutCard({w, onClick, draggable, onDragStart, onDragOver, onDrop, is
 }
 
 // ─── TodaySnapshot ────────────────────────────────────────────────────────────
-function TodaySnapshot({today, onOpen, onMarkComplete}: {today:WorkoutItem;onOpen:(w:WorkoutItem)=>void;onMarkComplete:(w:WorkoutItem)=>void}) {
+function TodaySnapshot({today, onOpen, onMarkComplete, coachInitials, coachName}: {today:WorkoutItem;onOpen:(w:WorkoutItem)=>void;onMarkComplete:(w:WorkoutItem)=>void;coachInitials?:string;coachName?:string}) {
   const isDone = today.status==='met'||today.status==='partial';
   return (
     <div className="panel lift" onClick={()=>onOpen(today)} style={{padding:28,cursor:'pointer',borderTop:'3px solid var(--ink)',background:'var(--parchment)'}}>
@@ -395,9 +410,9 @@ function TodaySnapshot({today, onOpen, onMarkComplete}: {today:WorkoutItem;onOpe
       </div>
       {today.coachNote&&(
         <div style={{marginTop:18,paddingTop:16,borderTop:'1px solid var(--rule-soft)',display:'flex',gap:12,alignItems:'flex-start'}}>
-          <div className="avatar avatar-coach avatar-sm" style={{width:26,height:26,fontSize:10}}>{STATIC_COACH.initials}</div>
+          <div className="avatar avatar-coach avatar-sm" style={{width:26,height:26,fontSize:10}}>{coachInitials||STATIC_COACH.initials}</div>
           <div style={{flex:1}}>
-            <div className="eyebrow eyebrow-terracotta" style={{fontSize:9.5,marginBottom:4}}>Coach Andes · Note</div>
+            <div className="eyebrow eyebrow-terracotta" style={{fontSize:9.5,marginBottom:4}}>{coachName||STATIC_COACH.name} · Note</div>
             <p style={{margin:0,fontSize:13,color:'var(--ink)',lineHeight:1.55,fontStyle:'italic'}}>"{today.coachNote}"</p>
           </div>
         </div>
@@ -703,11 +718,11 @@ function CadenceBadge({cadence}: {cadence:string}) {
   return <span className="mono" style={{fontSize:9,padding:'2px 7px',background:k.bg,color:k.fg,border:`1px solid ${k.bd}`,borderRadius:2,textTransform:'uppercase',letterSpacing:'0.1em'}}>{k.label}</span>;
 }
 
-function Profile({tab, onTab, memory, athlete, files, uploading, onUpload, onDeleteFile, uploadError}: {tab:string;onTab:(t:string)=>void;memory:{at:number;kind:string;text:string}[];athlete:LiveAthlete;files:AthleteFile[];uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;uploadError:string|null}) {
+function Profile({tab, onTab, memory, athlete, files, uploading, onUpload, onDeleteFile, uploadError, coach}: {tab:string;onTab:(t:string)=>void;memory:{at:number;kind:string;text:string}[];athlete:LiveAthlete;files:AthleteFile[];uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;uploadError:string|null;coach:ReturnType<typeof buildCoachDisplay>}) {
   const r = WEEKLY_REPORT;
   const [reportExpanded, setReportExpanded] = useState(false);
   const [openPast, setOpenPast] = useState<typeof PAST_REPORTS[0]|null>(null);
-  const waNumber = STATIC_COACH.whatsapp.replace(/[^\d]/g,'');
+  const waNumber = (coach.whatsapp||'').replace(/[^\d]/g,'');
   const waUrl = `https://wa.me/${waNumber}?text=${encodeURIComponent('Hey Coach — quick question about this week.')}`;
   return (
     <div style={{display:'grid',gridTemplateColumns:'300px 1fr',gap:24}}>
@@ -720,7 +735,7 @@ function Profile({tab, onTab, memory, athlete, files, uploading, onUpload, onDel
             <PRow label="Goal event" value={athlete.goal||'—'}/>
             <PRow label="Race date" value={athlete.goalDate||'—'}/>
             <PRow label="Weeks out" value={String(athlete.weeksOut)}/>
-            <PRow label="Coach" value={STATIC_COACH.name}/>
+            <PRow label="Coach" value={coach.name}/>
           </div>
         </div>
         <div className="panel" style={{padding:22}}>
@@ -757,9 +772,9 @@ function Profile({tab, onTab, memory, athlete, files, uploading, onUpload, onDel
                 <BigStat label="Sessions" value="6/7" large/>
               </div>
               <div style={{display:'flex',gap:14,marginBottom:28,alignItems:'flex-start'}}>
-                <div className="avatar avatar-coach" style={{width:44,height:44,fontSize:16}}>{STATIC_COACH.initials}</div>
+                <div className="avatar avatar-coach" style={{width:44,height:44,fontSize:16}}>{coach.initials}</div>
                 <div style={{flex:1}}>
-                  <div className="eyebrow eyebrow-terracotta" style={{fontSize:9.5,marginBottom:6}}>From Coach Andes</div>
+                  <div className="eyebrow eyebrow-terracotta" style={{fontSize:9.5,marginBottom:6}}>From {coach.name}</div>
                   {r.fromCoach.split('\n\n').map((p,i)=><p key={i} className="display" style={{margin:i?'14px 0 0':0,fontSize:15,lineHeight:1.6,color:'var(--ink)'}}>{p}</p>)}
                 </div>
               </div>
@@ -804,12 +819,12 @@ function Profile({tab, onTab, memory, athlete, files, uploading, onUpload, onDel
         {tab==='coach'&&(
           <div className="panel" style={{padding:'32px 36px'}}>
             <div style={{display:'flex',alignItems:'flex-start',gap:20,marginBottom:24}}>
-              <div className="avatar avatar-coach" style={{width:88,height:88,fontSize:30}}>{STATIC_COACH.initials}</div>
-              <div style={{flex:1}}><span className="eyebrow eyebrow-terracotta">Your coach</span><h2 className="display" style={{fontSize:32,margin:'4px 0 4px',letterSpacing:'-0.02em'}}>{STATIC_COACH.name}</h2><div className="mono" style={{fontSize:11,color:'var(--ink-mute)',textTransform:'uppercase',letterSpacing:'0.12em'}}>{STATIC_COACH.title}</div></div>
-              <a href={waUrl} target="_blank" rel="noopener noreferrer" className="btn btn-primary" style={{display:'inline-flex',alignItems:'center',gap:8,textDecoration:'none'}}>WhatsApp</a>
+              <div className="avatar avatar-coach" style={{width:88,height:88,fontSize:30}}>{coach.initials}</div>
+              <div style={{flex:1}}><span className="eyebrow eyebrow-terracotta">Your coach</span><h2 className="display" style={{fontSize:32,margin:'4px 0 4px',letterSpacing:'-0.02em'}}>{coach.name}</h2><div className="mono" style={{fontSize:11,color:'var(--ink-mute)',textTransform:'uppercase',letterSpacing:'0.12em'}}>{coach.title}</div></div>
+              {waNumber&&<a href={waUrl} target="_blank" rel="noopener noreferrer" className="btn btn-primary" style={{display:'inline-flex',alignItems:'center',gap:8,textDecoration:'none'}}>WhatsApp</a>}
             </div>
-            <p style={{margin:'0 0 22px',fontSize:14,color:'var(--ink-soft)',lineHeight:1.7}}>{STATIC_COACH.bio}</p>
-            <div className="pullquote" style={{fontSize:20,marginBottom:24}}>"{STATIC_COACH.philosophy}"</div>
+            <p style={{margin:'0 0 22px',fontSize:14,color:'var(--ink-soft)',lineHeight:1.7}}>{coach.bio}</p>
+            <div className="pullquote" style={{fontSize:20,marginBottom:24}}>"{coach.philosophy}"</div>
             <div style={{paddingTop:22,borderTop:'1px solid var(--rule-soft)'}}>
               <span className="eyebrow">How we train together</span>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:18,marginTop:14}}>
@@ -824,7 +839,7 @@ function Profile({tab, onTab, memory, athlete, files, uploading, onUpload, onDel
         {tab==='memory'&&(
           <div className="panel" style={{padding:28}}>
             <span className="eyebrow">Athlete memory</span>
-            <h2 className="display" style={{fontSize:22,margin:'6px 0 6px'}}>What Coach Andes knows about you</h2>
+            <h2 className="display" style={{fontSize:22,margin:'6px 0 6px'}}>What {coach.name} knows about you</h2>
             <p style={{fontSize:13,color:'var(--ink-soft)',margin:'0 0 20px',lineHeight:1.6}}>An append-only log sent to coach.ai as context for every report.</p>
             <div style={{display:'flex',flexDirection:'column'}}>
               {[...memory].reverse().map((m,i)=>(
@@ -873,7 +888,7 @@ function Profile({tab, onTab, memory, athlete, files, uploading, onUpload, onDel
             </div>
             <div style={{padding:'24px 32px'}}>
               <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:24,marginBottom:24,paddingBottom:24,borderBottom:'1px solid var(--rule-soft)'}}><BigStat label="Hours" value={String(openPast.hours)} unit={`/ ${openPast.hoursPlanned}h`}/><BigStat label="Compliance" value={`${Math.round(openPast.compliance*100)}%`}/><BigStat label="Cadence" value={openPast.cadence}/></div>
-              <div style={{display:'flex',gap:14,alignItems:'flex-start'}}><div className="avatar avatar-coach" style={{width:40,height:40,fontSize:14}}>{STATIC_COACH.initials}</div><div style={{flex:1}}><div className="eyebrow eyebrow-terracotta" style={{fontSize:9.5,marginBottom:6}}>From Coach Andes</div><p className="display" style={{margin:0,fontSize:15,lineHeight:1.65,color:'var(--ink)'}}>{openPast.summary}</p></div></div>
+              <div style={{display:'flex',gap:14,alignItems:'flex-start'}}><div className="avatar avatar-coach" style={{width:40,height:40,fontSize:14}}>{coach.initials}</div><div style={{flex:1}}><div className="eyebrow eyebrow-terracotta" style={{fontSize:9.5,marginBottom:6}}>From {coach.name}</div><p className="display" style={{margin:0,fontSize:15,lineHeight:1.65,color:'var(--ink)'}}>{openPast.summary}</p></div></div>
             </div>
           </div>
         </div>
@@ -895,8 +910,23 @@ function FieldRow({label,sub,children}: {label:string;sub?:string;children:React
 function SectionTitle({children}: {children:React.ReactNode}) {
   return <div className="display" style={{fontSize:16,color:'var(--ink)',margin:'20px 0 8px',paddingTop:18,borderTop:'1px solid var(--rule-soft)'}}>{children}</div>;
 }
-function Settings({tweaks, setTweak, section: sectionProp, onSection, onLogout, athlete}: {tweaks:Record<string,unknown>;setTweak:(k:string,v:unknown)=>void;section:string;onSection:(s:string)=>void;onLogout:()=>void;athlete:LiveAthlete}) {
+function Settings({tweaks, setTweak, section: sectionProp, onSection, onLogout, athlete, coach, onSaveProfile}: {tweaks:Record<string,unknown>;setTweak:(k:string,v:unknown)=>void;section:string;onSection:(s:string)=>void;onLogout:()=>void;athlete:LiveAthlete;coach:ReturnType<typeof buildCoachDisplay>;onSaveProfile:(data:{full_name?:string;email?:string;target_event_name?:string;target_event_date?:string})=>Promise<void>}) {
   const section = sectionProp;
+  const [fullName, setFullName] = useState(athlete.fullName);
+  const [email, setEmail] = useState(athlete.email);
+  const [goal, setGoal] = useState(athlete.goal);
+  const [goalDate, setGoalDate] = useState(athlete.goalDate);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string|null>(null);
+
+  async function handleSave() {
+    if(section!=='Profile') return;
+    setSaving(true);setSaveMsg(null);
+    try{await onSaveProfile({full_name:fullName,email,target_event_name:goal,target_event_date:goalDate});setSaveMsg('Saved ✓');}
+    catch{setSaveMsg('Save failed — try again.');}
+    finally{setSaving(false);setTimeout(()=>setSaveMsg(null),2500);}
+  }
+
   return (
     <div className="panel" style={{display:'grid',gridTemplateColumns:'240px 1fr',minHeight:640,padding:0,overflow:'hidden',background:'var(--parchment)'}}>
       <aside style={{borderRight:'1px solid var(--rule-soft)',padding:'28px 0',background:'var(--linen)'}}>
@@ -915,10 +945,10 @@ function Settings({tweaks, setTweak, section: sectionProp, onSection, onLogout, 
         <div className="mono" style={{fontSize:10.5,color:'var(--ink-mute)',marginBottom:28}}>Changes save to your profile and sync to your coach.</div>
         {section==='Profile'&&(
           <div>
-            <FieldRow label="Full name"><input className="input" defaultValue={athlete.fullName}/></FieldRow>
-            <FieldRow label="Email"><input className="input" defaultValue={athlete.email}/></FieldRow>
-            <FieldRow label="Goal event"><input className="input" defaultValue={athlete.goal}/></FieldRow>
-            <FieldRow label="Goal date"><input className="input" type="date" defaultValue={athlete.goalDate} style={{maxWidth:200}}/></FieldRow>
+            <FieldRow label="Full name"><input className="input" value={fullName} onChange={e=>setFullName(e.target.value)}/></FieldRow>
+            <FieldRow label="Email"><input className="input" value={email} onChange={e=>setEmail(e.target.value)}/></FieldRow>
+            <FieldRow label="Goal event"><input className="input" value={goal} onChange={e=>setGoal(e.target.value)}/></FieldRow>
+            <FieldRow label="Goal date"><input className="input" type="date" value={goalDate} onChange={e=>setGoalDate(e.target.value)} style={{maxWidth:200}}/></FieldRow>
             <SectionTitle>Session</SectionTitle>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:14,padding:16,border:'1px solid var(--rule-soft)',background:'var(--linen)',borderRadius:3}}>
               <div><div style={{fontSize:13,color:'var(--ink)',fontWeight:500}}>Sign out of all devices</div><div className="mono" style={{fontSize:10.5,color:'var(--ink-mute)',marginTop:2}}>You'll need to sign in again on web and iOS.</div></div>
@@ -950,12 +980,29 @@ function Settings({tweaks, setTweak, section: sectionProp, onSection, onLogout, 
             ))}
           </div>
         )}
+        {section==='Equipment'&&(
+          <div>
+            <p style={{fontSize:13,color:'var(--ink-soft)',margin:'0 0 20px',lineHeight:1.6}}>Your equipment list is shared with your coach to inform training recommendations.</p>
+            {[{cat:'Bike',items:['Road bike · Cervélo R5','Race wheels · Zipp 404']},{cat:'Run',items:['Race shoes · Nike Vaporfly 3','Training shoes · Saucony Ride 17']},{cat:'Swim',items:['Wetsuit · BlueSeventy Helix','Goggles · Speedo Biofuse']}].map(g=>(
+              <div key={g.cat} style={{marginBottom:20}}>
+                <div className="eyebrow" style={{marginBottom:10}}>{g.cat}</div>
+                {g.items.map((item,i)=>(
+                  <div key={i} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 14px',border:'1px solid var(--rule-soft)',borderRadius:3,background:'var(--linen)',marginBottom:6}}>
+                    <span style={{flex:1,fontSize:13,color:'var(--ink)'}}>{item}</span>
+                    <button className="btn btn-ghost" style={{fontSize:11,color:'var(--terracotta-deep)'}}>× Remove</button>
+                  </div>
+                ))}
+                <button className="btn btn-ghost" style={{fontSize:12,marginTop:4}}>+ Add {g.cat.toLowerCase()}</button>
+              </div>
+            ))}
+          </div>
+        )}
         {section==='Coaches'&&(
           <div>
             <div style={{padding:20,border:'1px solid var(--rule-soft)',background:'var(--linen)',borderRadius:3}}>
               <div style={{display:'flex',gap:14,alignItems:'center'}}>
-                <div className="avatar avatar-coach" style={{width:48,height:48,fontSize:17}}>{STATIC_COACH.initials}</div>
-                <div style={{flex:1}}><div className="display" style={{fontSize:17,color:'var(--ink)'}}>{STATIC_COACH.name}</div><div className="mono" style={{fontSize:10,color:'var(--ink-mute)',textTransform:'uppercase',letterSpacing:'0.1em'}}>{STATIC_COACH.title}</div></div>
+                <div className="avatar avatar-coach" style={{width:48,height:48,fontSize:17}}>{coach.initials}</div>
+                <div style={{flex:1}}><div className="display" style={{fontSize:17,color:'var(--ink)'}}>{coach.name}</div><div className="mono" style={{fontSize:10,color:'var(--ink-mute)',textTransform:'uppercase',letterSpacing:'0.1em'}}>{coach.title}</div></div>
                 <span className="mono" style={{fontSize:10,padding:'4px 10px',background:'var(--olive-wash)',color:'var(--olive-deep)',border:'1px solid var(--olive-soft)',borderRadius:2,textTransform:'uppercase'}}>Primary</span>
               </div>
             </div>
@@ -991,10 +1038,13 @@ function Settings({tweaks, setTweak, section: sectionProp, onSection, onLogout, 
             {['Terms of Use','Privacy Policy','HIPAA','Sources & Citations'].map(l=><a key={l} href="#" style={{fontSize:14,color:'var(--ink)',textDecoration:'none',padding:'12px 16px',border:'1px solid var(--rule-soft)',borderRadius:3,background:'var(--linen)',display:'flex',justifyContent:'space-between'}}>{l} <span style={{color:'var(--ink-faint)'}}>↗</span></a>)}
           </div>
         )}
-        <div style={{marginTop:36,paddingTop:20,borderTop:'1px solid var(--rule-soft)',display:'flex',justifyContent:'flex-end',gap:8}}>
-          <button className="btn btn-ghost">Cancel</button>
-          <button className="btn btn-primary">Save</button>
-        </div>
+        {section==='Profile'&&(
+          <div style={{marginTop:36,paddingTop:20,borderTop:'1px solid var(--rule-soft)',display:'flex',alignItems:'center',justifyContent:'flex-end',gap:12}}>
+            {saveMsg&&<span className="mono" style={{fontSize:11,color:saveMsg.startsWith('Saved')?'var(--olive-deep)':'var(--terracotta-deep)'}}>{saveMsg}</span>}
+            <button className="btn btn-ghost" onClick={()=>{setFullName(athlete.fullName);setEmail(athlete.email);setGoal(athlete.goal);setGoalDate(athlete.goalDate);}}>Cancel</button>
+            <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving?'Saving…':'Save'}</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1058,7 +1108,7 @@ function TopNav({active, onNav, onRefresh, refreshing, pendingCount, onLogout, a
 }
 
 // ─── Dashboard inner ──────────────────────────────────────────────────────────
-function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDeleteFile, uploadError, initialCurrentWeek, initialLastWeek, authToken}: {athlete:LiveAthlete;files:AthleteFile[];onSignOut:()=>void;uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;uploadError:string|null;initialCurrentWeek:WorkoutItem[];initialLastWeek:WorkoutItem[];authToken:string|null}) {
+function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDeleteFile, uploadError, initialCurrentWeek, initialLastWeek, authToken, coachProfile}: {athlete:LiveAthlete;files:AthleteFile[];onSignOut:()=>void;uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;uploadError:string|null;initialCurrentWeek:WorkoutItem[];initialLastWeek:WorkoutItem[];authToken:string|null;coachProfile:CoachProfile|null}) {
   const [page, setPage] = useState<string>('today');
   const [profileTab, setProfileTab] = useState('report');
   const [settingsSection, setSettingsSection] = useState('Profile');
@@ -1072,6 +1122,7 @@ function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDelet
   const [blockOverrides, setBlockOverrides] = useState<Record<string,{order?:number}>>({});
   const [appState, updateState, logMemory] = useAppState();
   const [dbMemory, setDbMemory] = useState<{at:number;kind:string;text:string}[]>([]);
+  const coach = useMemo(()=>buildCoachDisplay(coachProfile), [coachProfile]);
 
   useEffect(()=>{ setSeasonData(buildSeasonData()); },[]);
 
@@ -1119,6 +1170,11 @@ function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDelet
       pushDbMemory('complete',`Marked "${w.title}" as complete.`);
     }
   }
+  async function handleSaveProfile(data:{full_name?:string;email?:string;target_event_name?:string;target_event_date?:string}) {
+    if(!authToken) throw new Error('Not authenticated');
+    const res = await fetch(`${BACKEND}/api/v1/athlete/profile`,{method:'PATCH',headers:{Authorization:`Bearer ${authToken}`,'Content-Type':'application/json'},body:JSON.stringify(data)});
+    if(!res.ok) throw new Error('Save failed');
+  }
   function handleMoveWorkout(id:string,date:string) {
     updateState(prev=>({...prev,workouts:{...prev.workouts,[id]:{...(prev.workouts[id]||{}),date}}}));
     logMemory('reschedule',`Moved workout to ${date}.`);
@@ -1151,7 +1207,7 @@ function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDelet
         {page==='today'&&(
           <div style={{display:'grid',gridTemplateColumns:'1fr 320px',gap:24}}>
             <div style={{display:'flex',flexDirection:'column',gap:20}}>
-              {today&&<TodaySnapshot today={today} onOpen={setSelectedWorkout} onMarkComplete={handleMarkComplete}/>}
+              {today&&<TodaySnapshot today={today} onOpen={setSelectedWorkout} onMarkComplete={handleMarkComplete} coachInitials={coach.initials} coachName={coach.name}/>}
               <WeekMosaic week={week} weekStart={weekStart} weekLabel={weekLabel} weekOffset={weekOffset} onPrev={()=>setWeekOffset(o=>o-1)} onNext={()=>setWeekOffset(o=>o+1)} onThisWeek={()=>setWeekOffset(0)} onOpen={setSelectedWorkout} onMove={handleMoveWorkout}/>
               <WeekSummary week={week} athlete={athlete}/>
             </div>
@@ -1161,10 +1217,10 @@ function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDelet
           </div>
         )}
         {page==='season'&&<Season onOpenWorkout={setSelectedWorkout} blockOverrides={blockOverrides} onMoveBlock={(id,order)=>setBlockOverrides(prev=>({...prev,[id]:{...prev[id],order}}))} seasonData={seasonData}/>}
-        {page==='profile'&&<Profile tab={profileTab} onTab={setProfileTab} memory={dbMemory.length>0?dbMemory:appState.memory} athlete={athlete} files={files} uploading={uploading} onUpload={onUpload} onDeleteFile={onDeleteFile} uploadError={uploadError}/>}
-        {page==='settings'&&<Settings tweaks={tweaks} setTweak={(k,v)=>setTweaks(prev=>({...prev,[k]:v}))} section={settingsSection} onSection={setSettingsSection} onLogout={onSignOut} athlete={athlete}/>}
+        {page==='profile'&&<Profile tab={profileTab} onTab={setProfileTab} memory={dbMemory.length>0?dbMemory:appState.memory} athlete={athlete} files={files} uploading={uploading} onUpload={onUpload} onDeleteFile={onDeleteFile} uploadError={uploadError} coach={coach}/>}
+        {page==='settings'&&<Settings tweaks={tweaks} setTweak={(k,v)=>setTweaks(prev=>({...prev,[k]:v}))} section={settingsSection} onSection={setSettingsSection} onLogout={onSignOut} athlete={athlete} coach={coach} onSaveProfile={handleSaveProfile}/>}
       </main>
-      {selectedWorkout&&<WorkoutDetail workout={selectedWorkout} onClose={()=>setSelectedWorkout(null)} onAddComment={text=>handleAddComment(selectedWorkout,text)} onAddVoiceMemo={len=>handleAddVoiceMemo(selectedWorkout,len)} onMarkComplete={()=>handleMarkComplete(selectedWorkout)} athleteInitials={athlete.initials}/>}
+      {selectedWorkout&&<WorkoutDetail workout={selectedWorkout} onClose={()=>setSelectedWorkout(null)} onAddComment={text=>handleAddComment(selectedWorkout,text)} onAddVoiceMemo={len=>handleAddVoiceMemo(selectedWorkout,len)} onMarkComplete={()=>handleMarkComplete(selectedWorkout)} athleteInitials={athlete.initials} coachInitials={coach.initials} coachName={coach.name}/>}
       <Confetti show={confetti} onDone={()=>setConfetti(false)}/>
       {toast&&<Toast show={!!toast} title={toast.title} body={toast.body} onDone={()=>setToast(null)}/>}
     </div>
@@ -1182,6 +1238,7 @@ export default function AthleteDashboardPage() {
   const [currentWeekWorkouts, setCurrentWeekWorkouts] = useState<WorkoutItem[]>([]);
   const [lastWeekWorkouts, setLastWeekWorkouts] = useState<WorkoutItem[]>([]);
   const [authToken, setAuthToken] = useState<string|null>(null);
+  const [coachProfile, setCoachProfile] = useState<CoachProfile|null>(null);
 
   async function getToken() {
     const sb = createBrowserSupabase();
@@ -1205,11 +1262,12 @@ export default function AthleteDashboardPage() {
       if(!athleteId){router.replace('/athlete/onboarding');return;}
       const {start:curStart,end:curEnd} = getWeekBounds(0);
       const {start:prevStart,end:prevEnd} = getWeekBounds(-1);
-      const [profRes,filesRes,curWRes,prevWRes] = await Promise.allSettled([
+      const [profRes,filesRes,curWRes,prevWRes,coachRes] = await Promise.allSettled([
         sb.from('athletes').select('id,full_name,email,primary_sport,ai_profile_summary,target_event_name,target_event_date').eq('id',athleteId).single(),
         fetch(`${BACKEND}/api/v1/athlete/files`,{headers:{Authorization:`Bearer ${token}`}}),
         fetch(`${BACKEND}/api/v1/athlete/workouts?from=${curStart}&to=${curEnd}`,{headers:{Authorization:`Bearer ${token}`}}),
         fetch(`${BACKEND}/api/v1/athlete/workouts?from=${prevStart}&to=${prevEnd}`,{headers:{Authorization:`Bearer ${token}`}}),
+        fetch(`${BACKEND}/api/v1/athlete/coach`,{headers:{Authorization:`Bearer ${token}`}}),
       ]);
       if(profRes.status==='fulfilled'&&profRes.value.data){
         const p = profRes.value.data as Record<string,string>;
@@ -1238,6 +1296,9 @@ export default function AthleteDashboardPage() {
       }
       if(prevWRes.status==='fulfilled'&&(prevWRes.value as Response).ok){
         const d=await (prevWRes.value as Response).json();setLastWeekWorkouts(d.map(apiWorkoutToItem));
+      }
+      if(coachRes.status==='fulfilled'&&(coachRes.value as Response).ok){
+        const d=await (coachRes.value as Response).json();setCoachProfile(d);
       }
       setLoading(false);
     }
@@ -1278,7 +1339,7 @@ export default function AthleteDashboardPage() {
     );
   }
 
-  return <DashboardInner athlete={athlete} files={files} onSignOut={handleSignOut} uploading={uploading} onUpload={handleUpload} onDeleteFile={handleDeleteFile} uploadError={uploadError} initialCurrentWeek={currentWeekWorkouts} initialLastWeek={lastWeekWorkouts} authToken={authToken}/>;
+  return <DashboardInner athlete={athlete} files={files} onSignOut={handleSignOut} uploading={uploading} onUpload={handleUpload} onDeleteFile={handleDeleteFile} uploadError={uploadError} initialCurrentWeek={currentWeekWorkouts} initialLastWeek={lastWeekWorkouts} authToken={authToken} coachProfile={coachProfile}/>;
 }
 
 // ─── Stat / Field / Comment helpers ──────────────────────────────────────────
@@ -1288,13 +1349,13 @@ function Stat({label,value,unit,delta}: {label:string;value:number|string;unit?:
 function Field({label,value}: {label:string;value:string}) {
   return <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',gap:12}}><span className="mono" style={{fontSize:10,color:'var(--ink-mute)',textTransform:'uppercase',letterSpacing:'0.1em'}}>{label}</span><span className="mono" style={{fontSize:14,color:'var(--ink)',fontWeight:500}}>{value}</span></div>;
 }
-function WComment({c, athleteInitials}: {c:WComment;athleteInitials:string}) {
+function WComment({c, athleteInitials, coachInitials, coachName}: {c:WComment;athleteInitials:string;coachInitials?:string;coachName?:string}) {
   const isCoach = c.author==='coach';
   return (
     <div style={{display:'flex',gap:10,alignItems:'flex-start'}}>
-      <div className={`avatar avatar-sm${isCoach?' avatar-coach':''}`}>{isCoach?STATIC_COACH.initials:athleteInitials}</div>
+      <div className={`avatar avatar-sm${isCoach?' avatar-coach':''}`}>{isCoach?(coachInitials||STATIC_COACH.initials):athleteInitials}</div>
       <div style={{flex:1}}>
-        <div style={{display:'flex',alignItems:'baseline',gap:8}}><span style={{fontSize:12.5,fontWeight:500,color:'var(--ink)'}}>{isCoach?'Coach Andes':'You'}</span><span className="mono" style={{fontSize:9.5,color:'var(--ink-mute)'}}>{c.at}</span>{c.pending&&<span className="pending-badge" style={{fontSize:8.5}}>Pending review</span>}</div>
+        <div style={{display:'flex',alignItems:'baseline',gap:8}}><span style={{fontSize:12.5,fontWeight:500,color:'var(--ink)'}}>{isCoach?(coachName||STATIC_COACH.name):'You'}</span><span className="mono" style={{fontSize:9.5,color:'var(--ink-mute)'}}>{c.at}</span>{c.pending&&<span className="pending-badge" style={{fontSize:8.5}}>Pending review</span>}</div>
         <p style={{margin:'4px 0 0',fontSize:13,color:'var(--ink)',lineHeight:1.5}}>{c.text}</p>
       </div>
     </div>
@@ -1302,7 +1363,7 @@ function WComment({c, athleteInitials}: {c:WComment;athleteInitials:string}) {
 }
 
 // ─── WorkoutDetail modal ──────────────────────────────────────────────────────
-function WorkoutDetail({workout, onClose, onAddComment, onAddVoiceMemo, onMarkComplete, athleteInitials}: {workout:WorkoutItem;onClose:()=>void;onAddComment:(t:string)=>void;onAddVoiceMemo:(len:number)=>void;onMarkComplete:()=>void;athleteInitials:string}) {
+function WorkoutDetail({workout, onClose, onAddComment, onAddVoiceMemo, onMarkComplete, athleteInitials, coachInitials, coachName}: {workout:WorkoutItem;onClose:()=>void;onAddComment:(t:string)=>void;onAddVoiceMemo:(len:number)=>void;onMarkComplete:()=>void;athleteInitials:string;coachInitials?:string;coachName?:string}) {
   const [newComment, setNewComment] = useState('');
   const [recording, setRecording] = useState(false);
   const [recTime, setRecTime] = useState(0);
@@ -1354,14 +1415,14 @@ function WorkoutDetail({workout, onClose, onAddComment, onAddVoiceMemo, onMarkCo
           {workout.description&&<div style={{marginBottom:24}}><div className="eyebrow" style={{marginBottom:10}}>Workout</div><p style={{margin:0,fontSize:13.5,color:'var(--ink)',lineHeight:1.7,whiteSpace:'pre-line'}}>{workout.description}</p></div>}
           {workout.coachNote&&(
             <div style={{padding:18,background:'var(--terracotta-wash)',border:'1px solid var(--terracotta-soft)',borderLeft:'3px solid var(--terracotta-deep)',marginBottom:24,borderRadius:2}}>
-              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}><div className="avatar avatar-coach avatar-sm">{STATIC_COACH.initials}</div><span className="eyebrow eyebrow-terracotta" style={{fontSize:9.5}}>Coach Andes</span></div>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}><div className="avatar avatar-coach avatar-sm">{coachInitials||STATIC_COACH.initials}</div><span className="eyebrow eyebrow-terracotta" style={{fontSize:9.5}}>{coachName||STATIC_COACH.name}</span></div>
               <p className="display" style={{margin:0,fontSize:16,lineHeight:1.5,color:'var(--ink)'}}>"{workout.coachNote}"</p>
             </div>
           )}
           <div style={{marginBottom:16}}>
             <div className="eyebrow" style={{marginBottom:10}}>Conversation</div>
             <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:14}}>
-              {allComments.length===0?<p className="mono" style={{fontSize:11,color:'var(--ink-mute)',margin:0}}>No comments yet.</p>:allComments.map((c,i)=><WComment key={c.id||i} c={c as WComment} athleteInitials={athleteInitials}/>)}
+              {allComments.length===0?<p className="mono" style={{fontSize:11,color:'var(--ink-mute)',margin:0}}>No comments yet.</p>:allComments.map((c,i)=><WComment key={c.id||i} c={c as WComment} athleteInitials={athleteInitials} coachInitials={coachInitials} coachName={coachName}/>)}
             </div>
             {recording?(
               <div style={{display:'flex',alignItems:'center',gap:12,padding:14,background:'var(--terracotta-wash)',border:'1px solid var(--terracotta-soft)',borderRadius:3}}>

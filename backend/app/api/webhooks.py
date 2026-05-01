@@ -1458,6 +1458,21 @@ async def _handle_athlete_message(
     except Exception as exc:
         logger.error("[webhook] Failed to store check-in: %s", exc)
 
+    # COA-112: Log inbound athlete WhatsApp message to memory feed (fire-and-forget)
+    try:
+        supabase.table("athlete_memory_events").insert({
+            "athlete_id": athlete.athlete_id,
+            "event_type": "whatsapp_athlete",
+            "content": text[:500],
+            "metadata": {
+                "checkin_id": str(checkin_id) if checkin_id else None,
+                "wa_msg_id": wa_msg_id,
+                "is_voice": is_voice,
+            },
+        }).execute()
+    except Exception as mem_exc:
+        logger.warning("[COA-112] Failed to log athlete WhatsApp message to memory: %s", mem_exc)
+
     # COA-84 + COA-91: Strava sync is now fire-and-forget — it was on the critical path
     # (up to 5s) and risked hitting Meta's 20s webhook timeout. Data is written to DB
     # and will be available in athlete.current_state on the next message.
@@ -1581,6 +1596,19 @@ async def _handle_athlete_message(
         if suggestion_text:
             await _send_whatsapp_message(request, sender, suggestion_text)
             logger.info("[webhook] Auto-sent AI reply to athlete=%s", athlete.athlete_id)
+            # COA-112: Log AI auto-reply to athlete's memory feed
+            try:
+                supabase.table("athlete_memory_events").insert({
+                    "athlete_id": athlete.athlete_id,
+                    "event_type": "whatsapp_coach",
+                    "content": suggestion_text[:500],
+                    "metadata": {
+                        "suggestion_id": str(suggestion_id) if suggestion_id else None,
+                        "auto_send": True,
+                    },
+                }).execute()
+            except Exception as mem_exc:
+                logger.warning("[COA-112] Failed to log AI auto-reply to memory: %s", mem_exc)
         if coach_wa:
             if workout_adjustment:
                 adj_summary = (
@@ -1843,6 +1871,21 @@ async def _handle_coach_message(
     if athlete_phone:
         await _send_whatsapp_message(request, athlete_phone, reply_body)
         logger.info("[webhook][COA-49] Reply sent to athlete at %s", _mask_phone(athlete_phone))
+        # COA-112: Log coach reply to athlete's memory feed
+        try:
+            athlete_id_for_memory = suggestion.get("athlete_id")
+            if athlete_id_for_memory:
+                supabase.table("athlete_memory_events").insert({
+                    "athlete_id": str(athlete_id_for_memory),
+                    "event_type": "whatsapp_coach",
+                    "content": reply_body[:500],
+                    "metadata": {
+                        "suggestion_id": str(suggestion_id) if suggestion_id else None,
+                        "action": action,
+                    },
+                }).execute()
+        except Exception as mem_exc:
+            logger.warning("[COA-112] Failed to log coach reply to athlete memory: %s", mem_exc)
     else:
         logger.warning("[webhook][COA-49] No athlete phone for suggestion=%s -- skipping send", suggestion_id)
 
