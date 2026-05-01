@@ -750,7 +750,10 @@ function Profile({tab, onTab, memory, athlete, files, reports, uploading, onUplo
         </div>
         {athlete.aiProfile&&(
           <div className="panel" style={{padding:22,background:'var(--aegean-wash)',borderColor:'var(--aegean-soft)'}}>
-            <span className="eyebrow eyebrow-aegean">AI Profile</span>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+              <span className="eyebrow eyebrow-aegean">AI Profile</span>
+              <a href="/athlete/profile-update" style={{fontSize:10.5,fontFamily:'var(--mono)',color:'var(--aegean-deep)',textDecoration:'none',letterSpacing:'0.06em',opacity:0.8}}>↺ Update</a>
+            </div>
             <p style={{margin:'10px 0 0',fontSize:12.5,color:'var(--ink)',lineHeight:1.65}}>{athlete.aiProfile}</p>
           </div>
         )}
@@ -1178,6 +1181,7 @@ function Settings({tweaks, setTweak, section: sectionProp, onSection, onLogout, 
 function UserMenu({athlete, onNav, onLogout}: {athlete:LiveAthlete;onNav:(t:string)=>void;onLogout:()=>void}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const router = useRouter();
   useEffect(()=>{ function h(e:MouseEvent){if(ref.current&&!ref.current.contains(e.target as Node))setOpen(false);} document.addEventListener('mousedown',h); return()=>document.removeEventListener('mousedown',h); },[]);
   return (
     <div ref={ref} style={{position:'relative'}}>
@@ -1193,6 +1197,7 @@ function UserMenu({athlete, onNav, onLogout}: {athlete:LiveAthlete;onNav:(t:stri
             {[['Profile','profile'],['Settings','settings'],['Apps & devices','settings:Apps & Devices']].map(([label,target])=>(
               <button key={label} onClick={()=>{setOpen(false);onNav(target);}} className="menu-item">{label}</button>
             ))}
+            <button onClick={()=>{setOpen(false);router.push('/athlete/profile-update');}} className="menu-item" style={{color:'var(--aegean-deep)'}}>↺ Update my profile</button>
           </div>
           <div style={{borderTop:'1px solid var(--rule-soft)',padding:'6px 0'}}>
             <button onClick={()=>{setOpen(false);onLogout();}} className="menu-item" style={{color:'var(--terracotta-deep)'}}>Sign out</button>
