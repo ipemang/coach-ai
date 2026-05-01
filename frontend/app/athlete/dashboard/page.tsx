@@ -102,6 +102,7 @@ interface WorkoutItem {
   voiceMemos: VoiceMemo[]; comments: WComment[]; compliance: number | null;
 }
 interface AthleteFile { id: string; original_filename: string; file_type: string; category: string | null; status: string; size_bytes: number; created_at: string; document_type?: string | null; ai_summary?: string | null; ai_categorized?: boolean; ai_accessible?: boolean; uploaded_by?: string; }
+interface TrainingReport { id: string; athlete_id: string; coach_id: string; period_type: string; period_start: string; period_end: string; title: string; summary_text: string | null; full_text: string | null; highlights: string[]; watchouts: string[]; status: string; published_at: string | null; created_at: string; }
 interface LiveAthlete { firstName: string; fullName: string; initials: string; email: string; type: string; goal: string; goalDate: string; weeksOut: number; aiProfile: string; ftp: number; thresholdPace: string; cssPace: string; }
 interface AppState { workouts: Record<string, Partial<WorkoutItem>>; blocks: Record<string, {order?:number}>; memory: {at:number;kind:string;text:string}[]; lastSync: Record<string,number>; pendingCount: number; }
 interface CoachProfile { id: string; name: string; initials: string; whatsapp: string | null; email: string | null; }
@@ -718,11 +719,12 @@ function CadenceBadge({cadence}: {cadence:string}) {
   return <span className="mono" style={{fontSize:9,padding:'2px 7px',background:k.bg,color:k.fg,border:`1px solid ${k.bd}`,borderRadius:2,textTransform:'uppercase',letterSpacing:'0.1em'}}>{k.label}</span>;
 }
 
-function Profile({tab, onTab, memory, athlete, files, uploading, onUpload, onDeleteFile, onToggleAiAccess, uploadError, coach}: {tab:string;onTab:(t:string)=>void;memory:{at:number;kind:string;text:string}[];athlete:LiveAthlete;files:AthleteFile[];uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;onToggleAiAccess:(id:string,val:boolean)=>void;uploadError:string|null;coach:ReturnType<typeof buildCoachDisplay>}) {
-  const r = WEEKLY_REPORT;
+function Profile({tab, onTab, memory, athlete, files, reports, uploading, onUpload, onDeleteFile, onToggleAiAccess, uploadError, coach}: {tab:string;onTab:(t:string)=>void;memory:{at:number;kind:string;text:string}[];athlete:LiveAthlete;files:AthleteFile[];reports:TrainingReport[];uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;onToggleAiAccess:(id:string,val:boolean)=>void;uploadError:string|null;coach:ReturnType<typeof buildCoachDisplay>}) {
   const [reportExpanded, setReportExpanded] = useState(false);
-  const [openPast, setOpenPast] = useState<typeof PAST_REPORTS[0]|null>(null);
+  const [openReport, setOpenReport] = useState<TrainingReport|null>(null);
   const waNumber = (coach.whatsapp||'').replace(/[^\d]/g,'');
+  const latestReport = reports[0] ?? null;
+  const pastReports = reports.slice(1);
   const waUrl = `https://wa.me/${waNumber}?text=${encodeURIComponent('Hey Coach — quick question about this week.')}`;
   return (
     <div style={{display:'grid',gridTemplateColumns:'300px 1fr',gap:24}}>
@@ -760,59 +762,100 @@ function Profile({tab, onTab, memory, athlete, files, uploading, onUpload, onDel
 
         {tab==='report'&&(
           <div style={{display:'flex',flexDirection:'column',gap:20}}>
-            <div className="panel" style={{padding:'32px 36px'}}>
-              <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:16,marginBottom:8}}>
-                <div style={{display:'flex',alignItems:'center',gap:10}}><span className="eyebrow">Week of {fmtDate(r.weekOf,{month:'long',day:'numeric',year:'numeric'})}</span><CadenceBadge cadence="weekly"/></div>
-                <span className="mono" style={{fontSize:10.5,color:'var(--olive-deep)',letterSpacing:'0.12em',textTransform:'uppercase'}}>● {r.status}</span>
+            {/* Latest report */}
+            {latestReport ? (
+              <div className="panel" style={{padding:'32px 36px'}}>
+                <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:16,marginBottom:8}}>
+                  <div style={{display:'flex',alignItems:'center',gap:10}}>
+                    <span className="eyebrow">
+                      {fmtDate(latestReport.period_start,{month:'long',day:'numeric'})} – {fmtDate(latestReport.period_end,{month:'short',day:'numeric',year:'numeric'})}
+                    </span>
+                    <CadenceBadge cadence={latestReport.period_type}/>
+                  </div>
+                  <span className="mono" style={{fontSize:10.5,color:'var(--olive-deep)',letterSpacing:'0.12em',textTransform:'uppercase'}}>● Published</span>
+                </div>
+                <h1 className="display" style={{fontSize:36,margin:'0 0 24px',letterSpacing:'-0.025em',lineHeight:1.1}}>{latestReport.title}</h1>
+                {latestReport.full_text && (
+                  <div style={{marginBottom:28}}>
+                    <div style={{display:'flex',gap:14,alignItems:'flex-start'}}>
+                      <div className="avatar avatar-coach" style={{width:44,height:44,fontSize:16}}>{coach.initials}</div>
+                      <div style={{flex:1}}>
+                        <div className="eyebrow eyebrow-terracotta" style={{fontSize:9.5,marginBottom:6}}>From {coach.name}</div>
+                        {latestReport.full_text.split('\n\n').map((para,i)=>(
+                          <p key={i} className="display" style={{margin:i?'14px 0 0':0,fontSize:15,lineHeight:1.6,color:'var(--ink)'}}>{para}</p>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {(latestReport.highlights.length>0||latestReport.watchouts.length>0)&&(
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:24,paddingTop:20,borderTop:'1px solid var(--rule-soft)'}}>
+                    {latestReport.highlights.length>0&&(
+                      <div>
+                        <span className="eyebrow eyebrow-olive" style={{fontSize:9.5}}>Highlights</span>
+                        <ul style={{margin:'10px 0 0',padding:0,listStyle:'none',display:'flex',flexDirection:'column',gap:8}}>
+                          {latestReport.highlights.map((h,i)=>(
+                            <li key={i} style={{display:'flex',gap:8,fontSize:13,color:'var(--ink)',lineHeight:1.5}}>
+                              <span style={{color:'var(--olive-deep)',fontFamily:'var(--mono)',fontSize:11,marginTop:2}}>+</span>{h}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {latestReport.watchouts.length>0&&(
+                      <div>
+                        <span className="eyebrow eyebrow-terracotta" style={{fontSize:9.5}}>Watchouts</span>
+                        <ul style={{margin:'10px 0 0',padding:0,listStyle:'none',display:'flex',flexDirection:'column',gap:8}}>
+                          {latestReport.watchouts.map((h,i)=>(
+                            <li key={i} style={{display:'flex',gap:8,fontSize:13,color:'var(--ink)',lineHeight:1.5}}>
+                              <span style={{color:'var(--terracotta-deep)',fontFamily:'var(--mono)',fontSize:11,marginTop:2}}>!</span>{h}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {latestReport.summary_text&&(
+                  <div style={{marginTop:24,paddingTop:18,borderTop:'1px solid var(--rule-soft)'}}>
+                    <span className="mono" style={{fontSize:10.5,color:'var(--ink-mute)'}}>
+                      {latestReport.summary_text}
+                    </span>
+                  </div>
+                )}
               </div>
-              <h1 className="display" style={{fontSize:36,margin:'0 0 24px',letterSpacing:'-0.025em',lineHeight:1.1}}>Strong block. Hold the volume.</h1>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:24,marginBottom:28,paddingBottom:24,borderBottom:'1px solid var(--rule-soft)'}}>
-                <BigStat label="Hours trained" value={String(r.hours)} unit={`/ ${r.hoursPlanned}h`} large/>
-                <BigStat label="Compliance" value={`${Math.round(r.compliance*100)}%`} large/>
-                <BigStat label="Sessions" value="6/7" large/>
+            ) : (
+              <div className="panel" style={{padding:'48px 36px',textAlign:'center'}}>
+                <p style={{fontSize:32,margin:'0 0 12px'}}>📊</p>
+                <h2 className="display" style={{fontSize:22,margin:'0 0 8px',color:'var(--ink)'}}>No reports yet</h2>
+                <p style={{fontSize:14,color:'var(--ink-soft)',lineHeight:1.6,maxWidth:360,margin:'0 auto'}}>
+                  Your first report will appear here after your coach reviews your first week of training.
+                </p>
               </div>
-              <div style={{display:'flex',gap:14,marginBottom:28,alignItems:'flex-start'}}>
-                <div className="avatar avatar-coach" style={{width:44,height:44,fontSize:16}}>{coach.initials}</div>
-                <div style={{flex:1}}>
-                  <div className="eyebrow eyebrow-terracotta" style={{fontSize:9.5,marginBottom:6}}>From {coach.name}</div>
-                  {r.fromCoach.split('\n\n').map((p,i)=><p key={i} className="display" style={{margin:i?'14px 0 0':0,fontSize:15,lineHeight:1.6,color:'var(--ink)'}}>{p}</p>)}
+            )}
+
+            {/* Previous reports */}
+            {pastReports.length>0&&(
+              <div className="panel" style={{padding:28}}>
+                <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',marginBottom:6}}>
+                  <span className="eyebrow">Previous reports</span>
+                  <span className="mono" style={{fontSize:10,color:'var(--ink-mute)'}}>{pastReports.length} archived</span>
+                </div>
+                <div style={{display:'flex',flexDirection:'column'}}>
+                  {pastReports.map((p,i)=>(
+                    <div key={p.id} onClick={()=>setOpenReport(p)} style={{display:'grid',gridTemplateColumns:'110px 70px 1fr 24px',gap:18,alignItems:'center',padding:'14px 0',borderTop:i?'1px solid var(--rule-soft)':'none',cursor:'pointer'}}>
+                      <span className="mono" style={{fontSize:11,color:'var(--ink-mute)'}}>{fmtDate(p.period_start,{month:'short',day:'numeric'})}</span>
+                      <CadenceBadge cadence={p.period_type}/>
+                      <div>
+                        <div className="display" style={{fontSize:14.5,color:'var(--ink)',marginBottom:2}}>{p.title}</div>
+                        <div style={{fontSize:11.5,color:'var(--ink-soft)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.summary_text}</div>
+                      </div>
+                      <span style={{color:'var(--ink-faint)',textAlign:'right'}}>›</span>
+                    </div>
+                  ))}
                 </div>
               </div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:24}}>
-                <div><span className="eyebrow eyebrow-olive" style={{fontSize:9.5}}>Highlights</span><ul style={{margin:'10px 0 0',padding:0,listStyle:'none',display:'flex',flexDirection:'column',gap:8}}>{r.highlights.map((h,i)=><li key={i} style={{display:'flex',gap:8,fontSize:13,color:'var(--ink)',lineHeight:1.5}}><span style={{color:'var(--olive-deep)',fontFamily:'var(--mono)',fontSize:11,marginTop:2}}>+</span>{h}</li>)}</ul></div>
-                <div><span className="eyebrow eyebrow-terracotta" style={{fontSize:9.5}}>Watchouts</span><ul style={{margin:'10px 0 0',padding:0,listStyle:'none',display:'flex',flexDirection:'column',gap:8}}>{r.watchouts.map((h,i)=><li key={i} style={{display:'flex',gap:8,fontSize:13,color:'var(--ink)',lineHeight:1.5}}><span style={{color:'var(--terracotta-deep)',fontFamily:'var(--mono)',fontSize:11,marginTop:2}}>!</span>{h}</li>)}</ul></div>
-              </div>
-              <div style={{marginTop:24,paddingTop:18,borderTop:'1px solid var(--rule-soft)',display:'flex',justifyContent:'space-between',alignItems:'center',gap:14}}>
-                <span className="mono" style={{fontSize:10.5,color:'var(--ink-mute)'}}>{reportExpanded?'Full report — drafted by AI, signed by Coach Andes.':'Expand for section-by-section breakdown.'}</span>
-                <button className="btn" onClick={()=>setReportExpanded(v=>!v)}>{reportExpanded?'↑ Collapse':'↓ Expand full report'}</button>
-              </div>
-            </div>
-            <div className="panel" style={{padding:24}}>
-              <span className="eyebrow">Compliance by sport</span>
-              <div style={{display:'flex',flexDirection:'column',gap:12,marginTop:14}}>
-                {Object.entries(r.bySport).map(([sport,value])=>(
-                  <div key={sport} style={{display:'grid',gridTemplateColumns:'90px 1fr 50px',alignItems:'center',gap:14}}>
-                    <div style={{display:'flex',alignItems:'center',gap:8}}><SportGlyph sport={sport} size={20}/><span style={{fontSize:12.5,color:'var(--ink)'}}>{SPORT_LABEL[sport]}</span></div>
-                    <div style={{height:8,background:'var(--linen-deep)',borderRadius:999,overflow:'hidden'}}><div style={{height:'100%',width:`${value*100}%`,background:value>=0.85?'var(--c-met)':value>=0.5?'var(--c-partial)':'var(--c-missed)'}}/></div>
-                    <span className="mono" style={{fontSize:12,color:'var(--ink)',textAlign:'right'}}>{Math.round(value*100)}%</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="panel" style={{padding:28}}>
-              <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',marginBottom:6}}><span className="eyebrow">Previous reports</span><span className="mono" style={{fontSize:10,color:'var(--ink-mute)'}}>{PAST_REPORTS.length} archived</span></div>
-              <div style={{display:'flex',flexDirection:'column'}}>
-                {PAST_REPORTS.map((p,i)=>(
-                  <div key={p.id} onClick={()=>setOpenPast(p)} style={{display:'grid',gridTemplateColumns:'110px 70px 1fr 70px 24px',gap:18,alignItems:'center',padding:'14px 0',borderTop:i?'1px solid var(--rule-soft)':'none',cursor:'pointer'}}>
-                    <span className="mono" style={{fontSize:11,color:'var(--ink-mute)'}}>{fmtDate(p.weekOf,{month:'short',day:'numeric'})}</span>
-                    <CadenceBadge cadence={p.cadence}/>
-                    <div><div className="display" style={{fontSize:14.5,color:'var(--ink)',marginBottom:2}}>{p.title}</div><div style={{fontSize:11.5,color:'var(--ink-soft)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.summary}</div></div>
-                    <span className="mono" style={{fontSize:11,color:p.compliance>=0.85?'var(--c-met)':p.compliance>=0.5?'var(--c-partial)':'var(--c-missed)',textAlign:'right'}}>{Math.round(p.compliance*100)}%</span>
-                    <span style={{color:'var(--ink-faint)',textAlign:'right'}}>›</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -929,16 +972,47 @@ function Profile({tab, onTab, memory, athlete, files, uploading, onUpload, onDel
         )}
       </main>
 
-      {openPast&&(
-        <div className="modal-backdrop" onClick={()=>setOpenPast(null)}>
-          <div onClick={e=>e.stopPropagation()} style={{background:'var(--parchment)',width:'min(660px,92vw)',maxHeight:'90vh',overflow:'auto',borderRadius:4,border:'1px solid var(--rule)',animation:'slide-up 200ms ease'}}>
+      {openReport&&(
+        <div className="modal-backdrop" onClick={()=>setOpenReport(null)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'var(--parchment)',width:'min(720px,92vw)',maxHeight:'90vh',overflow:'auto',borderRadius:4,border:'1px solid var(--rule)',animation:'slide-up 200ms ease'}}>
             <div style={{padding:'24px 32px',borderBottom:'1px solid var(--rule-soft)',display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
-              <div><div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}><span className="eyebrow">Week of {fmtDate(openPast.weekOf,{month:'long',day:'numeric',year:'numeric'})}</span><CadenceBadge cadence={openPast.cadence}/></div><h2 className="display" style={{fontSize:24,margin:0}}>{openPast.title}</h2></div>
-              <button className="btn btn-ghost btn-icon" onClick={()=>setOpenPast(null)}>×</button>
+              <div>
+                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+                  <span className="eyebrow">{fmtDate(openReport.period_start,{month:'long',day:'numeric',year:'numeric'})} – {fmtDate(openReport.period_end,{month:'long',day:'numeric'})}</span>
+                  <CadenceBadge cadence={openReport.period_type}/>
+                  {openReport.status==='published'&&<span style={{display:'inline-flex',alignItems:'center',gap:4,padding:'2px 7px',background:'var(--olive-wash)',border:'1px solid var(--olive-soft)',color:'var(--olive-deep)',borderRadius:2,fontFamily:'var(--mono)',fontSize:9.5,letterSpacing:'0.1em',textTransform:'uppercase' as const}}>Published</span>}
+                </div>
+                <h2 className="display" style={{fontSize:24,margin:0}}>{openReport.title}</h2>
+              </div>
+              <button className="btn btn-ghost btn-icon" onClick={()=>setOpenReport(null)}>×</button>
             </div>
-            <div style={{padding:'24px 32px'}}>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:24,marginBottom:24,paddingBottom:24,borderBottom:'1px solid var(--rule-soft)'}}><BigStat label="Hours" value={String(openPast.hours)} unit={`/ ${openPast.hoursPlanned}h`}/><BigStat label="Compliance" value={`${Math.round(openPast.compliance*100)}%`}/><BigStat label="Cadence" value={openPast.cadence}/></div>
-              <div style={{display:'flex',gap:14,alignItems:'flex-start'}}><div className="avatar avatar-coach" style={{width:40,height:40,fontSize:14}}>{coach.initials}</div><div style={{flex:1}}><div className="eyebrow eyebrow-terracotta" style={{fontSize:9.5,marginBottom:6}}>From {coach.name}</div><p className="display" style={{margin:0,fontSize:15,lineHeight:1.65,color:'var(--ink)'}}>{openPast.summary}</p></div></div>
+            <div style={{padding:'24px 32px',display:'flex',flexDirection:'column' as const,gap:24}}>
+              {openReport.summary_text&&(
+                <p className="display" style={{margin:0,fontSize:16,lineHeight:1.65,color:'var(--ink)',borderLeft:'2px solid var(--terracotta-deep)',paddingLeft:18}}>{openReport.summary_text}</p>
+              )}
+              {openReport.full_text&&(
+                <div style={{color:'var(--ink)',lineHeight:1.7,fontSize:14}}>
+                  {openReport.full_text.split('\n').filter(Boolean).map((para,i)=>(
+                    <p key={i} style={{margin:'0 0 12px'}}>{para}</p>
+                  ))}
+                </div>
+              )}
+              {openReport.highlights.length>0&&(
+                <div>
+                  <div className="eyebrow eyebrow-olive" style={{marginBottom:10}}>Highlights</div>
+                  <ul style={{margin:0,padding:'0 0 0 18px',display:'flex',flexDirection:'column' as const,gap:6}}>
+                    {openReport.highlights.map((h,i)=><li key={i} style={{color:'var(--ink)',fontSize:13,lineHeight:1.55}}>{h}</li>)}
+                  </ul>
+                </div>
+              )}
+              {openReport.watchouts.length>0&&(
+                <div>
+                  <div className="eyebrow eyebrow-terracotta" style={{marginBottom:10}}>Watch-outs</div>
+                  <ul style={{margin:0,padding:'0 0 0 18px',display:'flex',flexDirection:'column' as const,gap:6}}>
+                    {openReport.watchouts.map((w,i)=><li key={i} style={{color:'var(--ink)',fontSize:13,lineHeight:1.55}}>{w}</li>)}
+                  </ul>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1158,7 +1232,7 @@ function TopNav({active, onNav, onRefresh, refreshing, pendingCount, onLogout, a
 }
 
 // ─── Dashboard inner ──────────────────────────────────────────────────────────
-function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDeleteFile, onToggleAiAccess, uploadError, initialCurrentWeek, initialLastWeek, authToken, coachProfile}: {athlete:LiveAthlete;files:AthleteFile[];onSignOut:()=>void;uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;onToggleAiAccess:(id:string,val:boolean)=>void;uploadError:string|null;initialCurrentWeek:WorkoutItem[];initialLastWeek:WorkoutItem[];authToken:string|null;coachProfile:CoachProfile|null}) {
+function DashboardInner({athlete, files, reports, onSignOut, uploading, onUpload, onDeleteFile, onToggleAiAccess, uploadError, initialCurrentWeek, initialLastWeek, authToken, coachProfile}: {athlete:LiveAthlete;files:AthleteFile[];reports:TrainingReport[];onSignOut:()=>void;uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;onToggleAiAccess:(id:string,val:boolean)=>void;uploadError:string|null;initialCurrentWeek:WorkoutItem[];initialLastWeek:WorkoutItem[];authToken:string|null;coachProfile:CoachProfile|null}) {
   const [page, setPage] = useState<string>('today');
   const [profileTab, setProfileTab] = useState('report');
   const [settingsSection, setSettingsSection] = useState('Profile');
@@ -1267,7 +1341,7 @@ function DashboardInner({athlete, files, onSignOut, uploading, onUpload, onDelet
           </div>
         )}
         {page==='season'&&<Season onOpenWorkout={setSelectedWorkout} blockOverrides={blockOverrides} onMoveBlock={(id,order)=>setBlockOverrides(prev=>({...prev,[id]:{...prev[id],order}}))} seasonData={seasonData}/>}
-        {page==='profile'&&<Profile tab={profileTab} onTab={setProfileTab} memory={dbMemory.length>0?dbMemory:appState.memory} athlete={athlete} files={files} uploading={uploading} onUpload={onUpload} onDeleteFile={onDeleteFile} onToggleAiAccess={onToggleAiAccess} uploadError={uploadError} coach={coach}/>}
+        {page==='profile'&&<Profile tab={profileTab} onTab={setProfileTab} memory={dbMemory.length>0?dbMemory:appState.memory} athlete={athlete} files={files} reports={reports} uploading={uploading} onUpload={onUpload} onDeleteFile={onDeleteFile} onToggleAiAccess={onToggleAiAccess} uploadError={uploadError} coach={coach}/>}
         {page==='settings'&&<Settings tweaks={tweaks} setTweak={(k,v)=>setTweaks(prev=>({...prev,[k]:v}))} section={settingsSection} onSection={setSettingsSection} onLogout={onSignOut} athlete={athlete} coach={coach} onSaveProfile={handleSaveProfile}/>}
       </main>
       {selectedWorkout&&<WorkoutDetail workout={selectedWorkout} onClose={()=>setSelectedWorkout(null)} onAddComment={text=>handleAddComment(selectedWorkout,text)} onAddVoiceMemo={len=>handleAddVoiceMemo(selectedWorkout,len)} onMarkComplete={()=>handleMarkComplete(selectedWorkout)} athleteInitials={athlete.initials} coachInitials={coach.initials} coachName={coach.name}/>}
@@ -1289,6 +1363,7 @@ export default function AthleteDashboardPage() {
   const [lastWeekWorkouts, setLastWeekWorkouts] = useState<WorkoutItem[]>([]);
   const [authToken, setAuthToken] = useState<string|null>(null);
   const [coachProfile, setCoachProfile] = useState<CoachProfile|null>(null);
+  const [reports, setReports] = useState<TrainingReport[]>([]);
 
   async function getToken() {
     const sb = createBrowserSupabase();
@@ -1312,12 +1387,13 @@ export default function AthleteDashboardPage() {
       if(!athleteId){router.replace('/athlete/onboarding');return;}
       const {start:curStart,end:curEnd} = getWeekBounds(0);
       const {start:prevStart,end:prevEnd} = getWeekBounds(-1);
-      const [profRes,filesRes,curWRes,prevWRes,coachRes] = await Promise.allSettled([
+      const [profRes,filesRes,curWRes,prevWRes,coachRes,reportsRes] = await Promise.allSettled([
         sb.from('athletes').select('id,full_name,email,primary_sport,ai_profile_summary,target_event_name,target_event_date').eq('id',athleteId).single(),
         fetch(`${BACKEND}/api/v1/athlete/files`,{headers:{Authorization:`Bearer ${token}`}}),
         fetch(`${BACKEND}/api/v1/athlete/workouts?from=${curStart}&to=${curEnd}`,{headers:{Authorization:`Bearer ${token}`}}),
         fetch(`${BACKEND}/api/v1/athlete/workouts?from=${prevStart}&to=${prevEnd}`,{headers:{Authorization:`Bearer ${token}`}}),
         fetch(`${BACKEND}/api/v1/athlete/coach`,{headers:{Authorization:`Bearer ${token}`}}),
+        fetch(`${BACKEND}/api/v1/athlete/reports`,{headers:{Authorization:`Bearer ${token}`}}),
       ]);
       if(profRes.status==='fulfilled'&&profRes.value.data){
         const p = profRes.value.data as Record<string,string>;
@@ -1349,6 +1425,9 @@ export default function AthleteDashboardPage() {
       }
       if(coachRes.status==='fulfilled'&&(coachRes.value as Response).ok){
         const d=await (coachRes.value as Response).json();setCoachProfile(d);
+      }
+      if(reportsRes.status==='fulfilled'&&(reportsRes.value as Response).ok){
+        const d=await (reportsRes.value as Response).json();setReports(d);
       }
       setLoading(false);
     }
@@ -1404,7 +1483,7 @@ export default function AthleteDashboardPage() {
     );
   }
 
-  return <DashboardInner athlete={athlete} files={files} onSignOut={handleSignOut} uploading={uploading} onUpload={handleUpload} onDeleteFile={handleDeleteFile} onToggleAiAccess={handleToggleAiAccess} uploadError={uploadError} initialCurrentWeek={currentWeekWorkouts} initialLastWeek={lastWeekWorkouts} authToken={authToken} coachProfile={coachProfile}/>;
+  return <DashboardInner athlete={athlete} files={files} reports={reports} onSignOut={handleSignOut} uploading={uploading} onUpload={handleUpload} onDeleteFile={handleDeleteFile} onToggleAiAccess={handleToggleAiAccess} uploadError={uploadError} initialCurrentWeek={currentWeekWorkouts} initialLastWeek={lastWeekWorkouts} authToken={authToken} coachProfile={coachProfile}/>;
 }
 
 // ─── Stat / Field / Comment helpers ──────────────────────────────────────────

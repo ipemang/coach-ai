@@ -15,6 +15,12 @@
       "schedule": "0 6 * * *",
       "command": "cd /app/backend && python -m app.services.oura_service",
       "comment": "COA-26: Pull yesterday Oura readiness, sleep, HRV for all athletes at 6 AM UTC daily"
+    },
+    {
+      "name": "weekly-reports",
+      "schedule": "0 7 * * 1",
+      "command": "cd /app/backend && python -m app.services.weekly_reports",
+      "comment": "COA-118: Auto-generate weekly training report drafts every Monday at 7 AM UTC"
     }
   ]
 }

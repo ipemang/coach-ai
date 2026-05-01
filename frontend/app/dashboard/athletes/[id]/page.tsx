@@ -9,6 +9,7 @@ import { ResendPlanButton } from "@/components/resend-plan-button";
 import { SessionNotePanel } from "@/components/session-note-panel";
 import { AthleteDocumentVault } from "@/components/athlete-document-vault";
 import { TrainingLoadChart } from "@/components/training-load-chart";
+import { AthleteReportsPanel } from "@/components/athlete-reports-panel";
 import Link from "next/link";
 
 function getSupabase() {
@@ -367,6 +368,8 @@ export default async function AthleteProfilePage({
             <SessionNotePanel athleteId={id} />
             {/* COA-66: Document vault */}
             <AthleteDocumentVault athleteId={id} />
+            {/* COA-118: Training reports */}
+            <AthleteReportsPanel athleteId={id} />
           </div>
 
           {/* Right — sidebar stack */}
