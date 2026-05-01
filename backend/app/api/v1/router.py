@@ -6,6 +6,7 @@ from app.api.v1.athlete_onboarding import router as athlete_onboarding_router
 from app.api.v1.athlete_workouts import router as athlete_workouts_router
 from app.api.v1.athlete_memory import router as athlete_memory_router
 from app.api.v1.athlete_profile import router as athlete_profile_router
+from app.api.v1.athlete_snapshot import router as athlete_snapshot_router
 from app.api.v1.knowledge_base import router as knowledge_base_router
 from app.api.v1.race_day import router as race_day_router
 from app.api.v1.routes import router as health_router
@@ -25,3 +26,4 @@ router.include_router(athlete_files_router)       # COA-95
 router.include_router(athlete_workouts_router)    # COA-116
 router.include_router(athlete_memory_router)      # COA-117
 router.include_router(athlete_profile_router)     # COA-113
+router.include_router(athlete_snapshot_router)    # COA-120
