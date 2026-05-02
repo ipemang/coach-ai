@@ -1784,7 +1784,7 @@ async def _handle_coach_message(
                 supabase.table("athletes")
                 .select("id, full_name, phone_number")
                 .eq("coach_id", coach_id)
-                .eq("archived_at", None)
+                .is_("archived_at", "null")
                 .limit(50)
             )
         except Exception as exc:
