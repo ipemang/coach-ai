@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLocation, Link } from "wouter";
 import { createBrowserSupabase } from "../lib/supabase";
-import { resolvePostLoginRoute } from "../lib/api";
+import { getRoleAndRedirect } from "../lib/api";
 
 function AndesLogo() {
   return (
@@ -58,8 +58,15 @@ export default function LoginPage() {
     }
 
     const token = data.session?.access_token ?? "";
-    const route = await resolvePostLoginRoute(token);
-    navigate(route);
+    const { role, route } = await getRoleAndRedirect(token);
+
+    if (role === "coach" && route === "/onboarding") {
+      const name = encodeURIComponent(data.session?.user.user_metadata?.full_name ?? "");
+      const emailParam = encodeURIComponent(data.session?.user.email ?? "");
+      navigate(`/onboarding?name=${name}&email=${emailParam}`);
+    } else {
+      navigate(route);
+    }
   }
 
   async function handleGoogle() {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { createBrowserSupabase } from "../lib/supabase";
-import { BACKEND, resolvePostLoginRoute } from "../lib/api";
+import { BACKEND, getRoleAndRedirect } from "../lib/api";
 
 export default function AuthCallbackPage() {
   const [, navigate] = useLocation();
@@ -59,10 +59,10 @@ export default function AuthCallbackPage() {
 
       // ── Normal login: resolve role & onboarding status ────────────────
       setStatus("Finding your workspace…");
-      const route = await resolvePostLoginRoute(token);
+      const { role, route } = await getRoleAndRedirect(token);
 
       // For coaches going to onboarding, pre-fill name + email in query params
-      if (route === "/onboarding") {
+      if (role === "coach" && route === "/onboarding") {
         const name = encodeURIComponent(session.user.user_metadata?.full_name ?? "");
         const email = encodeURIComponent(session.user.email ?? "");
         navigate(`/onboarding?name=${name}&email=${email}`);
