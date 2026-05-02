@@ -54,12 +54,12 @@ export default function AthleteDetailPage() {
   useEffect(() => {
     async function load() {
       const token = await getAuthToken();
-      if (!token) { navigate("/login"); return; }
+      if (!token) { navigate("/login?expired=1"); return; }
       try {
         const res = await fetch(`${BACKEND}/api/v1/athletes/${id}?include_suggestions=true&include_workouts=true&include_checkins=true`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (res.status === 401) { navigate("/login"); return; }
+        if (res.status === 401) { navigate("/login?expired=1"); return; }
         if (res.status === 404) { navigate("/dashboard"); return; }
         if (res.ok) { setData(await res.json()); }
         else { setError("Could not load athlete data."); }

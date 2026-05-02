@@ -39,6 +39,8 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
+  const sessionExpired = new URLSearchParams(window.location.search).get("expired") === "1";
+
   const anyLoading = loading || googleLoading;
 
   async function handleLogin(e: React.FormEvent) {
@@ -84,6 +86,17 @@ export default function LoginPage() {
   return (
     <div className="mosaic-bg" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px" }}>
       <div style={{ width: "100%", maxWidth: 420 }}>
+
+        {/* Session expired banner */}
+        {sessionExpired && (
+          <div style={{ marginBottom: 20, padding: "12px 16px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, display: "flex", alignItems: "flex-start", gap: 10 }}>
+            <span style={{ fontSize: 15, lineHeight: 1, marginTop: 1 }}>⏱</span>
+            <div>
+              <div style={{ fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--terracotta-deep)", marginBottom: 3 }}>Session expired</div>
+              <div style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, color: "var(--terracotta-deep)", lineHeight: 1.5 }}>Your session timed out — please sign in again to continue.</div>
+            </div>
+          </div>
+        )}
 
         {/* Brand */}
         <div style={{ textAlign: "center", marginBottom: 36 }}>

@@ -61,14 +61,14 @@ export default function AthleteDashboardPage() {
   useEffect(() => {
     async function load() {
       const token = await getAuthToken();
-      if (!token) { navigate("/login"); return; }
+      if (!token) { navigate("/login?expired=1"); return; }
       try {
         const [athleteRes, workoutsRes, suggestionsRes] = await Promise.all([
           fetch(`${BACKEND}/api/v1/athlete/me`, { headers: { Authorization: `Bearer ${token}` } }),
           fetch(`${BACKEND}/api/v1/athlete/workouts`, { headers: { Authorization: `Bearer ${token}` } }),
           fetch(`${BACKEND}/api/v1/athlete/messages`, { headers: { Authorization: `Bearer ${token}` } }),
         ]);
-        if (athleteRes.status === 401 || athleteRes.status === 403) { navigate("/login"); return; }
+        if (athleteRes.status === 401 || athleteRes.status === 403) { navigate("/login?expired=1"); return; }
         if (athleteRes.ok) setAthlete(await athleteRes.json());
         if (workoutsRes.ok) {
           const data = await workoutsRes.json();

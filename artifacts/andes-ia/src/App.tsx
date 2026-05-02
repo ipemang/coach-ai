@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Switch, Route } from "wouter";
 import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
@@ -11,10 +12,34 @@ import AthleteDashboardPage from "./pages/AthleteDashboardPage";
 import AthleteOnboardingPage from "./pages/AthleteOnboardingPage";
 import OnboardingPage from "./pages/OnboardingPage";
 import NotFoundPage from "./pages/NotFoundPage";
+import type { AuthChangeEvent } from "@supabase/supabase-js";
+import { createBrowserSupabase } from "./lib/supabase";
+
+const PROTECTED_PATHS = ["/dashboard", "/athlete/dashboard", "/onboarding"];
+
+function SessionGuard() {
+  useEffect(() => {
+    const supabase = createBrowserSupabase();
+    if (!supabase) return;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
+      if (event === "SIGNED_OUT") {
+        const path = window.location.pathname;
+        const isProtected = PROTECTED_PATHS.some(p => path.startsWith(p));
+        if (isProtected) {
+          window.location.href = "/login?expired=1";
+        }
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+  return null;
+}
 
 export default function App() {
   return (
-    <Switch>
+    <>
+      <SessionGuard />
+      <Switch>
       <Route path="/" component={LandingPage} />
       <Route path="/login" component={LoginPage} />
       <Route path="/signup" component={SignupPage} />
@@ -27,6 +52,7 @@ export default function App() {
       <Route path="/athlete/dashboard" component={AthleteDashboardPage} />
       <Route path="/athlete/onboarding" component={AthleteOnboardingPage} />
       <Route component={NotFoundPage} />
-    </Switch>
+      </Switch>
+    </>
   );
 }

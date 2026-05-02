@@ -612,13 +612,13 @@ export default function DashboardPage() {
   useEffect(() => {
     async function load() {
       const token = await getAuthToken();
-      if (!token) { navigate("/login"); return; }
+      if (!token) { navigate("/login?expired=1"); return; }
       try {
         const [athletesRes, suggestionsRes] = await Promise.all([
           fetch(`${BACKEND}/api/v1/athletes`, { headers: { Authorization: `Bearer ${token}` } }),
           fetch(`${BACKEND}/api/v1/suggestions/pending`, { headers: { Authorization: `Bearer ${token}` } }),
         ]);
-        if (athletesRes.status === 401) { navigate("/login"); return; }
+        if (athletesRes.status === 401) { navigate("/login?expired=1"); return; }
         if (athletesRes.ok) setAthletes(await athletesRes.json());
         if (suggestionsRes.ok) setSuggestions(await suggestionsRes.json());
       } catch { setError("Could not load dashboard. Please check your connection."); }
