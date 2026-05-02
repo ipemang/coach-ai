@@ -45,6 +45,7 @@ export interface Athlete {
   stable_profile: StableProfile;
   current_state: CurrentState;
   created_at: string;
+  active?: boolean | null;
   pending_suggestions?: number;
   total_checkins?: number;
   last_checkin_at?: string | null;

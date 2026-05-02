@@ -51,6 +51,91 @@ type SessionNote = {
   created_at: string;
 };
 
+type MorningPulseConfig = {
+  send_time: string;
+  questions: string[];
+};
+
+function EditMorningPulseModal({ config, athleteId, onClose, onSaved }: {
+  config: MorningPulseConfig;
+  athleteId: string;
+  onClose: () => void;
+  onSaved: (updated: MorningPulseConfig) => void;
+}) {
+  const [sendTime, setSendTime] = useState(config.send_time ?? "07:30");
+  const [questions, setQuestions] = useState<string[]>(config.questions ?? []);
+  const [newQ, setNewQ] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    setSaving(true); setError(null);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/athletes/${athleteId}/morning-pulse`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ send_time: sendTime, questions }),
+      });
+      if (res.ok) { onSaved(await res.json()); onClose(); }
+      else { const b = await res.json().catch(() => ({})); setError((b?.detail as string) ?? `Error ${res.status}`); }
+    } catch { setError("Network error."); }
+    setSaving(false);
+  }
+
+  function addQuestion() {
+    const q = newQ.trim();
+    if (q) { setQuestions(qs => [...qs, q]); setNewQ(""); }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "oklch(0.28 0.022 55 / 0.4)", backdropFilter: "blur(4px)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={onClose}>
+      <div className="ca-panel" style={{ width: "100%", maxWidth: 500, padding: 32 }} onClick={e => e.stopPropagation()}>
+        <div className="ca-eyebrow ca-eyebrow-aegean" style={{ marginBottom: 8 }}>Morning pulse</div>
+        <h2 className="ca-display" style={{ fontSize: 24, margin: "0 0 22px" }}>Edit check-in</h2>
+
+        <div style={{ marginBottom: 20 }}>
+          <div className="ca-eyebrow" style={{ fontSize: 9, marginBottom: 8 }}>Send time</div>
+          <input
+            type="time" value={sendTime} onChange={e => setSendTime(e.target.value)}
+            style={{ padding: "8px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 14, color: "var(--ink)", outline: "none" }}
+          />
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <div className="ca-eyebrow" style={{ fontSize: 9, marginBottom: 10 }}>Questions</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+            {questions.map((q, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-mute)", paddingTop: 9, minWidth: 18 }}>{i + 1}.</span>
+                <div style={{ flex: 1, padding: "8px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontSize: 13, color: "var(--ink)", lineHeight: 1.5 }}>{q}</div>
+                <button onClick={() => setQuestions(qs => qs.filter((_, j) => j !== i))} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-mute)", fontSize: 20, lineHeight: 1, paddingTop: 5 }}>×</button>
+              </div>
+            ))}
+            {questions.length === 0 && <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-faint)", margin: 0 }}>No questions yet.</p>}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="text" value={newQ} onChange={e => setNewQ(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addQuestion())}
+              placeholder="Add a question…"
+              style={{ flex: 1, padding: "8px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)", outline: "none" }}
+            />
+            <button className="ca-btn ca-btn-ghost" onClick={addQuestion} disabled={!newQ.trim()}>Add</button>
+          </div>
+        </div>
+
+        {error && <div style={{ padding: "10px 14px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13, marginBottom: 14 }}>{error}</div>}
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="ca-btn ca-btn-primary" style={{ flex: 1 }} disabled={saving || questions.length === 0} onClick={handleSave}>{saving ? "Saving…" : "Save check-in →"}</button>
+          <button className="ca-btn ca-btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AthleteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [, navigate] = useLocation();
@@ -73,6 +158,11 @@ export default function AthleteDetailPage() {
   const [aiDrafting, setAiDrafting] = useState(false);
   const [noteError, setNoteError] = useState<string | null>(null);
   const [notesExpanded, setNotesExpanded] = useState(true);
+  const [athleteActive, setAthleteActive] = useState<boolean | null>(null);
+  const [activeSaving, setActiveSaving] = useState(false);
+  const [morningPulse, setMorningPulse] = useState<MorningPulseConfig | null>(null);
+  const [pulseLoading, setPulseLoading] = useState(false);
+  const [editPulseOpen, setEditPulseOpen] = useState(false);
   const [msgText, setMsgText] = useState("");
   const [msgSending, setMsgSending] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -94,6 +184,45 @@ export default function AthleteDetailPage() {
     }
     load();
   }, [id, navigate]);
+
+  useEffect(() => {
+    if (data && athleteActive === null) setAthleteActive(data.athlete.active ?? true);
+  }, [data, athleteActive]);
+
+  useEffect(() => {
+    if (activeTab !== "overview" || morningPulse !== null) return;
+    async function fetchPulse() {
+      setPulseLoading(true);
+      const token = await getAuthToken();
+      try {
+        const res = await fetch(`${BACKEND}/api/v1/athletes/${id}/morning-pulse`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) setMorningPulse(await res.json());
+        else setMorningPulse({ send_time: "07:30", questions: [] });
+      } catch { setMorningPulse({ send_time: "07:30", questions: [] }); }
+      setPulseLoading(false);
+    }
+    fetchPulse();
+  }, [activeTab, id, morningPulse]);
+
+  async function handleToggleActive() {
+    if (activeSaving || athleteActive === null) return;
+    const newVal = !athleteActive;
+    setAthleteActive(newVal);
+    setActiveSaving(true);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/athletes/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ active: newVal }),
+      });
+      if (!res.ok) setAthleteActive(!newVal);
+      else showToast(newVal ? "Check-ins enabled" : "Check-ins paused");
+    } catch { setAthleteActive(!newVal); }
+    setActiveSaving(false);
+  }
 
   useEffect(() => {
     if (activeTab !== "overview" || sessionNotes !== null) return;
@@ -312,11 +441,29 @@ export default function AthleteDetailPage() {
               <h1 className="ca-display" style={{ fontSize: 36, margin: 0 }}>{athlete.full_name}</h1>
               {pendingSuggestions.length > 0 && <span className="ca-chip ca-chip-terra">{pendingSuggestions.length} pending</span>}
             </div>
-            <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
               {cs?.training_phase && <span className="ca-chip ca-chip-aegean">{cs.training_phase}{cs.training_week ? ` · Wk ${cs.training_week}` : ""}</span>}
               {sp?.target_race && <span className="ca-chip">{sp.target_race}</span>}
               {athlete.primary_sport && <span className="ca-chip">{athlete.primary_sport}</span>}
               {athlete.phone_number && <span className="ca-mono" style={{ fontSize: 11, color: "var(--ink-mute)", alignSelf: "center" }}>{athlete.phone_number}</span>}
+              {/* Morning pulse active toggle */}
+              {athleteActive !== null && (
+                <button
+                  onClick={handleToggleActive}
+                  disabled={activeSaving}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5, padding: "4px 10px",
+                    background: athleteActive ? "var(--olive)" : "oklch(0.72 0.13 42)",
+                    border: "none", borderRadius: 2, cursor: activeSaving ? "not-allowed" : "pointer",
+                    fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase",
+                    color: "white", opacity: activeSaving ? 0.6 : 1,
+                  }}
+                  title={athleteActive ? "Click to pause morning pulse check-ins" : "Click to enable morning pulse check-ins"}
+                >
+                  <span style={{ fontSize: 7 }}>●</span>
+                  {activeSaving ? "Saving…" : athleteActive ? "Check-ins on" : "Check-ins off"}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -426,6 +573,32 @@ export default function AthleteDetailPage() {
                   </div>
                 </div>
               )}
+
+              {/* Morning Pulse card */}
+              <div className="ca-panel" style={{ padding: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <div className="ca-eyebrow" style={{ fontSize: 9 }}>Morning pulse</div>
+                  {morningPulse && (
+                    <button className="ca-btn ca-btn-ghost" onClick={() => setEditPulseOpen(true)} style={{ fontSize: 11, padding: "4px 10px" }}>Edit</button>
+                  )}
+                </div>
+                {pulseLoading && <p className="ca-eyebrow" style={{ fontSize: 9, color: "var(--ink-faint)" }}>Loading…</p>}
+                {morningPulse && (
+                  <>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 9.5, color: "var(--ink-mute)", marginBottom: 12, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                      Sends at {morningPulse.send_time} · {morningPulse.questions.length} question{morningPulse.questions.length !== 1 ? "s" : ""}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {morningPulse.questions.map((q, i) => (
+                        <div key={i} style={{ fontFamily: "var(--body)", fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.5, paddingLeft: 10, borderLeft: "2px solid var(--rule)" }}>{q}</div>
+                      ))}
+                      {morningPulse.questions.length === 0 && (
+                        <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 12, color: "var(--ink-faint)", margin: 0 }}>No questions yet — click Edit to add some.</p>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
             {/* Session Notes */}
@@ -669,6 +842,15 @@ export default function AthleteDetailPage() {
           </div>
         )}
       </div>
+
+      {editPulseOpen && morningPulse && (
+        <EditMorningPulseModal
+          config={morningPulse}
+          athleteId={id!}
+          onClose={() => setEditPulseOpen(false)}
+          onSaved={(updated) => setMorningPulse(updated)}
+        />
+      )}
 
       {/* Send message modal */}
       {sendMsg && (
