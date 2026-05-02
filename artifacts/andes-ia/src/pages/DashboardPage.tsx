@@ -7,9 +7,10 @@ import type { Athlete, Suggestion, StableProfile, CurrentState, PredictiveFlag }
 type WeekWorkout = { scheduled_date: string; status: string; distance_km: number | null };
 type BiometricBaseline = { readiness_avg: number | null; hrv_avg: number | null; sleep_avg: number | null };
 type EnrichedAthlete = Athlete & { pending_suggestions?: number; total_checkins?: number; last_checkin_at?: string | null; week_workouts?: WeekWorkout[]; biometric_baseline?: BiometricBaseline | null };
-type Tab = "roster" | "queue" | "media" | "officehours";
+type Tab = "roster" | "queue" | "media" | "officehours" | "aivoice";
 type Filter = "all" | "pending";
 interface OfficeHoursData { office_hours: Record<string, unknown> | null; ai_autonomy_override: boolean; is_currently_autonomous: boolean; after_hours_message?: string | null; urgency_keywords?: string[] | null; }
+interface VoiceProfile { tone: string; formality: string; sentence_length: string; use_emojis: boolean; signature_phrases: string[]; banned_phrases: string[]; example_message?: string | null; }
 type DigestData = { generated_at: string; summary: string; athlete_flags: { athlete_id: string; name: string; reason: string }[] };
 type MediaReview = { id: string; athlete_id: string; media_type: "image" | "video"; ai_analysis: string | null; coach_edited_analysis: string | null; coach_comment: string | null; signed_url: string | null; status: string; created_at: string; athletes?: { full_name: string | null; display_name: string | null } | null };
 
@@ -726,6 +727,16 @@ export default function DashboardPage() {
   const [editingDay, setEditingDay] = useState<string | null>(null);
   const [dayDraft, setDayDraft] = useState<{ open: string; close: string; enabled: boolean }>({ open: "09:00", close: "17:00", enabled: true });
   const [ohHoursSaving, setOhHoursSaving] = useState(false);
+  const [voiceProfile, setVoiceProfile] = useState<VoiceProfile | null>(null);
+  const [voiceProfileLoading, setVoiceProfileLoading] = useState(false);
+  const [voiceProfileSaving, setVoiceProfileSaving] = useState(false);
+  const [voiceProfileDraft, setVoiceProfileDraft] = useState<VoiceProfile | null>(null);
+  const [voiceProfileError, setVoiceProfileError] = useState<string | null>(null);
+  const [voiceProfileSaved, setVoiceProfileSaved] = useState(false);
+  const [newPhrase, setNewPhrase] = useState("");
+  const [newBanned, setNewBanned] = useState("");
+  const [voicePreview, setVoicePreview] = useState<string | null>(null);
+  const [voicePreviewLoading, setVoicePreviewLoading] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -767,6 +778,61 @@ export default function DashboardPage() {
       else setOhData({ office_hours: null, ai_autonomy_override: false, is_currently_autonomous: false });
     })();
   }, [tab, ohData]);
+
+  const DEFAULT_VOICE: VoiceProfile = { tone: "warm", formality: "casual", sentence_length: "medium", use_emojis: false, signature_phrases: [], banned_phrases: [] };
+
+  useEffect(() => {
+    if (tab !== "aivoice" || voiceProfile !== null) return;
+    (async () => {
+      setVoiceProfileLoading(true);
+      const token = await getAuthToken();
+      try {
+        const res = await fetch(`${BACKEND}/api/v1/coach/voice-profile`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        const data: VoiceProfile = res.ok ? await res.json() : DEFAULT_VOICE;
+        setVoiceProfile(data);
+        setVoiceProfileDraft(data);
+      } catch { setVoiceProfile(DEFAULT_VOICE); setVoiceProfileDraft(DEFAULT_VOICE); }
+      setVoiceProfileLoading(false);
+    })();
+  }, [tab, voiceProfile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleSaveVoiceProfile() {
+    if (!voiceProfileDraft) return;
+    setVoiceProfileSaving(true); setVoiceProfileError(null);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/coach/voice-profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(voiceProfileDraft),
+      });
+      if (res.ok) { const updated = await res.json(); setVoiceProfile(updated); setVoiceProfileDraft(updated); setVoiceProfileSaved(true); setTimeout(() => setVoiceProfileSaved(false), 2500); }
+      else { const b = await res.json().catch(() => ({})); setVoiceProfileError((b?.detail as string) ?? `Error ${res.status}`); }
+    } catch { setVoiceProfileError("Network error."); }
+    setVoiceProfileSaving(false);
+  }
+
+  async function handleVoicePreview() {
+    if (!voiceProfileDraft) return;
+    setVoicePreviewLoading(true);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/coach/voice-profile/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(voiceProfileDraft),
+      });
+      if (res.ok) { const d = await res.json(); setVoicePreview(d.preview ?? d.message ?? null); }
+    } catch {}
+    setVoicePreviewLoading(false);
+  }
+
+  function addPhrase(type: "signature" | "banned") {
+    const val = type === "signature" ? newPhrase.trim() : newBanned.trim();
+    if (!val) return;
+    setVoiceProfileDraft(d => d ? { ...d, [type === "signature" ? "signature_phrases" : "banned_phrases"]: [...(type === "signature" ? d.signature_phrases : d.banned_phrases), val] } : d);
+    if (type === "signature") setNewPhrase(""); else setNewBanned("");
+  }
 
   useEffect(() => {
     async function loadDigest() {
@@ -977,6 +1043,7 @@ export default function DashboardPage() {
             { id: "queue" as Tab, label: "Replies to approve", badge: totalPending, alert: totalPending > 0 },
             { id: "media" as Tab, label: "Media queue", badge: mediaReviews.length, alert: mediaReviews.length > 0 },
             { id: "officehours" as Tab, label: "Office hours", badge: null },
+            { id: "aivoice" as Tab, label: "AI voice setup", badge: null },
           ]).map(t => (
             <button key={t.id} className={`ca-tab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
               {t.label}
@@ -1070,6 +1137,166 @@ export default function DashboardPage() {
                       </article>
                     );
                   })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === "aivoice" && (
+            <div>
+              {voiceProfileLoading && <div style={{ padding: "60px 0", textAlign: "center" }}><p className="ca-eyebrow" style={{ fontSize: 11 }}>Loading voice profile…</p></div>}
+              {!voiceProfileLoading && voiceProfileDraft && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, alignItems: "start" }}>
+
+                  {/* Left: Tone + Style */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+                    {/* Tone */}
+                    <div className="ca-panel" style={{ padding: 28 }}>
+                      <div className="ca-eyebrow ca-eyebrow-aegean" style={{ marginBottom: 6 }}>Voice tone</div>
+                      <h3 className="ca-display" style={{ fontSize: 22, margin: "0 0 20px" }}>How do you sound?</h3>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        {([
+                          { id: "direct", label: "Direct & concise", desc: "No fluff — clear cues, clear expectations." },
+                          { id: "warm", label: "Warm & encouraging", desc: "Personal, supportive, first-name basis." },
+                          { id: "technical", label: "Technical & precise", desc: "Data-driven — zones, watts, and paces." },
+                          { id: "motivational", label: "Motivational", desc: "High energy, push-through language." },
+                        ]).map(t => (
+                          <button
+                            key={t.id}
+                            onClick={() => setVoiceProfileDraft(d => d ? { ...d, tone: t.id } : d)}
+                            style={{ padding: "14px 18px", background: voiceProfileDraft.tone === t.id ? "var(--parchment-2)" : "var(--parchment)", border: `1px solid ${voiceProfileDraft.tone === t.id ? "var(--aegean-soft)" : "var(--rule)"}`, borderRadius: 2, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 14, transition: "all 150ms ease" }}
+                          >
+                            <span style={{ width: 13, height: 13, borderRadius: "50%", border: `2px solid ${voiceProfileDraft.tone === t.id ? "var(--aegean-deep)" : "var(--rule)"}`, background: voiceProfileDraft.tone === t.id ? "var(--aegean-deep)" : "transparent", flexShrink: 0, display: "inline-block" }} />
+                            <div>
+                              <div style={{ fontFamily: "var(--mono)", fontSize: 11, letterSpacing: "0.08em", color: "var(--ink)", marginBottom: 3 }}>{t.label}</div>
+                              <div style={{ fontFamily: "var(--body)", fontSize: 12, color: "var(--ink-mute)" }}>{t.desc}</div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Style toggles */}
+                    <div className="ca-panel" style={{ padding: 28 }}>
+                      <div className="ca-eyebrow" style={{ marginBottom: 20 }}>Writing style</div>
+
+                      {/* Formality */}
+                      <div style={{ marginBottom: 20 }}>
+                        <div style={{ fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 10 }}>Formality</div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          {(["casual", "professional"] as const).map(f => (
+                            <button key={f} onClick={() => setVoiceProfileDraft(d => d ? { ...d, formality: f } : d)}
+                              style={{ flex: 1, padding: "9px 0", background: voiceProfileDraft.formality === f ? "var(--ink)" : "var(--parchment)", border: `1px solid ${voiceProfileDraft.formality === f ? "var(--ink)" : "var(--rule)"}`, borderRadius: 2, cursor: "pointer", fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.1em", textTransform: "capitalize", color: voiceProfileDraft.formality === f ? "var(--parchment)" : "var(--ink-soft)", transition: "all 150ms ease" }}>
+                              {f}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Sentence length */}
+                      <div style={{ marginBottom: 22 }}>
+                        <div style={{ fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 10 }}>Sentence length</div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          {(["short", "medium", "long"] as const).map(s => (
+                            <button key={s} onClick={() => setVoiceProfileDraft(d => d ? { ...d, sentence_length: s } : d)}
+                              style={{ flex: 1, padding: "9px 0", background: voiceProfileDraft.sentence_length === s ? "var(--ink)" : "var(--parchment)", border: `1px solid ${voiceProfileDraft.sentence_length === s ? "var(--ink)" : "var(--rule)"}`, borderRadius: 2, cursor: "pointer", fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.1em", textTransform: "capitalize", color: voiceProfileDraft.sentence_length === s ? "var(--parchment)" : "var(--ink-soft)", transition: "all 150ms ease" }}>
+                              {s}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Emoji toggle */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div>
+                          <div style={{ fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 3 }}>Use emojis</div>
+                          <div style={{ fontSize: 12, color: "var(--ink-faint)" }}>{voiceProfileDraft.use_emojis ? "Used sparingly for warmth" : "Plain text only"}</div>
+                        </div>
+                        <button
+                          onClick={() => setVoiceProfileDraft(d => d ? { ...d, use_emojis: !d.use_emojis } : d)}
+                          style={{ width: 46, height: 26, background: voiceProfileDraft.use_emojis ? "var(--olive)" : "var(--rule)", border: "none", borderRadius: 13, cursor: "pointer", position: "relative", transition: "background 0.2s", flexShrink: 0 }}
+                        >
+                          <span style={{ position: "absolute", top: 4, left: voiceProfileDraft.use_emojis ? 23 : 4, width: 18, height: 18, background: "white", borderRadius: "50%", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.15)", display: "block" }} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: Phrases + preview + save */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+                    {/* Signature phrases */}
+                    <div className="ca-panel" style={{ padding: 28 }}>
+                      <div className="ca-eyebrow ca-eyebrow-aegean" style={{ marginBottom: 6 }}>Signature phrases</div>
+                      <p style={{ fontSize: 13, color: "var(--ink-mute)", margin: "0 0 16px", lineHeight: 1.55 }}>Phrases you always use — the AI will weave them in naturally.</p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14, minHeight: 32 }}>
+                        {voiceProfileDraft.signature_phrases.map((p, i) => (
+                          <span key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", background: "var(--parchment-2)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-soft)" }}>
+                            {p}
+                            <button onClick={() => setVoiceProfileDraft(d => d ? { ...d, signature_phrases: d.signature_phrases.filter((_, j) => j !== i) } : d)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-mute)", fontSize: 15, lineHeight: 1, padding: 0 }}>×</button>
+                          </span>
+                        ))}
+                        {voiceProfileDraft.signature_phrases.length === 0 && <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-faint)", margin: 0 }}>None yet — add your first phrase below.</p>}
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input value={newPhrase} onChange={e => setNewPhrase(e.target.value)}
+                          onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addPhrase("signature"))}
+                          placeholder={`e.g. "Trust the process"`}
+                          style={{ flex: 1, padding: "8px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)", outline: "none" }} />
+                        <button className="ca-btn ca-btn-ghost" onClick={() => addPhrase("signature")} disabled={!newPhrase.trim()}>Add</button>
+                      </div>
+                    </div>
+
+                    {/* Never-say phrases */}
+                    <div className="ca-panel" style={{ padding: 28 }}>
+                      <div className="ca-eyebrow ca-eyebrow-terra" style={{ marginBottom: 6 }}>Never say</div>
+                      <p style={{ fontSize: 13, color: "var(--ink-mute)", margin: "0 0 16px", lineHeight: 1.55 }}>Words the AI must avoid entirely — not your style.</p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14, minHeight: 32 }}>
+                        {voiceProfileDraft.banned_phrases.map((p, i) => (
+                          <span key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.82 0.06 45)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 11, color: "var(--terracotta-deep)" }}>
+                            {p}
+                            <button onClick={() => setVoiceProfileDraft(d => d ? { ...d, banned_phrases: d.banned_phrases.filter((_, j) => j !== i) } : d)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--terracotta-deep)", fontSize: 15, lineHeight: 1, padding: 0 }}>×</button>
+                          </span>
+                        ))}
+                        {voiceProfileDraft.banned_phrases.length === 0 && <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-faint)", margin: 0 }}>None yet — add words to block below.</p>}
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input value={newBanned} onChange={e => setNewBanned(e.target.value)}
+                          onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addPhrase("banned"))}
+                          placeholder={`e.g. "amazing" or "crushing it"`}
+                          style={{ flex: 1, padding: "8px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)", outline: "none" }} />
+                        <button className="ca-btn ca-btn-ghost" onClick={() => addPhrase("banned")} disabled={!newBanned.trim()}>Add</button>
+                      </div>
+                    </div>
+
+                    {/* Voice preview */}
+                    <div className="ca-panel" style={{ padding: 28 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                        <div>
+                          <div className="ca-eyebrow" style={{ marginBottom: 4 }}>Voice preview</div>
+                          <p style={{ fontSize: 12, color: "var(--ink-mute)", margin: 0 }}>A sample AI-drafted reply using your current settings.</p>
+                        </div>
+                        <button className="ca-btn ca-btn-ghost" style={{ fontSize: 11, padding: "5px 12px" }} onClick={handleVoicePreview} disabled={voicePreviewLoading}>
+                          {voicePreviewLoading ? "Generating…" : "↻ Preview"}
+                        </button>
+                      </div>
+                      <div style={{ padding: "16px 20px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, minHeight: 90, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 15.5, lineHeight: 1.65, color: "var(--ink-soft)" }}>
+                        {voicePreview
+                          ? <>&ldquo;{voicePreview}&rdquo;</>
+                          : <span style={{ color: "var(--ink-faint)", fontStyle: "normal", fontSize: 13, fontFamily: "var(--body)" }}>Click ↻ Preview to generate a sample reply in your voice…</span>}
+                      </div>
+                    </div>
+
+                    {/* Error + Save */}
+                    {voiceProfileError && (
+                      <div style={{ padding: "10px 14px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13 }}>{voiceProfileError}</div>
+                    )}
+                    <button className="ca-btn ca-btn-primary" style={{ width: "100%", padding: "14px 0", fontSize: 13 }} onClick={handleSaveVoiceProfile} disabled={voiceProfileSaving}>
+                      {voiceProfileSaved ? "Voice profile saved ✓" : voiceProfileSaving ? "Saving…" : "Save voice profile →"}
+                    </button>
+                  </div>
+
                 </div>
               )}
             </div>
