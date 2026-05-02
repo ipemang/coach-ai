@@ -38,9 +38,28 @@ interface WorkoutMessage {
 }
 
 const SPORT_COLORS: Record<string, string> = {
-  swim: "#4a90b8", bike: "#c0704a", run: "#b87a2c",
+  swim: "#4a90b8", bike: "#c0704a", run: "#6a8c4a",
   strength: "#6a7c4a", rest: "#9a9a8a", brick: "#8a5a8a",
 };
+
+const SPORT_BG: Record<string, string> = {
+  swim: "#e6f2fa", bike: "#fdf0e8", run: "#edf5e8",
+  strength: "#e8f0e0", brick: "#f5f0e0", rest: "#ede8df",
+};
+
+function getMondayOf(dateStr: string): string {
+  const d = new Date(dateStr + "T12:00:00");
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().split("T")[0];
+}
+
+function getDateForOffset(monday: string, offset: number): string {
+  const d = new Date(monday + "T12:00:00");
+  d.setDate(d.getDate() + offset);
+  return d.toISOString().split("T")[0];
+}
 
 function sessionColor(type: string): string {
   return SPORT_COLORS[type?.toLowerCase()] ?? "#9a9a8a";
@@ -258,46 +277,11 @@ export default function AthleteDashboardPage() {
 
         {/* Plan tab */}
         {activeTab === "plan" && (
-          <div>
-            {todayWorkouts.length > 0 && (
-              <div style={{ marginBottom: 28 }}>
-                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", color: "#c0704a", margin: "0 0 12px" }}>Today</p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {todayWorkouts.map(w => (
-                    <WorkoutCard key={w.id} workout={w} onOpen={() => setSelectedWorkout(w)} today />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {upcomingWorkouts.length > 0 && (
-              <div style={{ marginBottom: 28 }}>
-                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", color: "#8a7a6a", margin: "0 0 12px" }}>Upcoming</p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {upcomingWorkouts.map(w => (
-                    <WorkoutCard key={w.id} workout={w} onOpen={() => setSelectedWorkout(w)} />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {pastWorkouts.length > 0 && (
-              <div>
-                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", color: "#8a7a6a", margin: "0 0 12px" }}>Past</p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {pastWorkouts.map(w => (
-                    <WorkoutCard key={w.id} workout={w} onOpen={() => setSelectedWorkout(w)} />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {workouts.length === 0 && (
-              <div style={{ textAlign: "center", padding: "60px 0" }}>
-                <p style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontStyle: "italic", fontSize: 20, color: "#8a7a6a" }}>No workouts scheduled yet. Check back soon.</p>
-              </div>
-            )}
-          </div>
+          <PlanCalendar
+            workouts={workouts}
+            onSelect={w => setSelectedWorkout(w)}
+            todayStr={todayStr}
+          />
         )}
 
         {/* Messages tab */}
@@ -376,6 +360,168 @@ export default function AthleteDashboardPage() {
     </div>
   );
 }
+
+function WorkoutCell({ workout, onSelect, isToday }: {
+  workout: WorkoutItem | null;
+  onSelect: (w: WorkoutItem) => void;
+  isToday: boolean;
+}) {
+  if (!workout) {
+    return (
+      <div style={{
+        background: isToday ? "#f0ece0" : "#f5f2ec",
+        minHeight: 84,
+        outline: isToday ? "2px solid #b87a2c" : "none",
+        outlineOffset: -2,
+      }} />
+    );
+  }
+  const bg = SPORT_BG[workout.session_type?.toLowerCase()] ?? "#f5f2ec";
+  const color = sessionColor(workout.session_type);
+  const isCompleted = workout.status === "completed";
+  const isMissed = workout.status === "missed";
+
+  return (
+    <button
+      onClick={() => onSelect(workout)}
+      title={workout.title ?? workout.session_type}
+      style={{
+        width: "100%", minHeight: 84, background: bg, border: "none",
+        outline: isToday ? "2px solid #b87a2c" : "none", outlineOffset: -2,
+        cursor: "pointer", display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", gap: 5,
+        padding: "10px 6px", opacity: isMissed ? 0.45 : 1,
+        position: "relative", transition: "filter 0.12s",
+      }}
+      onMouseEnter={e => (e.currentTarget.style.filter = "brightness(0.92)")}
+      onMouseLeave={e => (e.currentTarget.style.filter = "none")}
+    >
+      {/* Status dot */}
+      {(isCompleted || isMissed) && (
+        <span style={{
+          position: "absolute", top: 6, right: 6,
+          width: 6, height: 6, borderRadius: "50%",
+          background: isCompleted ? "#2a5a30" : "#c0704a",
+        }} />
+      )}
+      {/* Sport icon */}
+      <span style={{ fontSize: 24, color, lineHeight: 1 }}>
+        <SportIcon type={workout.session_type} />
+      </span>
+      {/* Title */}
+      <span style={{
+        fontFamily: "'JetBrains Mono', monospace", fontSize: 7.5,
+        color, letterSpacing: "0.08em", textTransform: "uppercase",
+        textAlign: "center", lineHeight: 1.3,
+        maxWidth: "90%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+      }}>
+        {workout.title ?? workout.session_type}
+      </span>
+      {/* Duration */}
+      {workout.duration_min && (
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 7, color: "#8a7a6a" }}>
+          {fmtDuration(workout.duration_min)}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function PlanCalendar({ workouts, onSelect, todayStr }: {
+  workouts: WorkoutItem[];
+  onSelect: (w: WorkoutItem) => void;
+  todayStr: string;
+}) {
+  const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+  // Build sorted list of unique Mondays (include current week always)
+  const mondaySet = new Set<string>();
+  workouts.forEach(w => mondaySet.add(getMondayOf(w.scheduled_date)));
+  mondaySet.add(getMondayOf(todayStr));
+  const weeks = Array.from(mondaySet).sort();
+
+  if (workouts.length === 0) {
+    return (
+      <div style={{ textAlign: "center", padding: "60px 0" }}>
+        <p style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontStyle: "italic", fontSize: 20, color: "#8a7a6a", margin: 0 }}>
+          No workouts scheduled yet. Check back soon.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ overflowX: "auto", borderRadius: 4, border: "1px solid #c9b59a" }}>
+      {/* Column header */}
+      <div style={{ display: "grid", gridTemplateColumns: "54px repeat(7, 1fr) 54px", gap: 1, background: "#c9b59a", minWidth: 600 }}>
+        <div style={hdrCell}>WK</div>
+        {DAYS.map(d => <div key={d} style={hdrCell}>{d}</div>)}
+        <div style={hdrCell}>COMP</div>
+      </div>
+
+      {/* Week rows */}
+      {weeks.map((monday, wi) => {
+        const dayWorkouts = DAYS.map((_, di) => {
+          const dateStr = getDateForOffset(monday, di);
+          return workouts.find(w => w.scheduled_date === dateStr) ?? null;
+        });
+        const scheduled = dayWorkouts.filter(Boolean).length;
+        const completed = dayWorkouts.filter(w => w?.status === "completed").length;
+        const compPct = scheduled > 0 ? Math.round((completed / scheduled) * 100) : null;
+        const isCurrentWeek = monday === getMondayOf(todayStr);
+
+        return (
+          <div key={monday} style={{ display: "grid", gridTemplateColumns: "54px repeat(7, 1fr) 54px", gap: 1, background: "#c9b59a", borderTop: "1px solid #c9b59a", minWidth: 600 }}>
+            {/* Week label */}
+            <div style={{
+              background: isCurrentWeek ? "#e8e0cc" : "#ede8df",
+              display: "flex", flexDirection: "column", alignItems: "center",
+              justifyContent: "center", padding: "8px 4px", gap: 3,
+            }}>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: isCurrentWeek ? "#b87a2c" : "#6a5a4a", fontWeight: 600 }}>W{wi + 1}</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 7, color: "#9a9a8a", textAlign: "center" }}>
+                {new Date(monday + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </span>
+            </div>
+
+            {/* Day cells */}
+            {dayWorkouts.map((workout, di) => (
+              <WorkoutCell
+                key={di}
+                workout={workout}
+                onSelect={onSelect}
+                isToday={getDateForOffset(monday, di) === todayStr}
+              />
+            ))}
+
+            {/* Completion % */}
+            <div style={{
+              background: isCurrentWeek ? "#e8e0cc" : "#ede8df",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              {compPct !== null ? (
+                <span style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600,
+                  color: compPct >= 90 ? "#2a5a30" : compPct >= 70 ? "#b87a2c" : "#c0704a",
+                }}>
+                  {compPct}%
+                </span>
+              ) : (
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#c9b59a" }}>—</span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const hdrCell: React.CSSProperties = {
+  background: "#e4ddd2", padding: "9px 0", textAlign: "center",
+  fontFamily: "'JetBrains Mono', monospace", fontSize: 8.5,
+  letterSpacing: "0.13em", textTransform: "uppercase", color: "#8a7a6a",
+};
 
 function fmtDuration(mins: number): string {
   const h = Math.floor(mins / 60);
