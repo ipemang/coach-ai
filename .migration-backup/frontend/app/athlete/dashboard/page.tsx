@@ -1045,6 +1045,8 @@ function Settings({tweaks, setTweak, section: sectionProp, onSection, onLogout, 
   const [goalDate, setGoalDate] = useState(athlete.goalDate);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string|null>(null);
+  const [expandedDevice, setExpandedDevice] = useState<string|null>(null);
+  const [copiedDevice, setCopiedDevice] = useState<string|null>(null);
 
   async function handleSave() {
     if(section!=='Profile') return;
@@ -1135,19 +1137,98 @@ function Settings({tweaks, setTweak, section: sectionProp, onSection, onLogout, 
             </div>
           </div>
         )}
-        {section==='Apps & Devices'&&(
-          <div>
-            <p style={{fontSize:13,color:'var(--ink-soft)',margin:'0 0 16px'}}>Connected devices feed into your readiness rail.</p>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-              {[{name:'Whoop',connected:true},{name:'Oura',connected:false},{name:'Garmin',connected:false},{name:'Apple Health',connected:false},{name:'Strava',connected:true},{name:'Zwift',connected:false}].map(d=>(
-                <div key={d.name} style={{padding:14,border:'1px solid var(--rule-soft)',background:'var(--linen)',borderRadius:3,display:'flex',alignItems:'center',gap:12}}>
-                  <span style={{flex:1,fontSize:13,color:'var(--ink)'}}>{d.name}</span>
-                  {d.connected?<button className="btn btn-ghost" style={{color:'var(--olive-deep)'}}>● Connected</button>:<button className="btn">Connect</button>}
-                </div>
-              ))}
+        {section==='Apps & Devices'&&(()=>{
+          const DEVICES=[
+            {name:'Whoop',connected:true,icon:'⚡',data:'Recovery score · HRV · Resting HR · Strain · Sleep stages',
+             connectedNote:'Your WHOOP data syncs every morning. Coach can see your recovery trend, HRV, and strain alongside your training load.',
+             steps:[]},
+            {name:'Oura',connected:false,icon:'💍',data:'Readiness score · HRV · Sleep quality · Body temperature',
+             steps:[
+               'Download the Oura app and sign in at cloud.ouraring.com',
+               'Go to Account (top right) → Personal Access Tokens',
+               'Click "Create New Token" — give it any name (e.g. "Andes.IA")',
+               'Copy the token and send it to your coach via WhatsApp or email',
+               'Your coach will connect it — readiness data will appear within 24 h',
+             ]},
+            {name:'Garmin',connected:false,icon:'⌚',data:'Training readiness · VO₂ max · Training load · GPS workouts',
+             steps:[
+               'Open the Garmin Connect app on your phone',
+               'Tap More (···) at the bottom right → Connected Apps',
+               'Alternatively, sign in at connect.garmin.com → Settings → Partner Apps',
+               'Tell your coach your Garmin Connect email address',
+               'Your coach will request access — approve it in the Garmin app',
+             ]},
+            {name:'Apple Health',connected:false,icon:'❤️',data:'Heart rate · Sleep · Steps · Apple Watch workouts',
+             steps:[
+               'Apple Health syncs automatically via the iOS app (coming soon)',
+               'In the meantime, connect your Apple Watch to Strava to share workouts',
+               'Open Strava → Account → Apps → Apple Health → turn on "Write Workouts"',
+               'Once the Andes.IA iOS app launches, Health access is one tap to enable',
+             ]},
+            {name:'Strava',connected:true,icon:'🚴',data:'GPS workouts · Pace · Power · Elevation · Activity history',
+             connectedNote:'Strava is connected. Your activities sync automatically within minutes of saving a workout — no action needed.',
+             steps:[]},
+            {name:'Zwift',connected:false,icon:'🖥️',data:'Virtual rides · Power output · Structured workout completions',
+             steps:[
+               'The easiest path: Strava is already connected above',
+               'In Zwift, open Menu → Settings → Connections → enable Strava',
+               'Every Zwift ride will post to Strava and sync to your coach automatically',
+               'Alternatively: go to zwift.com → Profile → Connected Apps → authorize',
+             ]},
+          ];
+          function copySteps(d:{name:string;steps:string[]}) {
+            const text=`Hi! Here are my steps to connect ${d.name} to Andes.IA:\n${d.steps.map((s,i)=>`${i+1}. ${s}`).join('\n')}`;
+            navigator.clipboard.writeText(text).then(()=>{setCopiedDevice(d.name);setTimeout(()=>setCopiedDevice(null),2200);});
+          }
+          return (
+            <div>
+              <p style={{fontSize:13,color:'var(--ink-soft)',margin:'0 0 4px',lineHeight:1.6}}>Connected devices feed your readiness rail and training context. Click <strong style={{color:'var(--ink)',fontWeight:500}}>Connect</strong> on any device for step-by-step setup instructions.</p>
+              <p style={{fontSize:11.5,fontFamily:'var(--mono)',color:'var(--ink-faint)',margin:'0 0 20px',letterSpacing:'0.02em'}}>Full in-app OAuth coming soon. Setup takes ~2 min via your coach.</p>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {DEVICES.map(d=>{
+                  const isOpen=expandedDevice===d.name;
+                  return (
+                    <div key={d.name} style={{border:'1px solid',borderColor:d.connected?'var(--olive-soft)':isOpen?'var(--rule-strong)':'var(--rule-soft)',background:d.connected?'var(--olive-wash)':isOpen?'var(--parchment)':'var(--linen)',borderRadius:3,overflow:'hidden',transition:'all 140ms ease'}}>
+                      {/* Card header */}
+                      <div style={{display:'flex',alignItems:'center',gap:12,padding:'12px 14px'}}>
+                        <span style={{fontSize:18,lineHeight:1}}>{d.icon}</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:13,color:'var(--ink)',fontWeight:500}}>{d.name}</div>
+                          <div className="mono" style={{fontSize:10,color:'var(--ink-mute)',marginTop:1}}>{d.data}</div>
+                        </div>
+                        {d.connected
+                          ? <span className="mono" style={{fontSize:10,padding:'3px 9px',background:'var(--olive-wash)',color:'var(--olive-deep)',border:'1px solid var(--olive-soft)',borderRadius:2,textTransform:'uppercase',letterSpacing:'0.08em'}}>● Connected</span>
+                          : <button className="btn" style={{fontSize:12,padding:'6px 12px'}} onClick={()=>setExpandedDevice(isOpen?null:d.name)}>{isOpen?'Close':'Connect'}</button>
+                        }
+                      </div>
+                      {/* Connected detail */}
+                      {d.connected&&d.connectedNote&&(
+                        <div style={{padding:'0 14px 12px',paddingLeft:46,fontSize:12,color:'var(--ink-soft)',lineHeight:1.6}}>{d.connectedNote}</div>
+                      )}
+                      {/* Instruction drawer */}
+                      {!d.connected&&isOpen&&(
+                        <div style={{borderTop:'1px solid var(--rule-soft)',padding:'14px 16px',background:'var(--parchment)'}}>
+                          <div className="eyebrow" style={{marginBottom:10}}>How to connect</div>
+                          <ol style={{margin:0,padding:'0 0 0 18px',display:'flex',flexDirection:'column',gap:7}}>
+                            {d.steps.map((step,i)=>(
+                              <li key={i} style={{fontSize:13,color:'var(--ink)',lineHeight:1.55}}>{step}</li>
+                            ))}
+                          </ol>
+                          <div style={{marginTop:14,paddingTop:12,borderTop:'1px solid var(--rule-soft)',display:'flex',alignItems:'center',gap:8}}>
+                            <span style={{flex:1,fontSize:11.5,color:'var(--ink-mute)',fontFamily:'var(--mono)'}}>Send these steps to your coach to complete setup.</span>
+                            <button className="btn btn-primary" style={{fontSize:12,padding:'6px 12px'}} onClick={()=>copySteps(d)}>
+                              {copiedDevice===d.name?'✓ Copied!':'Copy steps'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
         {section==='Notifications'&&(
           <div>
             {[['Coach edits your plan',true],['New coach note on a workout',true],['Weekly report is published',true],['Missed workout reminders',false]].map(([label,on])=>(
