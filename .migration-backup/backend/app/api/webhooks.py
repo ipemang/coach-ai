@@ -1326,6 +1326,11 @@ def _is_outside_office_hours(coach_row: dict) -> bool:
     if coach_row.get("ai_autonomy_override"):
         return True
 
+    # COA-123: schedule enforcement is opt-in. If the toggle is off, coach is
+    # always treated as online (never outside hours).
+    if not coach_row.get("office_hours_enabled", False):
+        return False
+
     office_hours = coach_row.get("office_hours")
     if not office_hours or not isinstance(office_hours, dict):
         return False  # No hours configured — use normal routing
@@ -1361,7 +1366,7 @@ async def _fetch_coach_row(supabase: Any, coach_id: str) -> dict:
     try:
         rows = await _query_rows(
             supabase.table("coaches")
-            .select("id, office_hours, ai_autonomy_override, whatsapp_number")
+            .select("id, office_hours, ai_autonomy_override, office_hours_enabled, whatsapp_number")
             .eq("id", coach_id)
             .limit(1)
         )

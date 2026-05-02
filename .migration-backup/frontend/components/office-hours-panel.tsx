@@ -25,6 +25,7 @@ interface OfficeHoursState {
   sat?: string[];
   sun?: string[];
   ai_autonomy_override: boolean;
+  office_hours_enabled: boolean; // COA-123: master toggle
   is_currently_autonomous: boolean;
 }
 
@@ -36,6 +37,7 @@ const DEFAULT_STATE: OfficeHoursState = {
   thu: ["09:00", "18:00"],
   fri: ["09:00", "17:00"],
   ai_autonomy_override: false,
+  office_hours_enabled: false,
   is_currently_autonomous: false,
 };
 
@@ -47,7 +49,6 @@ export function OfficeHoursPanel() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch current config on mount
   useEffect(() => {
     setLoading(true);
     fetch("/api/office-hours")
@@ -64,12 +65,14 @@ export function OfficeHoursPanel() {
             sat: data.office_hours.sat,
             sun: data.office_hours.sun,
             ai_autonomy_override: data.ai_autonomy_override ?? false,
+            office_hours_enabled: data.office_hours_enabled ?? false,
             is_currently_autonomous: data.is_currently_autonomous ?? false,
           });
         } else {
           setState((s) => ({
             ...s,
             ai_autonomy_override: data.ai_autonomy_override ?? false,
+            office_hours_enabled: data.office_hours_enabled ?? false,
             is_currently_autonomous: data.is_currently_autonomous ?? false,
           }));
         }
@@ -79,10 +82,7 @@ export function OfficeHoursPanel() {
   }, []);
 
   function toggleDay(day: Day) {
-    setState((s) => ({
-      ...s,
-      [day]: s[day] ? undefined : ["09:00", "18:00"],
-    }));
+    setState((s) => ({ ...s, [day]: s[day] ? undefined : ["09:00", "18:00"] }));
   }
 
   function updateTime(day: Day, index: 0 | 1, value: string) {
@@ -100,9 +100,8 @@ export function OfficeHoursPanel() {
       const body = {
         timezone: state.timezone,
         ai_autonomy_override: state.ai_autonomy_override,
-        ...Object.fromEntries(
-          DAYS.filter((d) => state[d]).map((d) => [d, state[d]])
-        ),
+        office_hours_enabled: state.office_hours_enabled,
+        ...Object.fromEntries(DAYS.filter((d) => state[d]).map((d) => [d, state[d]])),
       };
       const res = await fetch("/api/office-hours", {
         method: "PATCH",
@@ -128,7 +127,6 @@ export function OfficeHoursPanel() {
     try {
       await fetch("/api/office-hours/toggle", { method: "POST" });
     } catch {
-      // revert on error
       setState((s) => ({ ...s, ai_autonomy_override: !next }));
     }
   }
@@ -137,7 +135,6 @@ export function OfficeHoursPanel() {
 
   return (
     <div className="relative">
-      {/* Status pill — always visible in header */}
       <button
         onClick={() => setOpen((v) => !v)}
         className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition ${
@@ -150,12 +147,25 @@ export function OfficeHoursPanel() {
         <span>{isAutonomous ? "AI Autonomous" : "Coach Online"}</span>
       </button>
 
-      {/* Dropdown panel */}
       {open && (
         <div className="absolute right-0 top-10 z-50 w-80 rounded-2xl border border-line bg-[#0f1117] p-5 shadow-2xl">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-white">Office Hours</h3>
             <button onClick={() => setOpen(false)} className="text-slate-500 hover:text-white text-lg leading-none">×</button>
+          </div>
+
+          {/* COA-123: Enable Schedule toggle */}
+          <div className="mb-3 flex items-center justify-between rounded-xl border border-line bg-white/5 px-3 py-2.5">
+            <div>
+              <p className="text-xs font-medium text-white">Enable Schedule</p>
+              <p className="text-xs text-slate-400">Enforce office hours window</p>
+            </div>
+            <button
+              onClick={() => setState((s) => ({ ...s, office_hours_enabled: !s.office_hours_enabled }))}
+              className={`relative h-6 w-11 rounded-full transition-colors ${state.office_hours_enabled ? "bg-indigo-500" : "bg-white/10"}`}
+            >
+              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${state.office_hours_enabled ? "translate-x-5" : "translate-x-0.5"}`} />
+            </button>
           </div>
 
           {/* AI Fully On toggle */}
@@ -166,15 +176,9 @@ export function OfficeHoursPanel() {
             </div>
             <button
               onClick={toggleOverride}
-              className={`relative h-6 w-11 rounded-full transition-colors ${
-                state.ai_autonomy_override ? "bg-sky-500" : "bg-white/10"
-              }`}
+              className={`relative h-6 w-11 rounded-full transition-colors ${state.ai_autonomy_override ? "bg-sky-500" : "bg-white/10"}`}
             >
-              <span
-                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                  state.ai_autonomy_override ? "translate-x-5" : "translate-x-0.5"
-                }`}
-              />
+              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${state.ai_autonomy_override ? "translate-x-5" : "translate-x-0.5"}`} />
             </button>
           </div>
 
@@ -186,14 +190,12 @@ export function OfficeHoursPanel() {
               onChange={(e) => setState((s) => ({ ...s, timezone: e.target.value }))}
               className="w-full rounded-lg border border-line bg-white/5 px-2 py-1.5 text-xs text-white"
             >
-              {TIMEZONES.map((tz) => (
-                <option key={tz} value={tz} className="bg-[#0f1117]">{tz}</option>
-              ))}
+              {TIMEZONES.map((tz) => <option key={tz} value={tz} className="bg-[#0f1117]">{tz}</option>)}
             </select>
           </div>
 
-          {/* Day rows */}
-          <div className="space-y-2">
+          {/* Day rows — dimmed when schedule disabled */}
+          <div className={`space-y-2 ${state.office_hours_enabled ? "opacity-100" : "opacity-40 pointer-events-none"}`}>
             {DAYS.map((day) => {
               const active = !!state[day];
               const hours = state[day] as string[] | undefined;
@@ -201,29 +203,15 @@ export function OfficeHoursPanel() {
                 <div key={day} className="flex items-center gap-2">
                   <button
                     onClick={() => toggleDay(day)}
-                    className={`w-10 shrink-0 rounded-md px-1 py-1 text-xs font-medium transition ${
-                      active
-                        ? "bg-indigo-500/30 text-indigo-300"
-                        : "bg-white/5 text-slate-500"
-                    }`}
+                    className={`w-10 shrink-0 rounded-md px-1 py-1 text-xs font-medium transition ${active ? "bg-indigo-500/30 text-indigo-300" : "bg-white/5 text-slate-500"}`}
                   >
                     {DAY_LABELS[day]}
                   </button>
                   {active && hours ? (
                     <div className="flex flex-1 items-center gap-1.5">
-                      <input
-                        type="time"
-                        value={hours[0]}
-                        onChange={(e) => updateTime(day, 0, e.target.value)}
-                        className="flex-1 rounded-md border border-line bg-white/5 px-1.5 py-1 text-xs text-white"
-                      />
+                      <input type="time" value={hours[0]} onChange={(e) => updateTime(day, 0, e.target.value)} className="flex-1 rounded-md border border-line bg-white/5 px-1.5 py-1 text-xs text-white" />
                       <span className="text-xs text-slate-500">–</span>
-                      <input
-                        type="time"
-                        value={hours[1]}
-                        onChange={(e) => updateTime(day, 1, e.target.value)}
-                        className="flex-1 rounded-md border border-line bg-white/5 px-1.5 py-1 text-xs text-white"
-                      />
+                      <input type="time" value={hours[1]} onChange={(e) => updateTime(day, 1, e.target.value)} className="flex-1 rounded-md border border-line bg-white/5 px-1.5 py-1 text-xs text-white" />
                     </div>
                   ) : (
                     <span className="text-xs text-slate-500 italic">AI autonomous</span>
@@ -233,13 +221,8 @@ export function OfficeHoursPanel() {
             })}
           </div>
 
-          {/* Save */}
           <div className="mt-4 flex items-center gap-2">
-            <button
-              onClick={save}
-              disabled={saving}
-              className="flex-1 rounded-xl bg-indigo-500/20 py-2 text-sm font-medium text-indigo-300 transition hover:bg-indigo-500/30 disabled:opacity-40"
-            >
+            <button onClick={save} disabled={saving} className="flex-1 rounded-xl bg-indigo-500/20 py-2 text-sm font-medium text-indigo-300 transition hover:bg-indigo-500/30 disabled:opacity-40">
               {saving ? "Saving…" : saved ? "✓ Saved" : "Save"}
             </button>
           </div>

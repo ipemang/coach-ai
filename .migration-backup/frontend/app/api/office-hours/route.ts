@@ -11,11 +11,14 @@ function getSupabase() {
 
 const DAY_MAP = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
+// COA-123: scheduleEnabled=false means coach is always online (never autonomous via schedule)
 function isCurrentlyAutonomous(
   officeHours: Record<string, unknown> | null,
-  override: boolean
+  override: boolean,
+  scheduleEnabled: boolean
 ): boolean {
   if (override) return true;
+  if (!scheduleEnabled) return false; // schedule toggled off → always online
   if (!officeHours) return false;
 
   const tz = (officeHours.timezone as string) || "UTC";
@@ -39,7 +42,7 @@ export async function GET() {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("coaches")
-    .select("id, office_hours, ai_autonomy_override")
+    .select("id, office_hours, ai_autonomy_override, office_hours_enabled")
     .eq("id", COACH_ID)
     .single();
 
@@ -47,15 +50,18 @@ export async function GET() {
     return NextResponse.json({ error: error?.message || "Coach not found" }, { status: 404 });
   }
 
+  const scheduleEnabled = !!data.office_hours_enabled;
   const autonomous = isCurrentlyAutonomous(
     data.office_hours as Record<string, unknown> | null,
-    !!data.ai_autonomy_override
+    !!data.ai_autonomy_override,
+    scheduleEnabled
   );
 
   return NextResponse.json({
     coach_id: data.id,
     office_hours: data.office_hours,
     ai_autonomy_override: !!data.ai_autonomy_override,
+    office_hours_enabled: scheduleEnabled,
     is_currently_autonomous: autonomous,
   });
 }
@@ -64,7 +70,7 @@ export async function PATCH(req: NextRequest) {
   const supabase = getSupabase();
   const body = await req.json().catch(() => ({}));
 
-  const { ai_autonomy_override, timezone, ...days } = body;
+  const { ai_autonomy_override, office_hours_enabled, timezone, ...days } = body;
 
   // Build office_hours JSONB
   const officeHours: Record<string, unknown> = { timezone: timezone || "America/New_York" };
@@ -79,6 +85,7 @@ export async function PATCH(req: NextRequest) {
     .update({
       office_hours: officeHours,
       ai_autonomy_override: !!ai_autonomy_override,
+      office_hours_enabled: !!office_hours_enabled, // COA-123
     })
     .eq("id", COACH_ID);
 

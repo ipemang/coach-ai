@@ -29,7 +29,7 @@ type EnrichedAthlete = Athlete & {
 };
 
 type Tab = "roster" | "queue" | "media" | "officehours";
-type Filter = "all" | "pending";
+type Filter = "all" | "watch" | "race" | "pending";
 
 interface OfficeHoursData {
   office_hours: Record<string, unknown> | null;
@@ -295,7 +295,16 @@ function KpiTile({ eyebrow, value, label, glyph, large = false, valueColor = "va
 
 // ─── TopBand ──────────────────────────────────────────────────────────────────
 
-function TopBand({ totalPending, onInvite, onSignOut }: { totalPending: number; onInvite: () => void; onSignOut: () => void; }) {
+function TopBand({ totalPending, onInvite, onSignOut, coachName }: {
+  totalPending: number;
+  onInvite: () => void;
+  onSignOut: () => void;
+  coachName: string | null;
+}) {
+  const initials = coachName
+    ? coachName.split(" ").slice(0, 2).map(w => w[0] ?? "").join("").toUpperCase()
+    : "?";
+
   return (
     <header style={{ borderBottom: "1px solid var(--rule)", background: "var(--linen)", position: "sticky", top: 0, zIndex: 30 }}>
       <div style={{ maxWidth: 1440, margin: "0 auto", padding: "14px 32px", display: "flex", alignItems: "center", gap: 24 }}>
@@ -339,6 +348,18 @@ function TopBand({ totalPending, onInvite, onSignOut }: { totalPending: number; 
               {totalPending} pending
             </div>
           )}
+          {/* Coach identity — portrait + name, matching design spec */}
+          {coachName && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, paddingLeft: 12, borderLeft: "1px solid var(--rule)" }}>
+              <Portrait initials={initials} size={32} tone="ochre" />
+              <div>
+                <div style={{ fontSize: 12.5, color: "var(--ink)", fontWeight: 600 }}>{coachName}</div>
+                <div className="ca-mono" style={{ fontSize: 9.5, color: "var(--ink-mute)", textTransform: "uppercase", letterSpacing: "0.12em" }}>
+                  Head coach
+                </div>
+              </div>
+            </div>
+          )}
           <button className="ca-btn ca-btn-ghost" onClick={onSignOut} style={{ fontSize: 12 }}>Sign out</button>
         </div>
       </div>
@@ -348,19 +369,31 @@ function TopBand({ totalPending, onInvite, onSignOut }: { totalPending: number; 
 
 // ─── Greeting ─────────────────────────────────────────────────────────────────
 
-function Greeting({ athleteCount }: { athleteCount: number }) {
+function Greeting({ athleteCount, racingCount, coachName }: {
+  athleteCount: number;
+  racingCount: number;
+  coachName: string | null;
+}) {
   const h = new Date().getHours();
   const salutation = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
   const date = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  const firstName = coachName ? coachName.split(" ")[0] : null;
+
+  // Build the subtext dynamically — matches design spec
+  const racingClause = racingCount > 0
+    ? ` ${racingCount === 1 ? "One" : racingCount} on the start line this weekend.`
+    : "";
+  const subtext = `${athleteCount} athlete${athleteCount !== 1 ? "s" : ""} in the stable.${racingClause} Here is the day, quietly.`;
+
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 24 }}>
       <div>
         <div className="ca-eyebrow ca-eyebrow-terra">{date}</div>
         <h1 className="ca-display" style={{ margin: "6px 0 0 0", fontSize: 42, color: "var(--ink)", letterSpacing: "-0.015em" }}>
-          {salutation}.
+          {salutation}{firstName ? `, ${firstName}.` : "."}
         </h1>
         <p className="ca-display-italic" style={{ margin: "8px 0 0 0", fontSize: 17, color: "var(--ink-soft)", maxWidth: 560 }}>
-          {athleteCount} athlete{athleteCount !== 1 ? "s" : ""} in the stable. Here is the day, quietly.
+          {subtext}
         </p>
       </div>
       <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -1065,6 +1098,14 @@ function RhythmRow({ label, value, max, color }: { label: string; value: number 
   );
 }
 
+// Classification chip colours matching the design spec
+const CLASS_CHIP: Record<string, { cls: string; label: string }> = {
+  flag:          { cls: "ca-chip-terra",  label: "Flag" },
+  plan_question: { cls: "ca-chip-aegean", label: "Plan question" },
+  check_in:      { cls: "ca-chip-ochre",  label: "Check-in" },
+  noise:         { cls: "",               label: "Noise" },
+};
+
 function QueueView({
   suggestions,
   athletes,
@@ -1098,6 +1139,8 @@ function QueueView({
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {suggestions.map((s) => {
           const busy = actionLoading === s.id;
+          const cls = s.message_class ? CLASS_CHIP[s.message_class] : CLASS_CHIP.check_in;
+          const hasPlanChange = (s as unknown as Record<string, unknown>).plan_modification_payload != null;
           return (
             <article key={s.id} className="tessera ca-rise" style={{ padding: 20 }}>
               <div style={{ display: "flex", gap: 14 }}>
@@ -1112,7 +1155,14 @@ function QueueView({
                         {relativeTime(s.created_at)}
                       </span>
                     </div>
-                    <span className="ca-chip ca-chip-ochre">Check-in</span>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <span className={`ca-chip ${cls.cls}`}>{cls.label}</span>
+                      {hasPlanChange && (
+                        <span className="ca-chip ca-chip-terra" style={{ fontSize: 9 }}>
+                          <G.Scroll size={10} color="var(--terracotta-deep)" /> plan change
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {s.athlete_message && (
@@ -1541,6 +1591,16 @@ export default function DashboardShell({
   const [mediaReviews, setMediaReviews] = useState<MediaReview[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
 
+  // ── Coach identity (for header + greeting) ──
+  const [coachName, setCoachName] = useState<string | null>(null);
+  useEffect(() => {
+    createBrowserSupabase().auth.getUser().then(({ data }) => {
+      const meta = data.user?.user_metadata;
+      const name = meta?.full_name ?? meta?.name ?? data.user?.email?.split("@")[0] ?? null;
+      setCoachName(name as string | null);
+    }).catch(() => {});
+  }, []);
+
   // ── Real-time subscription ──
   useEffect(() => {
     const supabase = createBrowserSupabase();
@@ -1797,11 +1857,38 @@ export default function DashboardShell({
 
   // ── Derived values ──
   const totalPending = suggestions.length;
-  const watching = athletes.filter(a => (a.pending_suggestions ?? 0) > 0).length;
+  // "To watch" = readiness < 70 OR high-priority AI flag (matches design spec)
+  const watching = athletes.filter(a => {
+    const cs = a.current_state as CurrentState | null | undefined;
+    const readiness = cs?.oura_readiness_score ?? null;
+    const flags = (cs?.predictive_flags ?? []) as PredictiveFlag[];
+    return (readiness !== null && readiness < 70) || flags.some(f => f.priority === "high");
+  }).length;
+  // "On the line" = racing within 2 weeks
+  const racing = athletes.filter(a => {
+    const sp = a.stable_profile as { race_date?: string } | null | undefined;
+    if (!sp?.race_date) return false;
+    const diff = Math.ceil((new Date(sp.race_date).getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000));
+    return diff >= 0 && diff <= 2;
+  }).length;
+
   const filteredAthletes = useMemo(() => {
-    const base = filter === "pending"
-      ? athletes.filter(a => (a.pending_suggestions ?? 0) > 0)
-      : athletes;
+    const base = (() => {
+      if (filter === "pending") return athletes.filter(a => (a.pending_suggestions ?? 0) > 0);
+      if (filter === "watch")   return athletes.filter(a => {
+        const cs = a.current_state as CurrentState | null | undefined;
+        const readiness = cs?.oura_readiness_score ?? null;
+        const flags = (cs?.predictive_flags ?? []) as PredictiveFlag[];
+        return (readiness !== null && readiness < 70) || flags.some(f => f.priority === "high");
+      });
+      if (filter === "race") return athletes.filter(a => {
+        const sp = a.stable_profile as { race_date?: string } | null | undefined;
+        if (!sp?.race_date) return false;
+        const diff = Math.ceil((new Date(sp.race_date).getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000));
+        return diff >= 0 && diff <= 4; // show ≤4 weeks for "racing soon" filter
+      });
+      return athletes;
+    })();
 
     // Urgency sort: high AI flags → pending suggestions → medium AI flags → rest
     return [...base].sort((a, b) => {
@@ -1824,10 +1911,10 @@ export default function DashboardShell({
 
   return (
     <div className="mosaic-bg" style={{ minHeight: "100vh" }}>
-      <TopBand totalPending={totalPending} onInvite={() => setInviteOpen(true)} onSignOut={handleSignOut} />
+      <TopBand totalPending={totalPending} onInvite={() => setInviteOpen(true)} onSignOut={handleSignOut} coachName={coachName} />
 
       <div style={{ maxWidth: 1440, margin: "0 auto", padding: "24px 32px 60px 32px" }}>
-        <Greeting athleteCount={athletes.length} />
+        <Greeting athleteCount={athletes.length} racingCount={racing} coachName={coachName} />
 
         {/* COA-102: Daily briefing panel */}
         <DailyDigest digest={digestData} loading={digestLoading} />
@@ -1849,8 +1936,8 @@ export default function DashboardShell({
         <section style={{ marginTop: 24, display: "grid", gridTemplateColumns: "1.3fr 1fr 1fr 1fr", gap: 1, background: "var(--rule)", border: "1px solid var(--rule)", borderRadius: 4, overflow: "hidden" }}>
           <KpiTile eyebrow="The stable" value={athletes.length} label="athletes under guidance" glyph={<G.Column size={22} color="var(--aegean-deep)" />} large />
           <KpiTile eyebrow="Need reply" value={totalPending} label={totalPending === 1 ? "message waiting" : "messages waiting"} glyph={<G.Scroll size={20} color="var(--terracotta-deep)" />} valueColor="var(--terracotta-deep)" />
-          <KpiTile eyebrow="Pending replies" value={watching} label="athletes with messages" glyph={<G.Heart size={20} color="var(--ochre)" />} valueColor="oklch(0.50 0.09 75)" />
-          <KpiTile eyebrow="Check-ins total" value={athletes.reduce((s, a) => s + (a.total_checkins ?? 0), 0)} label="across all athletes" glyph={<G.Mountain size={20} color="var(--aegean-deep)" />} valueColor="var(--aegean-deep)" />
+          <KpiTile eyebrow="To watch" value={watching} label={watching === 1 ? "low readiness" : "low readiness"} glyph={<G.Heart size={20} color="var(--ochre)" />} valueColor="oklch(0.50 0.09 75)" />
+          <KpiTile eyebrow="On the line" value={racing} label="racing in ≤2 weeks" glyph={<G.Mountain size={20} color="var(--aegean-deep)" />} valueColor="var(--aegean-deep)" />
         </section>
 
         {/* Tabs */}
@@ -1887,9 +1974,14 @@ export default function DashboardShell({
           <div style={{ flex: 1 }} />
           {tab === "roster" && (
             <div style={{ display: "flex", gap: 6, paddingBottom: 8 }}>
-              {(["all", "pending"] as Filter[]).map(f => (
-                <button key={f} onClick={() => setFilter(f)} style={{ padding: "6px 12px", border: `1px solid ${filter === f ? "var(--ink)" : "var(--rule)"}`, background: filter === f ? "var(--ink)" : "transparent", color: filter === f ? "var(--parchment)" : "var(--ink-soft)", fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.12em", textTransform: "uppercase", borderRadius: 2, cursor: "pointer", transition: "all 160ms ease" }}>
-                  {f === "all" ? "All" : "Pending"}
+              {([
+                { id: "all",     label: "All" },
+                { id: "watch",   label: "To watch" },
+                { id: "race",    label: "Racing soon" },
+                { id: "pending", label: "Pending" },
+              ] as { id: Filter; label: string }[]).map(f => (
+                <button key={f.id} onClick={() => setFilter(f.id as Filter)} style={{ padding: "6px 12px", border: `1px solid ${filter === f.id ? "var(--ink)" : "var(--rule)"}`, background: filter === f.id ? "var(--ink)" : "transparent", color: filter === f.id ? "var(--parchment)" : "var(--ink-soft)", fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.12em", textTransform: "uppercase", borderRadius: 2, cursor: "pointer", transition: "all 160ms ease" }}>
+                  {f.label}
                 </button>
               ))}
             </div>

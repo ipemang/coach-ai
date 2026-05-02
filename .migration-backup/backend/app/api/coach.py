@@ -661,6 +661,7 @@ class OfficeHoursPayload(_BaseModel):
     sat: Optional[list[str]] = None
     sun: Optional[list[str]] = None
     ai_autonomy_override: bool = False
+    office_hours_enabled: bool = False  # COA-123: master toggle — default OFF
 
 
 class OfficeHoursResponse(_BaseModel):
@@ -668,6 +669,7 @@ class OfficeHoursResponse(_BaseModel):
     office_hours: Optional[dict]
     ai_autonomy_override: bool
     is_currently_autonomous: bool
+    office_hours_enabled: bool = False  # COA-123
 
 
 @router.get("/office-hours", response_model=OfficeHoursResponse)
@@ -687,17 +689,18 @@ async def get_office_hours(
     coach_id = str(scope.coach_id)
 
     result = supabase_client.table("coaches").select(
-        "id, office_hours, ai_autonomy_override"
+        "id, office_hours, ai_autonomy_override, office_hours_enabled"
     ).eq("id", coach_id).limit(1).execute()
 
     row = result.data[0] if result.data else {}
     office_hours = row.get("office_hours")
     override = bool(row.get("ai_autonomy_override", False))
+    schedule_enabled = bool(row.get("office_hours_enabled", False))
 
-    # Compute current autonomy status
+    # Compute current autonomy status — COA-123: schedule only applies when toggle is ON
     _DAY_MAP = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
     is_autonomous = override
-    if not is_autonomous and office_hours and isinstance(office_hours, dict):
+    if not is_autonomous and schedule_enabled and office_hours and isinstance(office_hours, dict):
         tz_name = office_hours.get("timezone", "UTC")
         try:
             tz = ZoneInfo(tz_name)
@@ -723,6 +726,7 @@ async def get_office_hours(
         office_hours=office_hours,
         ai_autonomy_override=override,
         is_currently_autonomous=is_autonomous,
+        office_hours_enabled=schedule_enabled,
     )
 
 
@@ -752,6 +756,7 @@ async def update_office_hours(
         supabase_client.table("coaches").update({
             "office_hours": office_hours,
             "ai_autonomy_override": body.ai_autonomy_override,
+            "office_hours_enabled": body.office_hours_enabled,
         }).eq("id", coach_id).execute()
     except Exception as exc:
         logger.exception("Failed to update office hours for coach %s", coach_id)
