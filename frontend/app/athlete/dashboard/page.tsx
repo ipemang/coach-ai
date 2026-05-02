@@ -1360,6 +1360,7 @@ function DashboardInner({athlete, files, reports, onSignOut, uploading, onUpload
 export default function AthleteDashboardPage() {
   const router = useRouter();
   const [athlete, setAthlete] = useState<LiveAthlete|null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [files, setFiles] = useState<AthleteFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -1418,6 +1419,9 @@ export default function AthleteDashboardPage() {
           thresholdPace: '4:12/km',
           cssPace: '1:32/100m',
         });
+      } else {
+        // Profile fetch failed (RLS, network, or missing data) — show error state
+        setLoadError(true);
       }
       if(filesRes.status==='fulfilled'&&(filesRes.value as Response).ok){
         const d=await (filesRes.value as Response).json();setFiles(d);
@@ -1476,13 +1480,26 @@ export default function AthleteDashboardPage() {
     const sb=createBrowserSupabase();await sb.auth.signOut();router.replace('/login');
   }
 
-  if(loading||!athlete){
+  if(loading){
     return(
       <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'var(--parchment)'}}>
         <style dangerouslySetInnerHTML={{__html:STYLES}}/>
         <div style={{textAlign:'center'}}>
           <div className="brand-mark" style={{fontSize:24,justifyContent:'center',marginBottom:16}}>Andes<span style={{color:'var(--terracotta-deep)'}}>.</span>IA</div>
           <p className="mono" style={{fontSize:11,color:'var(--ink-mute)'}}>Loading your dashboard…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if(loadError||!athlete){
+    return(
+      <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'var(--parchment)'}}>
+        <style dangerouslySetInnerHTML={{__html:STYLES}}/>
+        <div style={{textAlign:'center',maxWidth:360}}>
+          <div className="brand-mark" style={{fontSize:24,justifyContent:'center',marginBottom:16}}>Andes<span style={{color:'var(--terracotta-deep)'}}>.</span>IA</div>
+          <p className="mono" style={{fontSize:11,color:'var(--terracotta-deep)',marginBottom:16}}>Could not load your profile.</p>
+          <button className="btn btn-primary" onClick={()=>window.location.reload()} style={{fontSize:12,padding:'8px 20px'}}>Try again</button>
         </div>
       </div>
     );
