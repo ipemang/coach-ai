@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Andes.IA — Coach Dashboard"
+version = "1.0.0"
+id = "artifacts/andes-ia"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19343
+
+[services.development]
+run = "pnpm --filter @workspace/andes-ia run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/andes-ia", "run", "build" ]
+publicDir = "artifacts/andes-ia/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19343"
+BASE_PATH = "/"

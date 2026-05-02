@@ -1,8 +1,16 @@
-# Workspace
+# Andes.IA — Coach Dashboard
 
 ## Overview
 
-pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
+B2B SaaS for endurance sports coaches. Ported from Vercel/Next.js to a Replit pnpm monorepo as a React+Vite artifact. Two user types: **coaches** and **athletes**.
+
+## Architecture
+
+- **Frontend**: `artifacts/andes-ia` — React + Vite, previewPath `/`
+- **Backend**: Python FastAPI on Railway (`https://coach-ai-production-a5aa.up.railway.app`)
+- **Auth**: Supabase (email/password + OAuth), `@supabase/ssr`
+- **Routing**: Wouter v3 (Switch/Route pattern, no base prop — BASE_URL handled by Vite config)
+- **Styling**: Custom design system in `src/index.css` — oklch color palette (parchment, aegean, terracotta, ochre, olive), `ca-*` CSS class prefix
 
 ## Stack
 
@@ -10,18 +18,42 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - **Node.js version**: 24
 - **Package manager**: pnpm
 - **TypeScript version**: 5.9
-- **API framework**: Express 5
-- **Database**: PostgreSQL + Drizzle ORM
-- **Validation**: Zod (`zod/v4`), `drizzle-zod`
-- **API codegen**: Orval (from OpenAPI spec)
-- **Build**: esbuild (CJS bundle)
+
+## Env Vars Needed
+
+- `VITE_SUPABASE_URL` — Supabase project URL
+- `VITE_SUPABASE_ANON_KEY` — Supabase anon key
+- `VITE_BACKEND_URL` — Railway backend URL (has hardcoded fallback)
+
+## Key Pages / Routes
+
+| Route | Component | Who sees it |
+|---|---|---|
+| `/` | LandingPage | Public |
+| `/login` | LoginPage | Public |
+| `/signup` | SignupPage | Public |
+| `/auth/callback` | AuthCallbackPage | Supabase OAuth redirect |
+| `/auth/forgot-password` | ForgotPasswordPage | Public |
+| `/auth/reset-password` | ResetPasswordPage | Public |
+| `/onboarding` | OnboardingPage | New coaches |
+| `/dashboard` | DashboardPage | Coaches |
+| `/dashboard/athletes/:id` | AthleteDetailPage | Coaches |
+| `/athlete/dashboard` | AthleteDashboardPage | Athletes |
+| `/athlete/onboarding` | AthleteOnboardingPage | New athletes |
+
+## Key Files
+
+- `src/App.tsx` — Wouter Switch routing
+- `src/lib/supabase.ts` — Supabase browser client (lazy, no crash when env vars missing)
+- `src/lib/api.ts` — API helpers, `BACKEND` constant, `getAuthToken()`
+- `src/lib/types.ts` — Shared TypeScript interfaces
+- `src/index.css` — Full design system (CSS custom props + `ca-*` utility classes)
 
 ## Key Commands
 
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- `pnpm --filter @workspace/api-server run dev` — run API server locally
+- `pnpm --filter @workspace/andes-ia run dev` — start frontend dev server
+- `pnpm --filter @workspace/andes-ia run typecheck` — typecheck frontend
 
-See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
+## Source Backup
+
+Original Next.js 14 App Router source is at `.migration-backup/frontend/`.
