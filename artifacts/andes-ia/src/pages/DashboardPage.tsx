@@ -9,7 +9,7 @@ type BiometricBaseline = { readiness_avg: number | null; hrv_avg: number | null;
 type EnrichedAthlete = Athlete & { pending_suggestions?: number; total_checkins?: number; last_checkin_at?: string | null; week_workouts?: WeekWorkout[]; biometric_baseline?: BiometricBaseline | null };
 type Tab = "roster" | "queue" | "media" | "officehours";
 type Filter = "all" | "pending";
-interface OfficeHoursData { office_hours: Record<string, unknown> | null; ai_autonomy_override: boolean; is_currently_autonomous: boolean }
+interface OfficeHoursData { office_hours: Record<string, unknown> | null; ai_autonomy_override: boolean; is_currently_autonomous: boolean; after_hours_message?: string | null; urgency_keywords?: string[] | null; }
 type DigestData = { generated_at: string; summary: string; athlete_flags: { athlete_id: string; name: string; reason: string }[] };
 type MediaReview = { id: string; athlete_id: string; media_type: "image" | "video"; ai_analysis: string | null; coach_edited_analysis: string | null; coach_comment: string | null; signed_url: string | null; status: string; created_at: string; athletes?: { full_name: string | null; display_name: string | null } | null };
 
@@ -588,6 +588,118 @@ function CsvImportModal({ onClose, onImported }: { onClose: () => void; onImport
   );
 }
 
+const DEFAULT_URGENCY_KEYWORDS = ["injury", "illness", "URGENT", "pain", "emergency", "racing today", "sick"];
+
+function EditVoiceModal({ current, onClose, onSaved }: { current: string; onClose: () => void; onSaved: (msg: string) => void }) {
+  const [message, setMessage] = useState(current);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    setLoading(true); setError(null);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/office-hours`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ after_hours_message: message.trim() }),
+      });
+      if (res.ok) { onSaved(message.trim()); onClose(); }
+      else { const b = await res.json().catch(() => ({})); setError((b?.detail as string) ?? "Failed to save."); }
+    } catch { setError("Network error."); }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "oklch(0.28 0.022 55 / 0.4)", backdropFilter: "blur(4px)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={onClose}>
+      <div className="ca-panel" style={{ width: "100%", maxWidth: 520, padding: 32 }} onClick={e => e.stopPropagation()}>
+        <div className="ca-eyebrow ca-eyebrow-terra" style={{ marginBottom: 8 }}>The understudy's voice</div>
+        <h2 className="ca-display" style={{ fontSize: 24, margin: "0 0 6px" }}>Edit after-hours message</h2>
+        <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, color: "var(--ink-soft)", lineHeight: 1.55, margin: "0 0 20px" }}>
+          This is the opening message athletes receive when they reach out outside your office hours. Write in your own voice — the AI will adapt from here.
+        </p>
+        <textarea
+          value={message}
+          onChange={e => setMessage(e.target.value)}
+          rows={5}
+          style={{ width: "100%", padding: "12px 14px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 15, lineHeight: 1.65, color: "var(--ink)", outline: "none", resize: "vertical", boxSizing: "border-box" }}
+          placeholder="Your coach is off the pitch until morning…"
+        />
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4, marginBottom: 14 }}>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--ink-faint)" }}>{message.length} chars</span>
+        </div>
+        {error && <div style={{ padding: "10px 14px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13, marginBottom: 14 }}>{error}</div>}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="ca-btn ca-btn-terra" style={{ flex: 1 }} disabled={loading || !message.trim()} onClick={handleSave}>{loading ? "Saving…" : "Save voice →"}</button>
+          <button className="ca-btn ca-btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UrgencyRulesModal({ current, onClose, onSaved }: { current: string[]; onClose: () => void; onSaved: (keywords: string[]) => void }) {
+  const [keywords, setKeywords] = useState<string[]>(current.length ? current : DEFAULT_URGENCY_KEYWORDS);
+  const [newKw, setNewKw] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function addKeyword() {
+    const kw = newKw.trim();
+    if (kw && !keywords.includes(kw)) { setKeywords(k => [...k, kw]); setNewKw(""); }
+  }
+
+  async function handleSave() {
+    setLoading(true); setError(null);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/office-hours`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ urgency_keywords: keywords }),
+      });
+      if (res.ok) { onSaved(keywords); onClose(); }
+      else { const b = await res.json().catch(() => ({})); setError((b?.detail as string) ?? "Failed to save."); }
+    } catch { setError("Network error."); }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "oklch(0.28 0.022 55 / 0.4)", backdropFilter: "blur(4px)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={onClose}>
+      <div className="ca-panel" style={{ width: "100%", maxWidth: 480, padding: 32 }} onClick={e => e.stopPropagation()}>
+        <div className="ca-eyebrow ca-eyebrow-ochre" style={{ marginBottom: 8 }}>Emergency response</div>
+        <h2 className="ca-display" style={{ fontSize: 24, margin: "0 0 6px" }}>Urgency rules</h2>
+        <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, color: "var(--ink-soft)", lineHeight: 1.55, margin: "0 0 20px" }}>
+          When an athlete's message contains any of these words or phrases, the AI flags it as urgent and notifies you immediately — regardless of office hours.
+        </p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16, minHeight: 36 }}>
+          {keywords.map((kw, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", background: "var(--ochre-soft)", border: "1px solid var(--ochre)", borderRadius: 2 }}>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink)" }}>{kw}</span>
+              <button onClick={() => setKeywords(k => k.filter((_, j) => j !== i))} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-mute)", fontSize: 16, lineHeight: 1, padding: "0 0 1px 2px" }}>×</button>
+            </div>
+          ))}
+          {keywords.length === 0 && <span style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-faint)" }}>No rules yet — add one below.</span>}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+          <input
+            type="text" value={newKw} onChange={e => setNewKw(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addKeyword())}
+            placeholder="Add a word or phrase…"
+            style={{ flex: 1, padding: "8px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)", outline: "none" }}
+          />
+          <button className="ca-btn ca-btn-ghost" onClick={addKeyword} disabled={!newKw.trim()}>Add</button>
+        </div>
+        {error && <div style={{ padding: "10px 14px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13, marginBottom: 14 }}>{error}</div>}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="ca-btn ca-btn-primary" style={{ flex: 1 }} disabled={loading} onClick={handleSave}>{loading ? "Saving…" : "Save rules →"}</button>
+          <button className="ca-btn ca-btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [, navigate] = useLocation();
   const [athletes, setAthletes] = useState<EnrichedAthlete[]>([]);
@@ -608,6 +720,9 @@ export default function DashboardPage() {
   const [mediaActionLoading, setMediaActionLoading] = useState<string | null>(null);
   const [mediaComment, setMediaComment] = useState<Record<string, string>>({});
   const [digestDismissed, setDigestDismissed] = useState(false);
+  const [voiceEditOpen, setVoiceEditOpen] = useState(false);
+  const [urgencyRulesOpen, setUrgencyRulesOpen] = useState(false);
+  const [ohSaving, setOhSaving] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -708,6 +823,23 @@ export default function DashboardPage() {
   }, []);
 
   async function handleSignOut() { const sb = createBrowserSupabase(); if (sb) await sb.auth.signOut(); navigate("/login"); }
+
+  async function handleToggleAutonomy() {
+    if (!ohData || ohSaving) return;
+    const newVal = !ohData.ai_autonomy_override;
+    setOhData(d => d ? { ...d, ai_autonomy_override: newVal } : d);
+    setOhSaving(true);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/office-hours`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ ai_autonomy_override: newVal }),
+      });
+      if (!res.ok) setOhData(d => d ? { ...d, ai_autonomy_override: !newVal } : d);
+    } catch { setOhData(d => d ? { ...d, ai_autonomy_override: !newVal } : d); }
+    setOhSaving(false);
+  }
 
   const handleMediaAction = useCallback(async (id: string, action: "approved" | "rejected", comment?: string) => {
     setMediaActionLoading(id);
@@ -919,28 +1051,81 @@ export default function DashboardPage() {
 
           {tab === "officehours" && ohData && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+
+              {/* Left: schedule + autonomy toggle */}
               <div className="ca-panel" style={{ padding: 28 }}>
-                <div className="ca-eyebrow ca-eyebrow-terra">When the door is open</div>
-                <h2 className="ca-display" style={{ margin: "8px 0 4px 0", fontSize: 28 }}>Office hours</h2>
-                <div style={{ marginTop: 20, display: "flex", flexDirection: "column" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                  <div className="ca-eyebrow ca-eyebrow-terra">When the door is open</div>
+                  <div style={{ padding: "3px 10px", background: ohData.is_currently_autonomous ? "var(--olive)" : "var(--aegean-deep)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: "oklch(0.96 0.02 80)" }}>
+                    {ohData.is_currently_autonomous ? "Coach online" : "After hours"}
+                  </div>
+                </div>
+                <h2 className="ca-display" style={{ margin: "4px 0 20px", fontSize: 28 }}>Office hours</h2>
+
+                {/* AI autonomy toggle */}
+                <div style={{ marginBottom: 20, padding: "14px 16px", background: "var(--linen)", border: "1px solid var(--rule)", borderRadius: 2, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                  <div>
+                    <div style={{ fontFamily: "var(--body)", fontWeight: 600, fontSize: 13.5, color: "var(--ink)", marginBottom: 2 }}>AI fully autonomous</div>
+                    <div style={{ fontFamily: "var(--body)", fontSize: 12, color: "var(--ink-soft)" }}>Override office hours — AI responds to everything</div>
+                  </div>
+                  <button
+                    onClick={handleToggleAutonomy}
+                    disabled={ohSaving}
+                    style={{
+                      width: 44, height: 24, borderRadius: 12, border: "none", cursor: ohSaving ? "not-allowed" : "pointer",
+                      background: ohData.ai_autonomy_override ? "var(--aegean-deep)" : "var(--rule)",
+                      position: "relative", flexShrink: 0, transition: "background 200ms ease", opacity: ohSaving ? 0.6 : 1,
+                    }}
+                    aria-label={ohData.ai_autonomy_override ? "Disable AI autonomy" : "Enable AI autonomy"}
+                  >
+                    <span style={{
+                      position: "absolute", top: 3, left: ohData.ai_autonomy_override ? 23 : 3, width: 18, height: 18,
+                      background: "white", borderRadius: "50%", transition: "left 200ms ease",
+                      boxShadow: "0 1px 3px oklch(0.3 0.02 60 / 0.3)",
+                    }} />
+                  </button>
+                </div>
+
+                {/* Day grid */}
+                <div style={{ display: "flex", flexDirection: "column" }}>
                   {DAY_KEYS_OH.map((k, i) => {
                     const oh = ohData.office_hours as Record<string, unknown> | null;
                     const h = oh?.[k];
                     const hours = Array.isArray(h) && h.length >= 2 ? `${h[0]} – ${h[1]}` : "Closed";
                     return (
-                      <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "14px 0", borderBottom: i < 6 ? "1px dashed var(--rule)" : "none" }}>
-                        <span className="ca-display" style={{ fontSize: 18, color: hours === "Closed" ? "var(--ink-mute)" : "var(--ink)" }}>{DAY_NAMES_OH[i]}</span>
-                        <span className="ca-mono" style={{ fontSize: 14, color: hours === "Closed" ? "var(--ink-mute)" : "var(--aegean-deep)" }}>{hours}</span>
+                      <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "12px 0", borderBottom: i < 6 ? "1px dashed var(--rule)" : "none" }}>
+                        <span className="ca-display" style={{ fontSize: 17, color: hours === "Closed" ? "var(--ink-mute)" : "var(--ink)" }}>{DAY_NAMES_OH[i]}</span>
+                        <span className="ca-mono" style={{ fontSize: 13, color: hours === "Closed" ? "var(--ink-mute)" : "var(--aegean-deep)" }}>{hours}</span>
                       </div>
                     );
                   })}
                 </div>
               </div>
-              <div className="ca-panel" style={{ padding: 28, background: "linear-gradient(155deg, oklch(0.68 0.135 42) 0%, oklch(0.56 0.130 38) 100%)", color: "oklch(0.98 0.02 50)" }}>
-                <div className="ca-eyebrow" style={{ color: "oklch(0.88 0.05 45)" }}>The understudy's voice</div>
-                <h2 className="ca-display" style={{ margin: "8px 0 4px 0", fontSize: 28, color: "oklch(0.98 0.02 50)" }}>After-hours reply</h2>
-                <div style={{ marginTop: 20, padding: "18px 22px", background: "oklch(1 0 0 / 0.1)", border: "1px solid oklch(1 0 0 / 0.2)", borderRadius: 2, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 17, lineHeight: 1.55, color: "oklch(0.98 0.02 50)" }}>
-                  &ldquo;Your coach is off the pitch until morning. I've taken your note and they'll see it first thing.&rdquo;
+
+              {/* Right: after-hours voice + buttons */}
+              <div className="ca-panel" style={{ padding: 28, background: "linear-gradient(155deg, oklch(0.68 0.135 42) 0%, oklch(0.56 0.130 38) 100%)", color: "oklch(0.98 0.02 50)", display: "flex", flexDirection: "column" }}>
+                <div className="ca-eyebrow" style={{ color: "oklch(0.88 0.05 45)", marginBottom: 4 }}>The understudy's voice</div>
+                <h2 className="ca-display" style={{ margin: "0 0 20px", fontSize: 28, color: "oklch(0.98 0.02 50)" }}>After-hours reply</h2>
+
+                <div style={{ flex: 1, padding: "18px 22px", background: "oklch(1 0 0 / 0.10)", border: "1px solid oklch(1 0 0 / 0.20)", borderRadius: 2, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 16.5, lineHeight: 1.6, color: "oklch(0.98 0.02 50)", marginBottom: 20 }}>
+                  &ldquo;{ohData.after_hours_message ?? "Your coach is off the pitch until morning. I've taken your note and they'll see it first thing. If this is urgent — pain, illness, racing today — reply URGENT."}&rdquo;
+                </div>
+
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button
+                    className="ca-btn"
+                    onClick={() => setVoiceEditOpen(true)}
+                    style={{ background: "oklch(1 0 0 / 0.14)", border: "1px solid oklch(1 0 0 / 0.28)", color: "oklch(0.98 0.02 50)", fontFamily: "var(--mono)", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", padding: "8px 16px", cursor: "pointer", borderRadius: 2 }}
+                  >
+                    Edit voice
+                  </button>
+                  <button
+                    className="ca-btn"
+                    onClick={() => setUrgencyRulesOpen(true)}
+                    style={{ background: "oklch(1 0 0 / 0.14)", border: "1px solid oklch(1 0 0 / 0.28)", color: "oklch(0.98 0.02 50)", fontFamily: "var(--mono)", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", padding: "8px 16px", cursor: "pointer", borderRadius: 2 }}
+                  >
+                    Urgency rules
+                  </button>
                 </div>
               </div>
             </div>
@@ -955,6 +1140,20 @@ export default function DashboardPage() {
       {inviteOpen && <InviteModal onClose={() => setInviteOpen(false)} />}
       {csvImportOpen && <CsvImportModal onClose={() => setCsvImportOpen(false)} onImported={() => { setCsvImportOpen(false); setRefreshKey(k => k + 1); }} />}
       {refineTarget && <RefineModal suggestion={refineTarget} onClose={() => setRefineTarget(null)} onSend={handleModified} />}
+      {voiceEditOpen && ohData && (
+        <EditVoiceModal
+          current={ohData.after_hours_message ?? "Your coach is off the pitch until morning. I've taken your note and they'll see it first thing. If this is urgent — pain, illness, racing today — reply URGENT."}
+          onClose={() => setVoiceEditOpen(false)}
+          onSaved={(msg) => setOhData(d => d ? { ...d, after_hours_message: msg } : d)}
+        />
+      )}
+      {urgencyRulesOpen && ohData && (
+        <UrgencyRulesModal
+          current={ohData.urgency_keywords ?? []}
+          onClose={() => setUrgencyRulesOpen(false)}
+          onSaved={(kws) => setOhData(d => d ? { ...d, urgency_keywords: kws } : d)}
+        />
+      )}
     </div>
   );
 }
