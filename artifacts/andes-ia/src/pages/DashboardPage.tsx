@@ -392,6 +392,9 @@ export default function DashboardPage() {
   const [digestData, setDigestData] = useState<DigestData | null>(null);
   const [mediaReviews, setMediaReviews] = useState<MediaReview[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
+  const [mediaActionLoading, setMediaActionLoading] = useState<string | null>(null);
+  const [mediaComment, setMediaComment] = useState<Record<string, string>>({});
+  const [digestDismissed, setDigestDismissed] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -430,12 +433,26 @@ export default function DashboardPage() {
       const token = await getAuthToken();
       const res = await fetch(`${BACKEND}/api/v1/office-hours`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
       if (res.ok) setOhData(await res.json());
+      else setOhData({ office_hours: null, ai_autonomy_override: false, is_currently_autonomous: false });
     })();
   }, [tab, ohData]);
 
   useEffect(() => {
+    async function loadDigest() {
+      const token = await getAuthToken();
+      if (!token) return;
+      try {
+        const res = await fetch(`${BACKEND}/api/v1/coach/daily-digest`, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) setDigestData(await res.json());
+      } catch {}
+    }
+    loadDigest();
+  }, []);
+
+  useEffect(() => {
     if (!athletes.length) return;
     const sb = createBrowserSupabase();
+    if (!sb) return;
     const channel = sb.channel("dashboard-suggestions-rt")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "suggestions" }, (payload: { new: Record<string, unknown> }) => {
         const r = payload.new as Record<string, unknown>;
@@ -477,7 +494,20 @@ export default function DashboardPage() {
     } finally { setActionLoading(null); }
   }, []);
 
-  async function handleSignOut() { const sb = createBrowserSupabase(); await sb.auth.signOut(); navigate("/login"); }
+  async function handleSignOut() { const sb = createBrowserSupabase(); if (sb) await sb.auth.signOut(); navigate("/login"); }
+
+  const handleMediaAction = useCallback(async (id: string, action: "approved" | "rejected", comment?: string) => {
+    setMediaActionLoading(id);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/media-reviews/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ action, coach_comment: comment ?? null }),
+      });
+      if (res.ok) setMediaReviews(prev => prev.filter(r => r.id !== id));
+    } finally { setMediaActionLoading(null); }
+  }, []);
 
   const totalPending = suggestions.length;
   const filteredAthletes = useMemo(() => {
@@ -544,6 +574,24 @@ export default function DashboardPage() {
           <KpiTile eyebrow="Check-ins total" value={athletes.reduce((s, a) => s + (a.total_checkins ?? 0), 0)} label="across all athletes" glyph={<G.Mountain />} valueColor="var(--aegean-deep)" />
         </section>
 
+        {/* Daily digest banner */}
+        {digestData && !digestDismissed && (
+          <div className="ca-panel" style={{ marginTop: 20, padding: "18px 24px", display: "grid", gridTemplateColumns: "1fr auto", gap: 20, alignItems: "start", borderLeft: "3px solid var(--aegean-deep)" }}>
+            <div>
+              <div className="ca-eyebrow ca-eyebrow-aegean" style={{ marginBottom: 8 }}>Today's digest · {new Date(digestData.generated_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</div>
+              <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 14.5, lineHeight: 1.65, color: "var(--ink-soft)", margin: 0 }}>{digestData.summary}</p>
+              {digestData.athlete_flags.length > 0 && (
+                <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {digestData.athlete_flags.map(f => (
+                    <span key={f.athlete_id} className="ca-chip ca-chip-terra" style={{ fontSize: 10 }} title={f.reason}>{f.name}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button className="ca-btn ca-btn-ghost" style={{ fontSize: 11, padding: "4px 10px" }} onClick={() => setDigestDismissed(true)}>Dismiss</button>
+          </div>
+        )}
+
         {/* Tabs */}
         <nav style={{ marginTop: 32, borderBottom: "1px solid var(--rule)", display: "flex", gap: 4, alignItems: "center" }}>
           {([
@@ -594,14 +642,64 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {mediaReviews.map(r => (
-                    <div key={r.id} className="ca-panel" style={{ padding: 20 }}>
-                      <p style={{ fontFamily: "var(--serif)", fontSize: 13 }}>{r.athletes?.full_name ?? "Athlete"} · {r.media_type}</p>
-                      {r.ai_analysis && <p style={{ fontSize: 12, color: "var(--ink-soft)", fontStyle: "italic", marginTop: 6 }}>{r.ai_analysis}</p>}
-                    </div>
-                  ))}
+                  {mediaReviews.map(r => {
+                    const busy = mediaActionLoading === r.id;
+                    const comment = mediaComment[r.id] ?? "";
+                    return (
+                      <article key={r.id} className="ca-panel" style={{ padding: 24 }}>
+                        <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+                          {r.signed_url && (
+                            <div style={{ flexShrink: 0, width: 100, height: 100, borderRadius: 2, overflow: "hidden", border: "1px solid var(--rule)", background: "var(--linen-deep)" }}>
+                              {r.media_type === "image"
+                                ? <img src={r.signed_url} alt="athlete media" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                : <video src={r.signed_url} style={{ width: "100%", height: "100%" }} controls />}
+                            </div>
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, marginBottom: 8 }}>
+                              <div>
+                                <span className="ca-display" style={{ fontSize: 16 }}>{r.athletes?.full_name ?? "Athlete"}</span>
+                                <span className="ca-mono" style={{ fontSize: 10, color: "var(--ink-mute)", marginLeft: 10 }}>{r.media_type} · {new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                              </div>
+                              <span className={`ca-chip ${r.status === "pending" ? "ca-chip-ochre" : r.status === "approved" ? "ca-chip-aegean" : "ca-chip-terra"}`} style={{ fontSize: 9 }}>{r.status}</span>
+                            </div>
+                            {(r.ai_analysis || r.coach_edited_analysis) && (
+                              <div style={{ padding: "10px 14px", background: "var(--parchment-2)", borderLeft: "2px solid var(--aegean-soft)", fontSize: 13, fontFamily: "var(--serif)", fontStyle: "italic", color: "var(--ink-soft)", lineHeight: 1.55, marginBottom: 12 }}>
+                                {r.coach_edited_analysis ?? r.ai_analysis}
+                              </div>
+                            )}
+                            {r.status === "pending" && (
+                              <>
+                                <textarea
+                                  value={comment}
+                                  onChange={e => setMediaComment(prev => ({ ...prev, [r.id]: e.target.value }))}
+                                  placeholder="Add a note for the athlete (optional)…"
+                                  rows={2}
+                                  style={{ width: "100%", padding: "8px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)", outline: "none", resize: "none", lineHeight: 1.5, boxSizing: "border-box", marginBottom: 10 }}
+                                />
+                                <div style={{ display: "flex", gap: 8 }}>
+                                  <button className="ca-btn ca-btn-primary" style={{ fontSize: 12, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleMediaAction(r.id, "approved", comment || undefined)}>
+                                    <G.Check /> {busy ? "Sending…" : "Approve"}
+                                  </button>
+                                  <button className="ca-btn ca-btn-ghost" style={{ fontSize: 12, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={() => handleMediaAction(r.id, "rejected", comment || undefined)}>
+                                    <G.X /> Reject
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               )}
+            </div>
+          )}
+
+          {tab === "officehours" && !ohData && (
+            <div style={{ padding: "60px 0", textAlign: "center" }}>
+              <p className="ca-eyebrow" style={{ fontSize: 11 }}>Loading office hours…</p>
             </div>
           )}
 

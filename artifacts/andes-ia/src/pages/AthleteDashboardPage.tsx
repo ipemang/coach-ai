@@ -86,7 +86,7 @@ export default function AthleteDashboardPage() {
 
   async function handleSignOut() {
     const sb = createBrowserSupabase();
-    await sb.auth.signOut();
+    if (sb) await sb.auth.signOut();
     navigate("/login");
   }
 
