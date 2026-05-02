@@ -176,6 +176,84 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Testimonials */}
+      <section style={{ background: "oklch(0.885 0.028 75)", borderTop: "1px solid oklch(0.80 0.025 70)", borderBottom: "1px solid oklch(0.80 0.025 70)" }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "72px 32px" }}>
+          <div style={{ textAlign: "center", marginBottom: 56 }}>
+            <div style={{ fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: "oklch(0.52 0.130 38)", marginBottom: 12 }}>
+              Coaches say
+            </div>
+            <h2 style={{ fontFamily: "var(--serif)", fontSize: 42, fontWeight: 500, letterSpacing: "-0.01em", margin: 0 }}>
+              Built for real coaching
+            </h2>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 24 }}>
+            {[
+              {
+                quote: "I was spending 2 hours a day answering check-ins. Now I spend 20 minutes reviewing drafts. My athletes still get my voice — I just have help.",
+                name: "Marcos V.",
+                detail: "Triathlon coach · 18 athletes",
+                initials: "MV",
+                color: "oklch(0.42 0.080 200)",
+                avatarBg: "oklch(0.88 0.04 200)",
+                avatarBorder: "oklch(0.78 0.06 200)",
+              },
+              {
+                quote: "What surprised me was how quickly the AI picked up on how I talk to different athletes. It doesn't sound like a chatbot. It sounds like me on a good day.",
+                name: "Sara L.",
+                detail: "Running coach · 11 athletes",
+                initials: "SL",
+                color: "oklch(0.52 0.130 38)",
+                avatarBg: "oklch(0.90 0.04 45)",
+                avatarBorder: "oklch(0.80 0.07 45)",
+              },
+              {
+                quote: "My athletes feel more supported than ever, and I actually have time to think about their training instead of just reacting to messages.",
+                name: "Daniel R.",
+                detail: "Cycling & gravel coach · 24 athletes",
+                initials: "DR",
+                color: "oklch(0.45 0.060 125)",
+                avatarBg: "oklch(0.90 0.03 130)",
+                avatarBorder: "oklch(0.80 0.05 130)",
+              },
+            ].map(t => (
+              <div key={t.name} style={{
+                background: "oklch(0.925 0.025 78)",
+                border: "1px solid oklch(0.80 0.025 70)",
+                borderRadius: 4, padding: "32px 28px",
+                display: "flex", flexDirection: "column", gap: 24,
+              }}>
+                <div style={{ borderLeft: "2px solid oklch(0.80 0.025 70)", paddingLeft: 16 }}>
+                  <p style={{
+                    fontFamily: "var(--serif)", fontStyle: "italic",
+                    fontSize: 17, lineHeight: 1.65,
+                    color: "oklch(0.32 0.022 55)", margin: 0,
+                  }}>
+                    &ldquo;{t.quote}&rdquo;
+                  </p>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: "auto" }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: 2, flexShrink: 0,
+                    background: t.avatarBg,
+                    border: `1px solid ${t.avatarBorder}`,
+                    display: "grid", placeItems: "center",
+                    fontFamily: "var(--serif)", fontWeight: 500, fontSize: 14,
+                    color: t.color,
+                  }}>
+                    {t.initials}
+                  </div>
+                  <div>
+                    <div style={{ fontFamily: "var(--serif)", fontWeight: 500, fontSize: 15 }}>{t.name}</div>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "oklch(0.58 0.018 65)", marginTop: 3 }}>{t.detail}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Pricing */}
       <section style={{ background: "oklch(0.885 0.028 75)", borderTop: "1px solid oklch(0.80 0.025 70)", borderBottom: "1px solid oklch(0.80 0.025 70)" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "72px 32px" }}>
