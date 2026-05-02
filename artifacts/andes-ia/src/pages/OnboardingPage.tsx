@@ -137,7 +137,7 @@ export default function OnboardingPage() {
           {step > 1 && <button className="ca-btn ca-btn-ghost" onClick={() => setStep(s => (s - 1) as typeof step)}>← Back</button>}
           <div style={{ flex: 1 }} />
           {step < 4 ? (
-            <button className="ca-btn ca-btn-primary" onClick={() => setStep(s => (s + 1) as typeof step)}>Continue →</button>
+            <button className="ca-btn ca-btn-primary" disabled={step === 1 && !coachName.trim()} onClick={() => setStep(s => (s + 1) as typeof step)} style={{ opacity: step === 1 && !coachName.trim() ? 0.45 : 1, cursor: step === 1 && !coachName.trim() ? "not-allowed" : "pointer" }}>Continue →</button>
           ) : (
             <button className="ca-btn ca-btn-primary" onClick={handleFinish} disabled={loading}>{loading ? "Setting up…" : "Go to dashboard →"}</button>
           )}

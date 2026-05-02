@@ -1,0 +1,202 @@
+Context
+
+During testing and free trial, coaches have unlimited AI interactions. This is intentional — we want no friction while validating the product. However, at scale, unmetered AI usage will destroy unit economics at the Starter ($29/mo) tier especially.
+
+This ticket specifies the full metering architecture to be built when we graduate from testing. Do not build until we have real usage data from at least 20 coaches.
+
+The core problem
+
+Every AI call has a real cost. The three main cost drivers per coach per month:
+
+Action
+
+Model
+
+Estimated tokens
+
+Cost per call (Groq)
+
+Training plan generation
+
+Llama 3.1 70B
+
+~8,000 in + 2,000 out
+
+~$0.06
+
+Athlete chat reply
+
+Llama 3.1 8B
+
+~2,000 in + 500 out
+
+~$0.004
+
+Post-workout analysis
+
+Mistral 7B
+
+~3,000 in + 800 out
+
+~$0.006
+
+Interaction Agent wrap
+
+Llama 3.1 8B
+
+~1,500 in + 400 out
+
+~$0.003
+
+A coach with 25 athletes sending 5 check-ins/week each = ~125 AI calls/week → ~500/month. At blended ~$0.01/call that's $5/month in AI cost per coach at Growth tier. Manageable. But a Pro coach with 80 athletes doing heavy plan generation could hit $40–60/month — which is 2–3× the subscription price.
+
+Proposed tier limits (starting point — validate with usage data)
+
+Tier
+
+Price
+
+AI messages/day
+
+Plan generations/month
+
+Token budget/month
+
+Free trial
+
+$0
+
+20
+
+3
+
+~500K tokens
+
+Starter
+
+$29
+
+50
+
+10
+
+~2M tokens
+
+Growth
+
+$79
+
+150
+
+30
+
+~6M tokens
+
+Pro
+
+$149
+
+Unlimited
+
+Unlimited
+
+~20M tokens (soft cap, alert at 80%)
+
+"AI messages" = any call that hits an LLM (chat reply, analysis, plan generation, Interaction Agent wrap — all count).
+
+Technical design
+
+Token tracking table (new)
+
+CREATE TABLE usage_events (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  coach_id    uuid REFERENCES coaches(id),
+  event_type  text NOT NULL,  -- 'chat', 'plan_gen', 'analysis', 'interaction_wrap'
+  model       text NOT NULL,
+  input_tokens  int NOT NULL DEFAULT 0,
+  output_tokens int NOT NULL DEFAULT 0,
+  cost_usd    numeric(10,6),
+  created_at  timestamptz DEFAULT now()
+);
+
+CREATE INDEX ON usage_events (coach_id, created_at);
+
+Limit enforcement
+
+Every FastAPI endpoint that calls an LLM must:
+
+Look up coach's tier from coaches.subscription_tier
+
+Count usage_events for today (or month) for that coach
+
+If over limit: return HTTP 429 with { "error": "daily_limit_reached", "limit": N, "resets_at": "<ISO date>" }
+
+If under limit: proceed, then INSERT a usage_events row after the call with actual token counts from the model response
+
+Middleware approach (preferred)
+
+Build a check_usage_limit(coach_id, event_type) dependency that can be injected into any route:
+
+@router.post("/chat")
+async def coach_chat(
+    body: ChatRequest,
+    principal = Depends(require_roles("coach")),
+    _: None = Depends(check_usage_limit),  # throws 429 if over limit
+):
+    ...
+
+Free trial
+
+New coaches get subscription_tier = 'trial' on coaches row creation
+
+Trial expires 14 days after coaches.created_at OR when they hit the trial token budget, whichever comes first
+
+After expiry: all AI endpoints return 402 with upgrade CTA
+
+Trial limits are intentionally generous enough to see real value but not to run a real squad on
+
+Soft cap for Pro tier
+
+Pro is "unlimited" in marketing but has a soft cap at 20M tokens/month. At 80% utilization, send an internal Slack alert (not to the coach). At 100%: throttle to 1 req/5 seconds, do not hard block. Log for manual review — these coaches may need enterprise pricing.
+
+Dashboard visibility
+
+Coaches should be able to see their usage. Add a usage widget to the dashboard:
+
+"X of Y AI messages used today" (progress bar)
+
+"X of Y plan generations used this month"
+
+Link to upgrade if approaching limit
+
+What NOT to build in this ticket
+
+Stripe subscription tier integration (separate ticket — link Stripe webhook to coaches.subscription_tier)
+
+Per-athlete limits (not planned)
+
+Usage-based billing / overages (evaluate post-PMF)
+
+Acceptance criteria (when this ships)
+
+Every LLM call inserts a usage_events row with real token counts
+
+Limits enforced per tier via middleware dependency
+
+Free trial: 14-day window with defined token budget
+
+HTTP 429 returned with clear resets_at timestamp when limit hit
+
+Pro tier: soft cap with internal alerting, no hard block
+
+Dashboard usage widget shows real-time consumption
+
+Unit economics verified: AI cost per coach < 15% of subscription revenue at each tier
+
+Do not start until
+
+20+ active coaches in production
+
+Real usage data showing p50 and p95 token consumption per coach per tier
+
+Stripe webhook → coaches.subscription_tier sync is live

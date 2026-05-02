@@ -580,9 +580,9 @@ export default function DashboardPage() {
             <div>
               <div className="ca-eyebrow ca-eyebrow-aegean" style={{ marginBottom: 8 }}>Today's digest · {new Date(digestData.generated_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</div>
               <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 14.5, lineHeight: 1.65, color: "var(--ink-soft)", margin: 0 }}>{digestData.summary}</p>
-              {digestData.athlete_flags.length > 0 && (
+              {(digestData.athlete_flags ?? []).length > 0 && (
                 <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {digestData.athlete_flags.map(f => (
+                  {(digestData.athlete_flags ?? []).map(f => (
                     <span key={f.athlete_id} className="ca-chip ca-chip-terra" style={{ fontSize: 10 }} title={f.reason}>{f.name}</span>
                   ))}
                 </div>
