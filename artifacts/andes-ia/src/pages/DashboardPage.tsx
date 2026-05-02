@@ -920,17 +920,19 @@ export default function DashboardPage() {
       {/* Header */}
       <header style={{ borderBottom: "1px solid var(--rule)", background: "var(--linen)", position: "sticky", top: 0, zIndex: 30 }}>
         <div style={{ maxWidth: 1440, margin: "0 auto", padding: "14px 32px", display: "flex", alignItems: "center", gap: 24 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <svg width="32" height="32" viewBox="0 0 32 32">
-              <rect x="2" y="2" width="28" height="28" fill="none" stroke="var(--ink)" strokeWidth="1" />
-              <g fill="var(--terracotta)" opacity="0.85"><rect x="5" y="5" width="5" height="5" /><rect x="16" y="5" width="5" height="5" /><rect x="11" y="11" width="5" height="5" /><rect x="22" y="11" width="5" height="5" /><rect x="5" y="17" width="5" height="5" /><rect x="16" y="17" width="5" height="5" /></g>
-              <g fill="var(--aegean-deep)" opacity="0.9"><rect x="11" y="5" width="5" height="5" /><rect x="22" y="5" width="5" height="5" /><rect x="5" y="11" width="5" height="5" /><rect x="16" y="11" width="5" height="5" /><rect x="11" y="17" width="5" height="5" /><rect x="22" y="17" width="5" height="5" /></g>
-            </svg>
-            <div>
-              <div className="ca-display" style={{ fontSize: 20, lineHeight: 1 }}>Andes<span style={{ color: "var(--terracotta-deep)" }}>.</span>IA</div>
-              <div className="ca-eyebrow" style={{ fontSize: 8.5, marginTop: 2 }}>THE ATHLETE'S ATHLETE</div>
+          <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+              <svg width="32" height="32" viewBox="0 0 32 32">
+                <rect x="2" y="2" width="28" height="28" fill="none" stroke="var(--ink)" strokeWidth="1" />
+                <g fill="var(--terracotta)" opacity="0.85"><rect x="5" y="5" width="5" height="5" /><rect x="16" y="5" width="5" height="5" /><rect x="11" y="11" width="5" height="5" /><rect x="22" y="11" width="5" height="5" /><rect x="5" y="17" width="5" height="5" /><rect x="16" y="17" width="5" height="5" /></g>
+                <g fill="var(--aegean-deep)" opacity="0.9"><rect x="11" y="5" width="5" height="5" /><rect x="22" y="5" width="5" height="5" /><rect x="5" y="11" width="5" height="5" /><rect x="16" y="11" width="5" height="5" /><rect x="11" y="17" width="5" height="5" /><rect x="22" y="17" width="5" height="5" /></g>
+              </svg>
+              <div>
+                <div className="ca-display" style={{ fontSize: 20, lineHeight: 1 }}>Andes<span style={{ color: "var(--terracotta-deep)" }}>.</span>IA</div>
+                <div className="ca-eyebrow" style={{ fontSize: 8.5, marginTop: 2 }}>THE ATHLETE'S ATHLETE</div>
+              </div>
             </div>
-          </div>
+          </Link>
           <div style={{ flex: 1 }} />
           <button className="ca-btn ca-btn-ghost" onClick={() => setCsvImportOpen(true)} style={{ fontSize: 12 }}>↑ Import CSV</button>
           <button className="ca-btn ca-btn-terra" onClick={() => setInviteOpen(true)} style={{ fontSize: 12 }}><G.Plus /> Invite athlete</button>
