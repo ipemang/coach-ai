@@ -36,6 +36,14 @@ type AthleteDetailData = {
   checkins: CheckIn[];
 };
 
+type TrainingReport = {
+  id: string;
+  period: string;
+  status: "draft" | "sent" | string;
+  content?: string | null;
+  created_at: string;
+};
+
 export default function AthleteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [, navigate] = useLocation();
@@ -47,6 +55,10 @@ export default function AthleteDetailPage() {
   const [refineId, setRefineId] = useState<string | null>(null);
   const [refineText, setRefineText] = useState("");
   const [sendMsg, setSendMsg] = useState(false);
+  const [trainingReports, setTrainingReports] = useState<TrainingReport[] | null>(null);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportGenerating, setReportGenerating] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [msgText, setMsgText] = useState("");
   const [msgSending, setMsgSending] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -68,6 +80,43 @@ export default function AthleteDetailPage() {
     }
     load();
   }, [id, navigate]);
+
+  useEffect(() => {
+    if (activeTab !== "plan" || trainingReports !== null) return;
+    async function fetchReports() {
+      setReportsLoading(true);
+      const token = await getAuthToken();
+      try {
+        const res = await fetch(`${BACKEND}/api/v1/athletes/${id}/reports`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) setTrainingReports(await res.json());
+        else setTrainingReports([]);
+      } catch { setTrainingReports([]); }
+      setReportsLoading(false);
+    }
+    fetchReports();
+  }, [activeTab, id, trainingReports]);
+
+  async function handleGenerateReport() {
+    setReportGenerating(true);
+    setReportError(null);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/athletes/${id}/reports/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      if (res.ok) {
+        const newReport: TrainingReport = await res.json();
+        setTrainingReports(prev => [newReport, ...(prev ?? [])]);
+      } else {
+        const b = await res.json().catch(() => ({}));
+        setReportError((b?.detail as string) ?? `Error ${res.status} — the server could not generate the report.`);
+      }
+    } catch { setReportError("Network error — could not reach the server."); }
+    setReportGenerating(false);
+  }
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000); }
 
@@ -352,7 +401,9 @@ export default function AthleteDetailPage() {
 
         {/* Training plan tab */}
         {activeTab === "plan" && (
-          <div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+
+            {/* Weekly workouts */}
             {workouts.length === 0 ? (
               <div style={{ textAlign: "center", padding: 60 }}>
                 <div className="ca-ornament">◆ ◆ ◆</div>
@@ -382,6 +433,58 @@ export default function AthleteDetailPage() {
                 ))}
               </div>
             )}
+
+            {/* Training Reports */}
+            <div className="ca-panel" style={{ padding: 24 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <div className="ca-eyebrow ca-eyebrow-terra">Training reports</div>
+                <button
+                  className="ca-btn ca-btn-ghost"
+                  onClick={handleGenerateReport}
+                  disabled={reportGenerating}
+                  style={{ fontSize: 12, padding: "6px 14px" }}
+                >
+                  {reportGenerating ? "Generating…" : "+ Generate draft"}
+                </button>
+              </div>
+
+              {reportError && (
+                <div style={{ padding: "10px 14px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13, marginBottom: 14, lineHeight: 1.5 }}>
+                  {reportError}
+                </div>
+              )}
+
+              {reportsLoading && (
+                <p className="ca-eyebrow" style={{ fontSize: 11, textAlign: "center", padding: "20px 0" }}>Loading reports…</p>
+              )}
+
+              {!reportsLoading && trainingReports !== null && trainingReports.length === 0 && !reportError && (
+                <div style={{ padding: "28px 0", border: "1px dashed var(--rule)", borderRadius: 2, textAlign: "center" }}>
+                  <p className="ca-display" style={{ fontSize: 16, color: "var(--ink-mute)", margin: "0 0 4px" }}>No reports yet</p>
+                  <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-faint)", margin: 0 }}>Generate a draft from last week's data</p>
+                </div>
+              )}
+
+              {!reportsLoading && trainingReports && trainingReports.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {trainingReports.map(r => (
+                    <div key={r.id} style={{ padding: "14px 16px", background: "var(--linen)", border: "1px solid var(--rule)", borderRadius: 2 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                        <span className="ca-display" style={{ fontSize: 14 }}>{r.period ?? "Weekly report"}</span>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <span className={`ca-chip ${r.status === "sent" ? "ca-chip-aegean" : "ca-chip-terra"}`} style={{ fontSize: 9 }}>{r.status}</span>
+                          <span className="ca-mono" style={{ fontSize: 10, color: "var(--ink-mute)" }}>{new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                        </div>
+                      </div>
+                      {r.content && (
+                        <p style={{ margin: 0, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-soft)" }}>{r.content}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
           </div>
         )}
 
