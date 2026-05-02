@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { createBrowserSupabase } from "../lib/supabase";
-import { BACKEND, parseJwtClaims } from "../lib/api";
+import { BACKEND, resolvePostLoginRoute } from "../lib/api";
 
 export default function AuthCallbackPage() {
   const [, navigate] = useLocation();
@@ -13,6 +13,7 @@ export default function AuthCallbackPage() {
     async function run() {
       const params = new URLSearchParams(search);
       const supabase = createBrowserSupabase();
+      if (!supabase) { navigate("/login"); return; }
 
       const code = params.get("code");
       if (code) {
@@ -27,6 +28,8 @@ export default function AuthCallbackPage() {
       if (!session) { navigate("/login"); return; }
 
       const token = session.access_token;
+
+      // ── Athlete invite link flow ───────────────────────────────────────
       const pendingInvite =
         localStorage.getItem("pending_athlete_invite") ||
         params.get("invite") || null;
@@ -40,13 +43,13 @@ export default function AuthCallbackPage() {
           );
           if (res.ok || res.status === 409) {
             localStorage.removeItem("pending_athlete_invite");
-            setStatus("Account linked! Refreshing session…");
+            setStatus("Account linked! Setting up your profile…");
             await supabase.auth.refreshSession();
             navigate("/athlete/onboarding");
             return;
           }
           const body = await res.json().catch(() => ({}));
-          setError((body?.detail as string) ?? "Could not link your account.");
+          setError((body?.detail as string) ?? "Could not link your account. Please contact your coach.");
           return;
         } catch {
           setError("Network error — please check your connection and try again.");
@@ -54,46 +57,17 @@ export default function AuthCallbackPage() {
         }
       }
 
-      const claims = parseJwtClaims(token);
-      if (claims.role === "athlete" || claims.athlete_id) {
-        setStatus("Checking onboarding…");
-        try {
-          const res = await fetch(`${BACKEND}/api/v1/athlete/onboarding/status`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (res.ok) {
-            const data = await res.json();
-            navigate(data.onboarding_complete ? "/athlete/dashboard" : "/athlete/onboarding");
-          } else {
-            navigate("/athlete/onboarding");
-          }
-        } catch {
-          navigate("/athlete/onboarding");
-        }
-        return;
-      }
+      // ── Normal login: resolve role & onboarding status ────────────────
+      setStatus("Finding your workspace…");
+      const route = await resolvePostLoginRoute(token);
 
-      setStatus("Setting up your workspace…");
-      try {
-        const res = await fetch(`${BACKEND}/api/v1/coach/onboarding/status`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.onboarding_complete) {
-            navigate("/dashboard");
-          } else {
-            const name = encodeURIComponent(session.user.user_metadata?.full_name ?? "");
-            const email = encodeURIComponent(session.user.email ?? "");
-            navigate(`/onboarding?name=${name}&email=${email}`);
-          }
-        } else {
-          const name = encodeURIComponent(session.user.user_metadata?.full_name ?? "");
-          const email = encodeURIComponent(session.user.email ?? "");
-          navigate(`/onboarding?name=${name}&email=${email}`);
-        }
-      } catch {
-        navigate("/onboarding");
+      // For coaches going to onboarding, pre-fill name + email in query params
+      if (route === "/onboarding") {
+        const name = encodeURIComponent(session.user.user_metadata?.full_name ?? "");
+        const email = encodeURIComponent(session.user.email ?? "");
+        navigate(`/onboarding?name=${name}&email=${email}`);
+      } else {
+        navigate(route);
       }
     }
     run();
@@ -103,9 +77,9 @@ export default function AuthCallbackPage() {
     return (
       <div className="mosaic-bg" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "1.5rem" }}>
         <div className="ca-panel" style={{ width: "100%", maxWidth: 400, padding: "2.5rem 2rem", textAlign: "center" }}>
-          <p style={{ fontSize: 40, margin: "0 0 16px" }}>⚠️</p>
-          <h2 className="ca-display" style={{ fontSize: 22, color: "var(--ink)", margin: "0 0 10px" }}>Something went wrong</h2>
-          <p style={{ fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.65, margin: "0 0 24px" }}>{error}</p>
+          <div className="ca-ornament" style={{ fontSize: 14, marginBottom: 16 }}>◆ ◆ ◆</div>
+          <h2 style={{ fontFamily: "var(--serif)", fontSize: 24, fontWeight: 500, color: "var(--ink)", margin: "0 0 12px" }}>Something went wrong</h2>
+          <p style={{ fontSize: 13.5, fontFamily: "var(--serif)", fontStyle: "italic", color: "var(--ink-soft)", lineHeight: 1.65, margin: "0 0 28px" }}>{error}</p>
           <button onClick={() => navigate("/login")} className="ca-btn ca-btn-primary" style={{ width: "100%", justifyContent: "center", padding: "10px" }}>
             Back to sign in
           </button>
@@ -117,11 +91,23 @@ export default function AuthCallbackPage() {
   return (
     <div className="mosaic-bg" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ textAlign: "center" }}>
-        <div className="ca-avatar" style={{ width: 52, height: 52, fontSize: 22, margin: "0 auto 20px" }}>
-          <span>C</span>
+        <div style={{ display: "flex", gap: 3, justifyContent: "center", marginBottom: 24 }}>
+          {[0, 1, 2].map(i => (
+            <div key={i} style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: i === 0 ? "var(--terracotta)" : i === 1 ? "var(--aegean-deep)" : "var(--ochre)",
+              animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+            }} />
+          ))}
         </div>
-        <p className="ca-eyebrow" style={{ fontSize: 11 }}>{status}</p>
+        <p style={{ fontFamily: "var(--mono)", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--ink-mute)" }}>{status}</p>
       </div>
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 0.3; transform: scale(0.85); }
+          50% { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
     </div>
   );
 }
