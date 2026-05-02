@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLocation, Link } from "wouter";
 import { createBrowserSupabase } from "../lib/supabase";
-import { getRoleAndRedirect } from "../lib/api";
+import { getRoleAndRedirect, consumeLoginRedirect } from "../lib/api";
 
 function AndesLogo({ size = 28 }: { size?: number }) {
   const cell = Math.floor(size / 4);
@@ -96,7 +96,10 @@ export default function LoginPage() {
     if (authErr) { setError(authErr.message); setLoading(false); return; }
     const token = data.session?.access_token ?? "";
     const { role, route } = await getRoleAndRedirect(token);
-    if (role === "coach" && route === "/onboarding") {
+    const storedPath = consumeLoginRedirect(role);
+    if (storedPath) {
+      navigate(storedPath);
+    } else if (role === "coach" && route === "/onboarding") {
       const name = encodeURIComponent(data.session?.user.user_metadata?.full_name ?? "");
       const emailParam = encodeURIComponent(data.session?.user.email ?? "");
       navigate(`/onboarding?name=${name}&email=${emailParam}`);

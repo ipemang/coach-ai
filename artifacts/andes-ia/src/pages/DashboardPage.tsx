@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useLocation, Link } from "wouter";
 import { createBrowserSupabase } from "../lib/supabase";
-import { BACKEND, getAuthToken } from "../lib/api";
+import { BACKEND, getAuthToken, storeLoginRedirect } from "../lib/api";
 import type { Athlete, Suggestion, StableProfile, CurrentState, PredictiveFlag } from "../lib/types";
 
 type WeekWorkout = { scheduled_date: string; status: string; distance_km: number | null };
@@ -612,13 +612,13 @@ export default function DashboardPage() {
   useEffect(() => {
     async function load() {
       const token = await getAuthToken();
-      if (!token) { navigate("/login?expired=1"); return; }
+      if (!token) { storeLoginRedirect(); navigate("/login?expired=1"); return; }
       try {
         const [athletesRes, suggestionsRes] = await Promise.all([
           fetch(`${BACKEND}/api/v1/athletes`, { headers: { Authorization: `Bearer ${token}` } }),
           fetch(`${BACKEND}/api/v1/suggestions/pending`, { headers: { Authorization: `Bearer ${token}` } }),
         ]);
-        if (athletesRes.status === 401) { navigate("/login?expired=1"); return; }
+        if (athletesRes.status === 401) { storeLoginRedirect(); navigate("/login?expired=1"); return; }
         if (athletesRes.ok) setAthletes(await athletesRes.json());
         if (suggestionsRes.ok) setSuggestions(await suggestionsRes.json());
       } catch { setError("Could not load dashboard. Please check your connection."); }

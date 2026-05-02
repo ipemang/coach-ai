@@ -14,6 +14,7 @@ import OnboardingPage from "./pages/OnboardingPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import type { AuthChangeEvent } from "@supabase/supabase-js";
 import { createBrowserSupabase } from "./lib/supabase";
+import { storeLoginRedirect } from "./lib/api";
 
 const PROTECTED_PATHS = ["/dashboard", "/athlete/dashboard", "/onboarding"];
 
@@ -26,6 +27,7 @@ function SessionGuard() {
         const path = window.location.pathname;
         const isProtected = PROTECTED_PATHS.some(p => path.startsWith(p));
         if (isProtected) {
+          storeLoginRedirect();
           window.location.href = "/login?expired=1";
         }
       }

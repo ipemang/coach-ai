@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { createBrowserSupabase } from "../lib/supabase";
-import { BACKEND, getRoleAndRedirect } from "../lib/api";
+import { BACKEND, getRoleAndRedirect, consumeLoginRedirect } from "../lib/api";
 
 export default function AuthCallbackPage() {
   const [, navigate] = useLocation();
@@ -67,7 +67,8 @@ export default function AuthCallbackPage() {
         const email = encodeURIComponent(session.user.email ?? "");
         navigate(`/onboarding?name=${name}&email=${email}`);
       } else {
-        navigate(route);
+        const storedPath = consumeLoginRedirect(role);
+        navigate(storedPath ?? route);
       }
     }
     run();
