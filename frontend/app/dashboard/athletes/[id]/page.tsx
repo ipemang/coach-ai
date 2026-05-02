@@ -219,6 +219,7 @@ export default async function AthleteProfilePage({
         {/* Back link */}
         <Link
           href="/dashboard"
+          className="ca-back-link"
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -232,11 +233,10 @@ export default async function AthleteProfilePage({
             opacity: 0.8,
             transition: "opacity 160ms",
           }}
-          onMouseOver={(e) => ((e.target as HTMLElement).style.opacity = "1")}
-          onMouseOut={(e) => ((e.target as HTMLElement).style.opacity = "0.8")}
         >
           ← Dashboard
         </Link>
+        <style>{`.ca-back-link:hover { opacity: 1 !important; }`}</style>
 
         {/* ── Header ─────────────────────────────────────────────── */}
         <div
