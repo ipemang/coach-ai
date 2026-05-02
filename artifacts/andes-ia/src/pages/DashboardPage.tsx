@@ -723,6 +723,9 @@ export default function DashboardPage() {
   const [voiceEditOpen, setVoiceEditOpen] = useState(false);
   const [urgencyRulesOpen, setUrgencyRulesOpen] = useState(false);
   const [ohSaving, setOhSaving] = useState(false);
+  const [editingDay, setEditingDay] = useState<string | null>(null);
+  const [dayDraft, setDayDraft] = useState<{ open: string; close: string; enabled: boolean }>({ open: "09:00", close: "17:00", enabled: true });
+  const [ohHoursSaving, setOhHoursSaving] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -823,6 +826,33 @@ export default function DashboardPage() {
   }, []);
 
   async function handleSignOut() { const sb = createBrowserSupabase(); if (sb) await sb.auth.signOut(); navigate("/login"); }
+
+  function startEditDay(key: string) {
+    const oh = ohData?.office_hours as Record<string, unknown> | null;
+    const h = oh?.[key];
+    const arr = Array.isArray(h) && h.length >= 2 ? h as string[] : null;
+    setDayDraft({ open: arr?.[0] ?? "09:00", close: arr?.[1] ?? "17:00", enabled: arr !== null });
+    setEditingDay(key);
+  }
+
+  async function handleSaveDay(key: string) {
+    if (!ohData || ohHoursSaving) return;
+    const updatedOh = { ...(ohData.office_hours as Record<string, unknown> ?? {}), [key]: dayDraft.enabled ? [dayDraft.open, dayDraft.close] : null };
+    const prevOh = ohData.office_hours;
+    setOhData(d => d ? { ...d, office_hours: updatedOh } : d);
+    setEditingDay(null);
+    setOhHoursSaving(true);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/office-hours`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ office_hours: updatedOh }),
+      });
+      if (!res.ok) setOhData(d => d ? { ...d, office_hours: prevOh } : d);
+    } catch { setOhData(d => d ? { ...d, office_hours: prevOh } : d); }
+    setOhHoursSaving(false);
+  }
 
   async function handleToggleAutonomy() {
     if (!ohData || ohSaving) return;
@@ -1060,7 +1090,8 @@ export default function DashboardPage() {
                     {ohData.is_currently_autonomous ? "Coach online" : "After hours"}
                   </div>
                 </div>
-                <h2 className="ca-display" style={{ margin: "4px 0 20px", fontSize: 28 }}>Office hours</h2>
+                <h2 className="ca-display" style={{ margin: "4px 0 2px", fontSize: 28 }}>Office hours</h2>
+                <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-soft)", margin: "0 0 20px", lineHeight: 1.5 }}>Outside these windows, athletes hear from the understudy.</p>
 
                 {/* AI autonomy toggle */}
                 <div style={{ marginBottom: 20, padding: "14px 16px", background: "var(--linen)", border: "1px solid var(--rule)", borderRadius: 2, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
@@ -1092,10 +1123,79 @@ export default function DashboardPage() {
                     const oh = ohData.office_hours as Record<string, unknown> | null;
                     const h = oh?.[k];
                     const hours = Array.isArray(h) && h.length >= 2 ? `${h[0]} – ${h[1]}` : "Closed";
+                    const isEditing = editingDay === k;
                     return (
-                      <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "12px 0", borderBottom: i < 6 ? "1px dashed var(--rule)" : "none" }}>
-                        <span className="ca-display" style={{ fontSize: 17, color: hours === "Closed" ? "var(--ink-mute)" : "var(--ink)" }}>{DAY_NAMES_OH[i]}</span>
-                        <span className="ca-mono" style={{ fontSize: 13, color: hours === "Closed" ? "var(--ink-mute)" : "var(--aegean-deep)" }}>{hours}</span>
+                      <div key={k} style={{ borderBottom: i < 6 ? "1px dashed var(--rule)" : "none" }}>
+                        {/* Collapsed row — click to edit */}
+                        {!isEditing && (
+                          <div
+                            onClick={() => startEditDay(k)}
+                            style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "12px 0", cursor: "pointer" }}
+                            title="Click to edit"
+                          >
+                            <span className="ca-display" style={{ fontSize: 17, color: hours === "Closed" ? "var(--ink-mute)" : "var(--ink)" }}>{DAY_NAMES_OH[i]}</span>
+                            <span className="ca-mono" style={{ fontSize: 13, color: hours === "Closed" ? "var(--ink-mute)" : "var(--aegean-deep)" }}>{hours}</span>
+                          </div>
+                        )}
+                        {/* Expanded editor */}
+                        {isEditing && (
+                          <div style={{ padding: "12px 0 14px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                              <span className="ca-display" style={{ fontSize: 17, color: "var(--ink)" }}>{DAY_NAMES_OH[i]}</span>
+                              {/* Open / Closed toggle */}
+                              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontFamily: "var(--mono)", fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: dayDraft.enabled ? "var(--aegean-deep)" : "var(--ink-mute)" }}>
+                                <button
+                                  onClick={() => setDayDraft(d => ({ ...d, enabled: !d.enabled }))}
+                                  style={{
+                                    width: 36, height: 20, borderRadius: 10, border: "none", cursor: "pointer",
+                                    background: dayDraft.enabled ? "var(--aegean-deep)" : "var(--rule)",
+                                    position: "relative", flexShrink: 0, transition: "background 180ms ease",
+                                  }}
+                                >
+                                  <span style={{
+                                    position: "absolute", top: 2, left: dayDraft.enabled ? 18 : 2, width: 16, height: 16,
+                                    background: "white", borderRadius: "50%", transition: "left 180ms ease",
+                                    boxShadow: "0 1px 2px oklch(0.3 0.02 60 / 0.25)",
+                                  }} />
+                                </button>
+                                {dayDraft.enabled ? "Open" : "Closed"}
+                              </label>
+                            </div>
+                            {/* Time inputs */}
+                            {dayDraft.enabled && (
+                              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+                                <input
+                                  type="time" value={dayDraft.open}
+                                  onChange={e => setDayDraft(d => ({ ...d, open: e.target.value }))}
+                                  style={{ flex: 1, padding: "6px 10px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 13, color: "var(--ink)", outline: "none" }}
+                                />
+                                <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-mute)" }}>to</span>
+                                <input
+                                  type="time" value={dayDraft.close}
+                                  onChange={e => setDayDraft(d => ({ ...d, close: e.target.value }))}
+                                  style={{ flex: 1, padding: "6px 10px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 13, color: "var(--ink)", outline: "none" }}
+                                />
+                              </div>
+                            )}
+                            <div style={{ display: "flex", gap: 8 }}>
+                              <button
+                                onClick={() => handleSaveDay(k)}
+                                disabled={ohHoursSaving}
+                                className="ca-btn ca-btn-primary"
+                                style={{ fontSize: 11, padding: "5px 14px" }}
+                              >
+                                {ohHoursSaving ? "Saving…" : "Save"}
+                              </button>
+                              <button
+                                onClick={() => setEditingDay(null)}
+                                className="ca-btn ca-btn-ghost"
+                                style={{ fontSize: 11, padding: "5px 12px" }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
