@@ -151,6 +151,9 @@ export default function AthleteDetailPage() {
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reportGenerating, setReportGenerating] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [reportSending, setReportSending] = useState<string | null>(null);
+  const [reportSendError, setReportSendError] = useState<Record<string, string>>({});
+  const [reportEditDraft, setReportEditDraft] = useState<Record<string, string>>({});
   const [sessionNotes, setSessionNotes] = useState<SessionNote[] | null>(null);
   const [notesLoading, setNotesLoading] = useState(false);
   const [noteText, setNoteText] = useState("");
@@ -320,6 +323,27 @@ export default function AthleteDetailPage() {
       }
     } catch { setReportError("Network error — could not reach the server."); }
     setReportGenerating(false);
+  }
+
+  async function handleSendReport(reportId: string, content: string) {
+    setReportSending(reportId);
+    setReportSendError(prev => { const n = { ...prev }; delete n[reportId]; return n; });
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/athletes/${id}/reports/${reportId}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ content }),
+      });
+      if (res.ok) {
+        setTrainingReports(prev => prev ? prev.map(r => r.id === reportId ? { ...r, status: "sent", content } : r) : prev);
+        setReportEditDraft(prev => { const n = { ...prev }; delete n[reportId]; return n; });
+      } else {
+        const b = await res.json().catch(() => ({}));
+        setReportSendError(prev => ({ ...prev, [reportId]: (b?.detail as string) ?? `Error ${res.status}` }));
+      }
+    } catch { setReportSendError(prev => ({ ...prev, [reportId]: "Network error — could not send." })); }
+    setReportSending(null);
   }
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000); }
@@ -799,20 +823,55 @@ export default function AthleteDetailPage() {
 
               {!reportsLoading && trainingReports && trainingReports.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {trainingReports.map(r => (
-                    <div key={r.id} style={{ padding: "14px 16px", background: "var(--linen)", border: "1px solid var(--rule)", borderRadius: 2 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-                        <span className="ca-display" style={{ fontSize: 14 }}>{r.period ?? "Weekly report"}</span>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                          <span className={`ca-chip ${r.status === "sent" ? "ca-chip-aegean" : "ca-chip-terra"}`} style={{ fontSize: 9 }}>{r.status}</span>
-                          <span className="ca-mono" style={{ fontSize: 10, color: "var(--ink-mute)" }}>{new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                  {trainingReports.map(r => {
+                    const isDraft = r.status === "draft";
+                    const isSending = reportSending === r.id;
+                    const editContent = reportEditDraft[r.id] ?? r.content ?? "";
+                    const sendErr = reportSendError[r.id];
+                    return (
+                      <div key={r.id} style={{ padding: "16px 18px", background: isDraft ? "var(--parchment)" : "var(--linen)", border: `1px solid ${isDraft ? "oklch(0.78 0.06 55)" : "var(--rule)"}`, borderRadius: 2 }}>
+                        {/* Header */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+                          <span className="ca-display" style={{ fontSize: 14 }}>{r.period ?? "Weekly report"}</span>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <span className={`ca-chip ${r.status === "sent" ? "ca-chip-aegean" : "ca-chip-ochre"}`} style={{ fontSize: 9 }}>{r.status}</span>
+                            <span className="ca-mono" style={{ fontSize: 10, color: "var(--ink-mute)" }}>{new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                          </div>
                         </div>
+
+                        {/* Content — editable for drafts, read-only when sent */}
+                        {isDraft ? (
+                          <textarea
+                            value={editContent}
+                            onChange={e => setReportEditDraft(prev => ({ ...prev, [r.id]: e.target.value }))}
+                            rows={6}
+                            style={{ width: "100%", padding: "10px 12px", background: "var(--parchment-2)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, lineHeight: 1.65, color: "var(--ink-soft)", outline: "none", resize: "vertical", boxSizing: "border-box", marginBottom: 12 }}
+                          />
+                        ) : (
+                          r.content && <p style={{ margin: "0 0 0", fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-soft)" }}>{r.content}</p>
+                        )}
+
+                        {/* Send action — only on drafts */}
+                        {isDraft && (
+                          <>
+                            {sendErr && (
+                              <div style={{ padding: "8px 12px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 12, marginBottom: 10, lineHeight: 1.45 }}>{sendErr}</div>
+                            )}
+                            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                              <button
+                                className="ca-btn ca-btn-primary"
+                                onClick={() => handleSendReport(r.id, editContent)}
+                                disabled={isSending || !editContent.trim()}
+                                style={{ fontSize: 12, padding: "7px 18px", opacity: isSending || !editContent.trim() ? 0.6 : 1 }}
+                              >
+                                {isSending ? "Sending…" : "Send to athlete →"}
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
-                      {r.content && (
-                        <p style={{ margin: 0, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-soft)" }}>{r.content}</p>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
