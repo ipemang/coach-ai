@@ -44,6 +44,13 @@ type TrainingReport = {
   created_at: string;
 };
 
+type SessionNote = {
+  id: string;
+  note_text: string;
+  sent: boolean;
+  created_at: string;
+};
+
 export default function AthleteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [, navigate] = useLocation();
@@ -59,6 +66,13 @@ export default function AthleteDetailPage() {
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reportGenerating, setReportGenerating] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [sessionNotes, setSessionNotes] = useState<SessionNote[] | null>(null);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [noteText, setNoteText] = useState("");
+  const [noteSaving, setNoteSaving] = useState<"save" | "send" | null>(null);
+  const [aiDrafting, setAiDrafting] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
+  const [notesExpanded, setNotesExpanded] = useState(true);
   const [msgText, setMsgText] = useState("");
   const [msgSending, setMsgSending] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -80,6 +94,67 @@ export default function AthleteDetailPage() {
     }
     load();
   }, [id, navigate]);
+
+  useEffect(() => {
+    if (activeTab !== "overview" || sessionNotes !== null) return;
+    async function fetchNotes() {
+      setNotesLoading(true);
+      const token = await getAuthToken();
+      try {
+        const res = await fetch(`${BACKEND}/api/v1/athletes/${id}/session-notes`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) setSessionNotes(await res.json());
+        else setSessionNotes([]);
+      } catch { setSessionNotes([]); }
+      setNotesLoading(false);
+    }
+    fetchNotes();
+  }, [activeTab, id, sessionNotes]);
+
+  async function handleAiDraft() {
+    setAiDrafting(true);
+    setNoteError(null);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/athletes/${id}/session-notes/ai-draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      if (res.ok) {
+        const body = await res.json();
+        setNoteText(body.draft ?? body.note_text ?? "");
+      } else {
+        const b = await res.json().catch(() => ({}));
+        setNoteError((b?.detail as string) ?? `Error ${res.status} — could not generate draft.`);
+      }
+    } catch { setNoteError("Network error — could not reach the server."); }
+    setAiDrafting(false);
+  }
+
+  async function handleSaveNote(send: boolean) {
+    if (!noteText.trim()) return;
+    setNoteSaving(send ? "send" : "save");
+    setNoteError(null);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/athletes/${id}/session-notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ note_text: noteText.trim(), send }),
+      });
+      if (res.ok) {
+        const newNote: SessionNote = await res.json();
+        setSessionNotes(prev => [newNote, ...(prev ?? [])]);
+        setNoteText("");
+        showToast(send ? "Note sent to athlete" : "Note saved");
+      } else {
+        const b = await res.json().catch(() => ({}));
+        setNoteError((b?.detail as string) ?? `Error ${res.status} — could not save note.`);
+      }
+    } catch { setNoteError("Network error — could not reach the server."); }
+    setNoteSaving(null);
+  }
 
   useEffect(() => {
     if (activeTab !== "plan" || trainingReports !== null) return;
@@ -352,6 +427,90 @@ export default function AthleteDetailPage() {
                 </div>
               )}
             </div>
+
+            {/* Session Notes */}
+            <div className="ca-panel" style={{ padding: 0, overflow: "hidden" }}>
+              {/* Header row */}
+              <div
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 20px", cursor: "pointer", userSelect: "none" }}
+                onClick={() => setNotesExpanded(e => !e)}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 14 }}>✏️</span>
+                  <span className="ca-eyebrow ca-eyebrow-ochre" style={{ fontSize: 10 }}>Session notes</span>
+                </div>
+                <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-mute)" }}>{notesExpanded ? "▲" : "▼"}</span>
+              </div>
+
+              {notesExpanded && (
+                <div style={{ padding: "0 20px 20px" }}>
+                  {/* Compose row */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span className="ca-eyebrow" style={{ fontSize: 9 }}>New note</span>
+                    <button
+                      onClick={handleAiDraft}
+                      disabled={aiDrafting}
+                      style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", cursor: aiDrafting ? "not-allowed" : "pointer", color: "var(--ink)", opacity: aiDrafting ? 0.6 : 1 }}
+                    >
+                      <span style={{ fontSize: 12 }}>✦</span>
+                      {aiDrafting ? "Drafting…" : "AI draft"}
+                    </button>
+                  </div>
+                  <textarea
+                    value={noteText}
+                    onChange={e => setNoteText(e.target.value)}
+                    rows={4}
+                    placeholder="Write a post-workout note for this athlete, or click AI draft…"
+                    style={{ width: "100%", padding: "12px 14px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13.5, color: "var(--ink)", outline: "none", resize: "vertical", lineHeight: 1.6, boxSizing: "border-box" }}
+                  />
+                  {noteError && (
+                    <div style={{ padding: "8px 12px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 12, margin: "8px 0", lineHeight: 1.5 }}>
+                      {noteError}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    <button
+                      className="ca-btn ca-btn-ghost"
+                      onClick={() => handleSaveNote(false)}
+                      disabled={!noteText.trim() || !!noteSaving}
+                      style={{ fontSize: 12 }}
+                    >
+                      {noteSaving === "save" ? "Saving…" : "Save (no send)"}
+                    </button>
+                    <button
+                      className="ca-btn ca-btn-primary"
+                      onClick={() => handleSaveNote(true)}
+                      disabled={!noteText.trim() || !!noteSaving}
+                      style={{ fontSize: 12 }}
+                    >
+                      {noteSaving === "send" ? "Sending…" : "Send to athlete →"}
+                    </button>
+                  </div>
+
+                  {/* Notes list */}
+                  <div style={{ marginTop: 16 }}>
+                    {notesLoading && <p className="ca-eyebrow" style={{ fontSize: 10, color: "var(--ink-faint)" }}>Loading notes…</p>}
+                    {!notesLoading && sessionNotes !== null && sessionNotes.length === 0 && (
+                      <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-faint)", margin: 0 }}>No notes yet. Write one above or click AI draft.</p>
+                    )}
+                    {!notesLoading && sessionNotes && sessionNotes.length > 0 && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {sessionNotes.map(n => (
+                          <div key={n.id} style={{ padding: "10px 14px", background: "var(--linen)", border: "1px solid var(--rule)", borderRadius: 2 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+                              <span className="ca-mono" style={{ fontSize: 9, color: "var(--ink-mute)" }}>{new Date(n.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                              {n.sent && <span className="ca-chip ca-chip-aegean" style={{ fontSize: 8 }}>Sent</span>}
+                            </div>
+                            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.55, color: "var(--ink-soft)", fontFamily: "var(--serif)", fontStyle: "italic" }}>{n.note_text}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
           </div>
         )}
 
