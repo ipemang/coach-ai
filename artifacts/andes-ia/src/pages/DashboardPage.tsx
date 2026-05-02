@@ -7,12 +7,44 @@ import type { Athlete, Suggestion, StableProfile, CurrentState, PredictiveFlag }
 type WeekWorkout = { scheduled_date: string; status: string; distance_km: number | null };
 type BiometricBaseline = { readiness_avg: number | null; hrv_avg: number | null; sleep_avg: number | null };
 type EnrichedAthlete = Athlete & { pending_suggestions?: number; total_checkins?: number; last_checkin_at?: string | null; week_workouts?: WeekWorkout[]; biometric_baseline?: BiometricBaseline | null };
-type Tab = "roster" | "queue" | "media" | "officehours" | "aivoice";
+type Tab = "roster" | "queue" | "media" | "officehours" | "aivoice" | "plans";
 type Filter = "all" | "pending";
 interface OfficeHoursData { office_hours: Record<string, unknown> | null; ai_autonomy_override: boolean; is_currently_autonomous: boolean; after_hours_message?: string | null; urgency_keywords?: string[] | null; }
 interface VoiceProfile { tone: string; formality: string; sentence_length: string; use_emojis: boolean; signature_phrases: string[]; banned_phrases: string[]; example_message?: string | null; }
+type PlanWorkout = { id: string; scheduled_date: string; session_type: string; title: string | null; status: string; duration_min: number | null; distance_km: number | null };
+type AthletePlan = { athlete_id: string; full_name: string; training_phase: string | null; workouts: PlanWorkout[] };
+type PlansData = { week_start: string; athletes: AthletePlan[] };
 type DigestData = { generated_at: string; summary: string; athlete_flags: { athlete_id: string; name: string; reason: string }[] };
 type MediaReview = { id: string; athlete_id: string; media_type: "image" | "video"; ai_analysis: string | null; coach_edited_analysis: string | null; coach_comment: string | null; signed_url: string | null; status: string; created_at: string; athletes?: { full_name: string | null; display_name: string | null } | null };
+
+const PLAN_SPORT_COLORS: Record<string, string> = { swim: "#4a90b8", bike: "#c0704a", run: "#6a8c4a", strength: "#6a7c4a", rest: "#9a9a8a", brick: "#8a5a8a" };
+const PLAN_SPORT_BG: Record<string, string> = { swim: "#e6f2fa", bike: "#fdf0e8", run: "#edf5e8", strength: "#e8f0e0", brick: "#f5f0e0", rest: "#ede8df" };
+const PLAN_DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function planGetMonday(d: Date = new Date()): string {
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + diff);
+  return date.toISOString().split("T")[0];
+}
+function planShiftWeek(monday: string, delta: number): string {
+  const d = new Date(monday + "T12:00:00");
+  d.setDate(d.getDate() + delta * 7);
+  return d.toISOString().split("T")[0];
+}
+function planGetDate(monday: string, offset: number): string {
+  const d = new Date(monday + "T12:00:00");
+  d.setDate(d.getDate() + offset);
+  return d.toISOString().split("T")[0];
+}
+function planFormatWeek(monday: string): string {
+  const start = new Date(monday + "T12:00:00");
+  const end = new Date(monday + "T12:00:00");
+  end.setDate(end.getDate() + 6);
+  const fmt = (dt: Date) => dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return `${fmt(start)} – ${fmt(end)}, ${end.getFullYear()}`;
+}
 
 function getInitials(name: string | null | undefined): string {
   if (!name) return "?";
@@ -728,6 +760,9 @@ export default function DashboardPage() {
   const [dayDraft, setDayDraft] = useState<{ open: string; close: string; enabled: boolean }>({ open: "09:00", close: "17:00", enabled: true });
   const [ohHoursSaving, setOhHoursSaving] = useState(false);
   const [copyTargets, setCopyTargets] = useState<string[]>([]);
+  const [planData, setPlanData] = useState<PlansData | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planWeekStart, setPlanWeekStart] = useState<string>(() => planGetMonday());
   const [voiceProfile, setVoiceProfile] = useState<VoiceProfile | null>(null);
   const [voiceProfileLoading, setVoiceProfileLoading] = useState(false);
   const [voiceProfileSaving, setVoiceProfileSaving] = useState(false);
@@ -779,6 +814,26 @@ export default function DashboardPage() {
       else setOhData({ office_hours: null, ai_autonomy_override: false, is_currently_autonomous: false });
     })();
   }, [tab, ohData]);
+
+  const planTodayStr = new Date().toISOString().split("T")[0];
+  const planTodayMonday = planGetMonday();
+
+  useEffect(() => {
+    if (tab !== "plans") return;
+    setPlanData(null);
+    setPlanLoading(true);
+    (async () => {
+      const token = await getAuthToken();
+      try {
+        const res = await fetch(`${BACKEND}/api/v1/training-plans/weekly?week_start=${planWeekStart}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) setPlanData(await res.json());
+        else setPlanData({ week_start: planWeekStart, athletes: [] });
+      } catch { setPlanData({ week_start: planWeekStart, athletes: [] }); }
+      setPlanLoading(false);
+    })();
+  }, [tab, planWeekStart]);
 
   const DEFAULT_VOICE: VoiceProfile = { tone: "warm", formality: "casual", sentence_length: "medium", use_emojis: false, signature_phrases: [], banned_phrases: [] };
 
@@ -1070,6 +1125,7 @@ export default function DashboardPage() {
             { id: "roster" as Tab, label: "The stable", badge: athletes.length },
             { id: "queue" as Tab, label: "Replies to approve", badge: totalPending, alert: totalPending > 0 },
             { id: "media" as Tab, label: "Media queue", badge: mediaReviews.length, alert: mediaReviews.length > 0 },
+            { id: "plans" as Tab, label: "Training plans", badge: null },
             { id: "officehours" as Tab, label: "Office hours", badge: null },
             { id: "aivoice" as Tab, label: "AI voice setup", badge: null },
           ]).map(t => (
@@ -1165,6 +1221,134 @@ export default function DashboardPage() {
                       </article>
                     );
                   })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === "plans" && (
+            <div>
+              {/* Week navigator */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+                <button
+                  className="ca-btn ca-btn-ghost"
+                  onClick={() => setPlanWeekStart(planShiftWeek(planWeekStart, -1))}
+                  style={{ fontSize: 12, padding: "5px 14px" }}
+                >← Prev</button>
+                <div style={{ flex: 1, textAlign: "center" }}>
+                  <span className="ca-display" style={{ fontSize: 18 }}>{planFormatWeek(planWeekStart)}</span>
+                </div>
+                <button
+                  className="ca-btn ca-btn-ghost"
+                  onClick={() => setPlanWeekStart(planTodayMonday)}
+                  disabled={planWeekStart === planTodayMonday}
+                  style={{ fontSize: 11, padding: "5px 12px", opacity: planWeekStart === planTodayMonday ? 0.4 : 1 }}
+                >This week</button>
+                <button
+                  className="ca-btn ca-btn-ghost"
+                  onClick={() => setPlanWeekStart(planShiftWeek(planWeekStart, 1))}
+                  style={{ fontSize: 12, padding: "5px 14px" }}
+                >Next →</button>
+              </div>
+
+              {planLoading && (
+                <div style={{ padding: "60px 0", textAlign: "center" }}>
+                  <p className="ca-eyebrow" style={{ fontSize: 11 }}>Loading training plans…</p>
+                </div>
+              )}
+
+              {!planLoading && planData && (
+                <div className="ca-panel" style={{ padding: 0, overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 720 }}>
+                    <colgroup>
+                      <col style={{ width: 170 }} />
+                      {PLAN_DAY_LABELS.map(d => <col key={d} style={{ width: "calc((100% - 170px - 52px) / 7)" }} />)}
+                      <col style={{ width: 52 }} />
+                    </colgroup>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid var(--rule)" }}>
+                        <th style={{ padding: "10px 16px", textAlign: "left", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--ink-mute)", fontWeight: 400 }}>Athlete</th>
+                        {PLAN_DAY_LABELS.map((d, i) => {
+                          const date = planGetDate(planWeekStart, i);
+                          const isToday = date === planTodayStr;
+                          return (
+                            <th key={d} style={{ padding: "8px 4px", textAlign: "center", fontWeight: 400, background: isToday ? "oklch(0.94 0.03 220 / 0.5)" : "transparent" }}>
+                              <div style={{ fontFamily: "var(--mono)", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", color: isToday ? "var(--aegean-deep)" : "var(--ink-mute)" }}>{d}</div>
+                              <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: isToday ? "var(--aegean-deep)" : "var(--ink-soft)", marginTop: 2, fontWeight: isToday ? 700 : 400 }}>
+                                {new Date(date + "T12:00:00").getDate()}
+                              </div>
+                            </th>
+                          );
+                        })}
+                        <th style={{ padding: "10px 8px", textAlign: "center", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--ink-mute)", fontWeight: 400 }}>Done</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {planData.athletes.length === 0 && (
+                        <tr>
+                          <td colSpan={9} style={{ padding: "56px 0", textAlign: "center" }}>
+                            <div className="ca-ornament">◆ ◆ ◆</div>
+                            <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 15, color: "var(--ink-soft)", margin: "12px 0 0" }}>No workouts scheduled for this week.</p>
+                          </td>
+                        </tr>
+                      )}
+                      {planData.athletes.map((ap, ri) => {
+                        const byDate: Record<string, PlanWorkout> = {};
+                        for (const w of ap.workouts) byDate[w.scheduled_date] = w;
+                        const prescribed = ap.workouts.filter(w => w.session_type?.toLowerCase() !== "rest").length;
+                        const completed = ap.workouts.filter(w => w.status === "completed").length;
+                        const allDone = prescribed > 0 && completed >= prescribed;
+                        return (
+                          <tr key={ap.athlete_id} style={{ borderBottom: ri < planData.athletes.length - 1 ? "1px solid var(--rule)" : "none" }}>
+                            <td style={{ padding: "10px 16px", verticalAlign: "middle" }}>
+                              <Link href={`/dashboard/athletes/${ap.athlete_id}`} style={{ fontFamily: "var(--serif)", fontSize: 15, color: "var(--ink)", textDecoration: "none", display: "block", lineHeight: 1.2 }}>
+                                {ap.full_name}
+                              </Link>
+                              {ap.training_phase && (
+                                <div style={{ fontFamily: "var(--mono)", fontSize: 8.5, color: "var(--ink-mute)", letterSpacing: "0.1em", textTransform: "uppercase", marginTop: 3 }}>{ap.training_phase}</div>
+                              )}
+                            </td>
+                            {Array.from({ length: 7 }, (_, di) => {
+                              const date = planGetDate(planWeekStart, di);
+                              const w = byDate[date];
+                              const isToday = date === planTodayStr;
+                              const stype = w?.session_type?.toLowerCase() ?? "";
+                              const bg = w ? (PLAN_SPORT_BG[stype] ?? "#f5f2ec") : "transparent";
+                              const accent = w ? (PLAN_SPORT_COLORS[stype] ?? "#9a9a8a") : "var(--rule)";
+                              const borderColor = w?.status === "completed" ? PLAN_SPORT_COLORS["run"] ?? "#6a8c4a" : w?.status === "missed" ? PLAN_SPORT_COLORS["bike"] ?? "#c0704a" : accent;
+                              return (
+                                <td key={di} style={{ padding: "6px 4px", verticalAlign: "middle", background: isToday ? "oklch(0.97 0.01 220 / 0.3)" : "transparent" }}>
+                                  {w ? (
+                                    <div
+                                      title={`${w.title ?? w.session_type}${w.status !== "prescribed" ? ` · ${w.status}` : ""}`}
+                                      style={{ background: bg, border: `1px solid ${borderColor}`, borderRadius: 2, padding: "5px 3px", textAlign: "center", cursor: "default", opacity: w.status === "missed" ? 0.65 : 1 }}
+                                    >
+                                      <div style={{ fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.06em", color: accent, fontWeight: 600 }}>
+                                        {stype.slice(0, 3).toUpperCase()}
+                                      </div>
+                                      {(w.duration_min || w.distance_km) && (
+                                        <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--ink-mute)", marginTop: 2 }}>
+                                          {w.duration_min ? `${w.duration_min}′` : `${w.distance_km}km`}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div style={{ textAlign: "center", fontFamily: "var(--mono)", fontSize: 11, color: "var(--rule)", userSelect: "none" }}>—</div>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            <td style={{ padding: "10px 8px", textAlign: "center", verticalAlign: "middle" }}>
+                              <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: allDone ? "#6a8c4a" : "var(--ink-soft)", fontWeight: allDone ? 700 : 400 }}>
+                                {completed}
+                              </span>
+                              <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--ink-faint)" }}>/{prescribed}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
