@@ -10,6 +10,7 @@ import { SessionNotePanel } from "@/components/session-note-panel";
 import { AthleteDocumentVault } from "@/components/athlete-document-vault";
 import { TrainingLoadChart } from "@/components/training-load-chart";
 import { AthleteReportsPanel } from "@/components/athlete-reports-panel";
+import { SendMessageModal } from "@/components/send-message-modal";
 import Link from "next/link";
 
 function getSupabase() {
@@ -327,6 +328,7 @@ export default async function AthleteProfilePage({
               <span className="ca-chip ca-chip-aegean">✓ Onboarded</span>
             )}
             <ResendPlanButton athleteId={id} />
+            <SendMessageModal athleteId={id} athleteName={athlete.full_name} />
           </div>
         </div>
 

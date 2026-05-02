@@ -8,6 +8,7 @@ from app.api.v1.athlete_memory import router as athlete_memory_router
 from app.api.v1.athlete_profile import router as athlete_profile_router
 from app.api.v1.athlete_snapshot import router as athlete_snapshot_router
 from app.api.v1.training_reports import router as training_reports_router
+from app.api.v1.coach_messaging import router as coach_messaging_router
 from app.api.v1.knowledge_base import router as knowledge_base_router
 from app.api.v1.race_day import router as race_day_router
 from app.api.v1.routes import router as health_router
@@ -29,3 +30,4 @@ router.include_router(athlete_memory_router)      # COA-117
 router.include_router(athlete_profile_router)     # COA-113
 router.include_router(athlete_snapshot_router)    # COA-120
 router.include_router(training_reports_router)    # COA-118
+router.include_router(coach_messaging_router)     # COA-121

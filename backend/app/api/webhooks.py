@@ -1773,6 +1773,72 @@ async def _handle_coach_message(
     coach_id = coach.get("id")
     cmd = text.strip()
 
+    # COA-121: SEND [name]: [message] -- coach-initiated message to a specific athlete
+    # Syntax: "SEND Patrick: How are you feeling this week?"
+    send_match = _re.match(r"^SEND\s+([^:]+):\s*(.+)$", cmd, _re.IGNORECASE | _re.DOTALL)
+    if send_match:
+        target_name = send_match.group(1).strip()
+        outbound_text = send_match.group(2).strip()
+        try:
+            all_athletes = await _query_rows(
+                supabase.table("athletes")
+                .select("id, full_name, phone_number")
+                .eq("coach_id", coach_id)
+                .eq("archived_at", None)
+                .limit(50)
+            )
+        except Exception as exc:
+            logger.error("[webhook][COA-121] Athlete list fetch failed: %s", exc)
+            all_athletes = []
+
+        # Fuzzy name match (case-insensitive, first name or full name)
+        matched = None
+        target_lower = target_name.lower()
+        for a in all_athletes:
+            full = (a.get("full_name") or "").lower()
+            first = full.split()[0] if full else ""
+            if target_lower == full or target_lower == first or target_lower in full:
+                matched = a
+                break
+
+        if not matched:
+            names = ", ".join(a.get("full_name", "?") for a in all_athletes[:8])
+            await _send_whatsapp_message(
+                request, sender,
+                f"⚠️ No athlete found matching '{target_name}'.\nYour roster: {names}"
+            )
+            return WhatsAppWebhookResponse(status="athlete_not_found", coach_id=str(coach_id))
+
+        athlete_phone = matched.get("phone_number") or ""
+        athlete_name = matched.get("full_name") or target_name
+        athlete_id_send = matched.get("id")
+
+        if not athlete_phone:
+            await _send_whatsapp_message(
+                request, sender,
+                f"⚠️ {athlete_name} has no phone number on file."
+            )
+            return WhatsAppWebhookResponse(status="no_phone", coach_id=str(coach_id))
+
+        await _send_whatsapp_message(request, athlete_phone, outbound_text)
+
+        # Log to memory
+        try:
+            supabase.table("athlete_memory_events").insert({
+                "athlete_id": str(athlete_id_send),
+                "event_type": "whatsapp_coach",
+                "content": outbound_text[:500],
+                "metadata": {"coach_initiated": True, "via": "whatsapp_command"},
+            }).execute()
+        except Exception as mem_exc:
+            logger.warning("[COA-121] Memory log failed: %s", mem_exc)
+
+        await _send_whatsapp_message(
+            request, sender,
+            f"✓ Sent to {athlete_name}:\n\"{outbound_text[:80]}{'…' if len(outbound_text) > 80 else ''}\""
+        )
+        return WhatsAppWebhookResponse(status="coach_message_sent", coach_id=str(coach_id))
+
     # QUEUE / STATUS -- list pending suggestions
     if cmd.upper() in ("QUEUE", "STATUS", "LIST"):
         try:
