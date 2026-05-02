@@ -1394,15 +1394,15 @@ export default function AthleteDashboardPage() {
       const {start:curStart,end:curEnd} = getWeekBounds(0);
       const {start:prevStart,end:prevEnd} = getWeekBounds(-1);
       const [profRes,filesRes,curWRes,prevWRes,coachRes,reportsRes] = await Promise.allSettled([
-        sb.from('athletes').select('id,full_name,email,primary_sport,ai_profile_summary,target_event_name,target_event_date').eq('id',athleteId).single(),
+        fetch(`${BACKEND}/api/v1/athlete/profile`,{headers:{Authorization:`Bearer ${token}`}}),
         fetch(`${BACKEND}/api/v1/athlete/files`,{headers:{Authorization:`Bearer ${token}`}}),
         fetch(`${BACKEND}/api/v1/athlete/workouts?from=${curStart}&to=${curEnd}`,{headers:{Authorization:`Bearer ${token}`}}),
         fetch(`${BACKEND}/api/v1/athlete/workouts?from=${prevStart}&to=${prevEnd}`,{headers:{Authorization:`Bearer ${token}`}}),
         fetch(`${BACKEND}/api/v1/athlete/coach`,{headers:{Authorization:`Bearer ${token}`}}),
         fetch(`${BACKEND}/api/v1/athlete/reports`,{headers:{Authorization:`Bearer ${token}`}}),
       ]);
-      if(profRes.status==='fulfilled'&&profRes.value.data){
-        const p = profRes.value.data as Record<string,string>;
+      if(profRes.status==='fulfilled'&&(profRes.value as Response).ok){
+        const p = await (profRes.value as Response).json() as Record<string,string>;
         const fullName = p.full_name||'Athlete';
         const goalDate = p.target_event_date||'';
         setAthlete({

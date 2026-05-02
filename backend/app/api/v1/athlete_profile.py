@@ -1,6 +1,7 @@
 """COA-113: Athlete profile API — settings save + real coach data.
 
 Endpoints (athlete-facing):
+  GET   /api/v1/athlete/profile   — get the athlete's own profile fields
   GET   /api/v1/athlete/coach     — get the athlete's coach profile
   PATCH /api/v1/athlete/profile   — update athlete profile fields
 """
@@ -34,6 +35,16 @@ class CoachProfileOut(BaseModel):
     email: Optional[str]
 
 
+class AthleteProfileOut(BaseModel):
+    id: str
+    full_name: str
+    email: Optional[str]
+    primary_sport: Optional[str]
+    ai_profile_summary: Optional[str]
+    target_event_name: Optional[str]
+    target_event_date: Optional[str]
+
+
 class AthleteProfileIn(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
@@ -51,6 +62,46 @@ def _name_to_initials(name: str) -> str:
 
 
 # ── Athlete endpoints ─────────────────────────────────────────────────────────
+
+@router.get("/api/v1/athlete/profile", response_model=AthleteProfileOut)
+async def get_athlete_profile(
+    principal: AuthenticatedPrincipal = Depends(require_roles("athlete")),
+):
+    """Return the athlete's own profile fields (bypasses RLS — uses service role)."""
+    from app.core.supabase import get_supabase_client
+    supabase = get_supabase_client()
+
+    athlete_id, _ = resolve_athlete_scope(principal)
+
+    def _fetch():
+        return (
+            supabase.table("athletes")
+            .select("id,full_name,email,primary_sport,ai_profile_summary,target_event_name,target_event_date")
+            .eq("id", athlete_id)
+            .single()
+            .execute()
+        )
+
+    try:
+        result = await run_in_threadpool(_fetch)
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Athlete profile not found")
+        row = result.data
+        return AthleteProfileOut(
+            id=str(row["id"]),
+            full_name=row.get("full_name") or "Athlete",
+            email=row.get("email"),
+            primary_sport=row.get("primary_sport"),
+            ai_profile_summary=row.get("ai_profile_summary"),
+            target_event_name=row.get("target_event_name"),
+            target_event_date=row.get("target_event_date"),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("[athlete_profile] get profile failed athlete=%s", athlete_id[:8])
+        raise HTTPException(status_code=500, detail="Failed to load athlete profile") from exc
+
 
 @router.get("/api/v1/athlete/coach", response_model=CoachProfileOut)
 async def get_athlete_coach(
