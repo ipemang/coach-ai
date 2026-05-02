@@ -377,6 +377,217 @@ function InviteModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function CsvImportModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  const [rows, setRows] = useState<{ name: string; email: string; phone: string }[]>([]);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [results, setResults] = useState<{ name: string; ok: boolean; error?: string }[] | null>(null);
+
+  function parseCSV(text: string): { name: string; email: string; phone: string }[] | string {
+    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const firstLine = normalized.split("\n")[0];
+    const delim = firstLine.includes(";") ? ";" : ",";
+    const lines: string[][] = [];
+    let cur = "", inQ = false;
+    let row: string[] = [];
+    for (const ch of normalized + "\n") {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === delim && !inQ) { row.push(cur.trim()); cur = ""; }
+      else if (ch === "\n" && !inQ) {
+        row.push(cur.trim());
+        if (row.some(c => c)) lines.push(row);
+        row = []; cur = "";
+      } else { cur += ch; }
+    }
+    if (lines.length < 2) return "The file must have a header row and at least one data row.";
+    const headers = lines[0].map(h => h.replace(/"/g, "").toLowerCase().replace(/[\s_-]+/g, " ").trim());
+    function findCol(candidates: string[]): number {
+      for (const c of candidates) { const i = headers.findIndex(h => h === c || h.includes(c)); if (i !== -1) return i; }
+      return -1;
+    }
+    const nameIdx = findCol(["full name", "name", "athlete name", "athlete", "fullname"]);
+    const emailIdx = findCol(["email", "email address", "e mail", "e-mail"]);
+    const phoneIdx = findCol(["phone", "whatsapp", "mobile", "phone number", "mobile number", "cell"]);
+    if (nameIdx === -1) return `No "Name" column found. Detected: ${lines[0].join(", ")}`;
+    if (emailIdx === -1) return `No "Email" column found. Detected: ${lines[0].join(", ")}`;
+    const parsed: { name: string; email: string; phone: string }[] = [];
+    for (const line of lines.slice(1)) {
+      const name = line[nameIdx]?.replace(/"/g, "").trim() ?? "";
+      const email = line[emailIdx]?.replace(/"/g, "").trim() ?? "";
+      const phone = phoneIdx >= 0 ? (line[phoneIdx]?.replace(/"/g, "").trim() ?? "") : "";
+      if (name && email && email.includes("@")) parsed.push({ name, email, phone });
+    }
+    if (!parsed.length) return "No valid rows found. Each row needs a Name and a valid Email.";
+    return parsed;
+  }
+
+  async function handleFile(file: File) {
+    setParseError(null); setRows([]); setResults(null); setFileName(file.name);
+    const text = await file.text();
+    const out = parseCSV(text);
+    if (typeof out === "string") setParseError(out);
+    else setRows(out);
+  }
+
+  async function handleImport() {
+    setImporting(true); setProgress({ done: 0, total: rows.length });
+    const token = await getAuthToken();
+    const res: { name: string; ok: boolean; error?: string }[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      try {
+        const resp = await fetch(`${BACKEND}/api/v1/athletes/invite`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: JSON.stringify({ full_name: r.name, email: r.email, phone_number: r.phone || undefined }),
+        });
+        const body = await resp.json().catch(() => ({}));
+        res.push({ name: r.name, ok: resp.ok, error: resp.ok ? undefined : ((body?.detail as string) ?? "Failed") });
+      } catch { res.push({ name: r.name, ok: false, error: "Network error" }); }
+      setProgress({ done: i + 1, total: rows.length });
+    }
+    setResults(res); setImporting(false);
+    if (res.some(r => r.ok)) onImported();
+  }
+
+  function downloadTemplate() {
+    const csv = "Full Name,Email,WhatsApp\nAlex Thompson,alex@example.com,+1 555 000 1234\nJordan Rivera,jordan@example.com,";
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "andes-ia-roster-template.csv"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const succeeded = results?.filter(r => r.ok).length ?? 0;
+  const failed = results?.filter(r => !r.ok).length ?? 0;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "oklch(0.28 0.022 55 / 0.4)", backdropFilter: "blur(4px)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={onClose}>
+      <div className="ca-panel" style={{ width: "100%", maxWidth: 560, padding: 32, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+        <div className="ca-eyebrow ca-eyebrow-aegean" style={{ marginBottom: 8 }}>Bulk import</div>
+        <h2 className="ca-display" style={{ fontSize: 26, margin: "0 0 4px" }}>Import athlete roster</h2>
+        <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 14, color: "var(--ink-soft)", margin: "0 0 24px", lineHeight: 1.55 }}>
+          Works with exports from TrainingPeaks, TrainHeroic, Google Sheets, or any CSV. Needs at minimum a Name and Email column.
+        </p>
+
+        {!results ? (
+          <>
+            <label style={{ display: "block", border: `2px dashed ${fileName && !parseError ? "var(--aegean-soft)" : parseError ? "oklch(0.80 0.08 45)" : "var(--rule)"}`, borderRadius: 4, padding: "28px 24px", textAlign: "center", cursor: "pointer", background: fileName && !parseError ? "var(--aegean-wash)" : parseError ? "var(--terracotta-soft)" : "var(--parchment)", transition: "all 200ms ease", marginBottom: 16 }}>
+              <input type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+              <div style={{ fontSize: 28, marginBottom: 10 }}>📄</div>
+              {fileName ? (
+                <>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: parseError ? "var(--terracotta-deep)" : "var(--aegean-deep)", marginBottom: 4 }}>{fileName}</div>
+                  {rows.length > 0 && <div style={{ fontSize: 13, color: "var(--aegean-deep)", fontFamily: "var(--serif)", fontStyle: "italic" }}>{rows.length} athlete{rows.length !== 1 ? "s" : ""} ready to import</div>}
+                </>
+              ) : (
+                <>
+                  <div style={{ fontFamily: "var(--body)", fontSize: 14, color: "var(--ink)", marginBottom: 4 }}>Click to choose a CSV file</div>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-mute)" }}>Columns needed: Name, Email — WhatsApp optional</div>
+                </>
+              )}
+            </label>
+
+            {parseError && (
+              <div style={{ padding: "12px 16px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13, marginBottom: 16, lineHeight: 1.5 }}>
+                <strong>Could not parse file:</strong> {parseError}
+              </div>
+            )}
+
+            {rows.length > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <div className="ca-eyebrow" style={{ marginBottom: 10 }}>Preview — first {Math.min(5, rows.length)} of {rows.length}</div>
+                <div style={{ border: "1px solid var(--rule)", borderRadius: 2, overflow: "hidden" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: "var(--linen-deep)" }}>
+                        {["Name", "Email", "WhatsApp"].map(h => (
+                          <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--ink-mute)", borderBottom: "1px solid var(--rule)", fontWeight: 500 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.slice(0, 5).map((r, i) => (
+                        <tr key={i} style={{ background: i % 2 === 0 ? "var(--parchment)" : "var(--linen)" }}>
+                          <td style={{ padding: "8px 12px", borderBottom: "1px solid var(--rule-soft)", fontFamily: "var(--serif)", fontSize: 13 }}>{r.name}</td>
+                          <td style={{ padding: "8px 12px", borderBottom: "1px solid var(--rule-soft)", fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-soft)" }}>{r.email}</td>
+                          <td style={{ padding: "8px 12px", borderBottom: "1px solid var(--rule-soft)", fontFamily: "var(--mono)", fontSize: 11, color: r.phone ? "var(--ink-soft)" : "var(--ink-faint)" }}>{r.phone || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {rows.length > 5 && (
+                    <div style={{ padding: "8px 12px", background: "var(--linen)", borderTop: "1px solid var(--rule)", fontFamily: "var(--mono)", fontSize: 10, color: "var(--ink-mute)", textAlign: "center" }}>
+                      + {rows.length - 5} more athlete{rows.length - 5 !== 1 ? "s" : ""}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {importing && progress && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-soft)" }}>Importing athletes…</span>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-mute)" }}>{progress.done} / {progress.total}</span>
+                </div>
+                <div className="ca-bar-track"><div className="ca-bar-fill" style={{ width: `${(progress.done / progress.total) * 100}%`, transition: "width 200ms ease" }} /></div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <button className="ca-btn ca-btn-primary" disabled={rows.length === 0 || importing} onClick={handleImport} style={{ opacity: rows.length === 0 || importing ? 0.45 : 1, cursor: rows.length === 0 || importing ? "not-allowed" : "pointer" }}>
+                {importing ? `Importing ${progress?.done ?? 0} of ${rows.length}…` : `Import ${rows.length > 0 ? `${rows.length} athlete${rows.length !== 1 ? "s" : ""}` : "athletes"} →`}
+              </button>
+              <button className="ca-btn ca-btn-ghost" onClick={onClose} disabled={importing}>Cancel</button>
+              <div style={{ flex: 1 }} />
+              <button className="ca-btn ca-btn-ghost" style={{ fontSize: 11 }} onClick={downloadTemplate}>↓ Template CSV</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 16, marginBottom: 20 }}>
+              <div className="ca-panel" style={{ flex: 1, padding: "20px", textAlign: "center" }}>
+                <div style={{ fontFamily: "var(--serif)", fontSize: 44, color: "var(--aegean-deep)", lineHeight: 1 }}>{succeeded}</div>
+                <div className="ca-eyebrow ca-eyebrow-aegean" style={{ marginTop: 8, fontSize: 9.5 }}>Imported</div>
+              </div>
+              {failed > 0 && (
+                <div className="ca-panel" style={{ flex: 1, padding: "20px", textAlign: "center" }}>
+                  <div style={{ fontFamily: "var(--serif)", fontSize: 44, color: "var(--terracotta-deep)", lineHeight: 1 }}>{failed}</div>
+                  <div className="ca-eyebrow ca-eyebrow-terra" style={{ marginTop: 8, fontSize: 9.5 }}>Failed</div>
+                </div>
+              )}
+            </div>
+
+            {failed > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <div className="ca-eyebrow" style={{ marginBottom: 8 }}>Could not import</div>
+                <div style={{ border: "1px solid var(--rule)", borderRadius: 2, overflow: "hidden" }}>
+                  {results.filter(r => !r.ok).map((r, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 14px", background: i % 2 === 0 ? "var(--terracotta-soft)" : "var(--parchment)", borderBottom: "1px solid oklch(0.86 0.04 45)" }}>
+                      <span style={{ fontFamily: "var(--serif)", fontSize: 13 }}>{r.name}</span>
+                      <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--terracotta-deep)" }}>{r.error}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, color: "var(--ink-soft)", lineHeight: 1.65, margin: "0 0 20px" }}>
+              {succeeded > 0 ? `${succeeded} invitation${succeeded !== 1 ? "s" : ""} sent. Athletes will receive an onboarding link to set up their profile.` : "No athletes were imported successfully."}
+            </p>
+
+            <button className="ca-btn ca-btn-primary" onClick={onClose} style={{ width: "100%", justifyContent: "center" }}>Done</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [, navigate] = useLocation();
   const [athletes, setAthletes] = useState<EnrichedAthlete[]>([]);
@@ -386,6 +597,8 @@ export default function DashboardPage() {
   const [tab, setTab] = useState<Tab>("roster");
   const [filter, setFilter] = useState<Filter>("all");
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [csvImportOpen, setCsvImportOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [refineTarget, setRefineTarget] = useState<Suggestion | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [ohData, setOhData] = useState<OfficeHoursData | null>(null);
@@ -412,7 +625,7 @@ export default function DashboardPage() {
       setLoading(false);
     }
     load();
-  }, [navigate]);
+  }, [navigate, refreshKey]);
 
   useEffect(() => {
     if (tab !== "media") return;
@@ -557,6 +770,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <div style={{ flex: 1 }} />
+          <button className="ca-btn ca-btn-ghost" onClick={() => setCsvImportOpen(true)} style={{ fontSize: 12 }}>↑ Import CSV</button>
           <button className="ca-btn ca-btn-terra" onClick={() => setInviteOpen(true)} style={{ fontSize: 12 }}><G.Plus /> Invite athlete</button>
           {totalPending > 0 && <div style={{ fontSize: 12, color: "var(--terracotta-deep)", fontFamily: "var(--mono)" }}>{totalPending} pending</div>}
           <button className="ca-btn ca-btn-ghost" onClick={handleSignOut} style={{ fontSize: 12 }}>Sign out</button>
@@ -739,6 +953,7 @@ export default function DashboardPage() {
       </div>
 
       {inviteOpen && <InviteModal onClose={() => setInviteOpen(false)} />}
+      {csvImportOpen && <CsvImportModal onClose={() => setCsvImportOpen(false)} onImported={() => { setCsvImportOpen(false); setRefreshKey(k => k + 1); }} />}
       {refineTarget && <RefineModal suggestion={refineTarget} onClose={() => setRefineTarget(null)} onSend={handleModified} />}
     </div>
   );
