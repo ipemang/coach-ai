@@ -727,6 +727,7 @@ export default function DashboardPage() {
   const [editingDay, setEditingDay] = useState<string | null>(null);
   const [dayDraft, setDayDraft] = useState<{ open: string; close: string; enabled: boolean }>({ open: "09:00", close: "17:00", enabled: true });
   const [ohHoursSaving, setOhHoursSaving] = useState(false);
+  const [copyTargets, setCopyTargets] = useState<string[]>([]);
   const [voiceProfile, setVoiceProfile] = useState<VoiceProfile | null>(null);
   const [voiceProfileLoading, setVoiceProfileLoading] = useState(false);
   const [voiceProfileSaving, setVoiceProfileSaving] = useState(false);
@@ -899,6 +900,33 @@ export default function DashboardPage() {
     const arr = Array.isArray(h) && h.length >= 2 ? h as string[] : null;
     setDayDraft({ open: arr?.[0] ?? "09:00", close: arr?.[1] ?? "17:00", enabled: arr !== null });
     setEditingDay(key);
+    setCopyTargets([]);
+  }
+
+  async function handleCopyDays(sourceKey: string) {
+    if (!ohData || ohHoursSaving || copyTargets.length === 0) return;
+    const value = dayDraft.enabled ? [dayDraft.open, dayDraft.close] : null;
+    const updatedOh = { ...(ohData.office_hours as Record<string, unknown> ?? {}), [sourceKey]: value };
+    for (const t of copyTargets) updatedOh[t] = value;
+    const prevOh = ohData.office_hours;
+    setOhData(d => d ? { ...d, office_hours: updatedOh } : d);
+    setEditingDay(null);
+    setCopyTargets([]);
+    setOhHoursSaving(true);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/office-hours`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ office_hours: updatedOh }),
+      });
+      if (!res.ok) setOhData(d => d ? { ...d, office_hours: prevOh } : d);
+    } catch { setOhData(d => d ? { ...d, office_hours: prevOh } : d); }
+    setOhHoursSaving(false);
+  }
+
+  function toggleCopyTarget(key: string) {
+    setCopyTargets(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
   }
 
   async function handleSaveDay(key: string) {
@@ -1406,7 +1434,7 @@ export default function DashboardPage() {
                                 />
                               </div>
                             )}
-                            <div style={{ display: "flex", gap: 8 }}>
+                            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
                               <button
                                 onClick={() => handleSaveDay(k)}
                                 disabled={ohHoursSaving}
@@ -1421,6 +1449,61 @@ export default function DashboardPage() {
                                 style={{ fontSize: 11, padding: "5px 12px" }}
                               >
                                 Cancel
+                              </button>
+                            </div>
+
+                            {/* Copy to other days */}
+                            <div style={{ borderTop: "1px dashed var(--rule)", paddingTop: 12 }}>
+                              <div style={{ fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 8 }}>Copy these hours to</div>
+
+                              {/* Preset shortcuts */}
+                              <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+                                {[
+                                  { label: "Weekdays", keys: ["mon","tue","wed","thu","fri"] },
+                                  { label: "Weekend", keys: ["sat","sun"] },
+                                  { label: "All days", keys: ["mon","tue","wed","thu","fri","sat","sun"] },
+                                ].map(preset => {
+                                  const targets = preset.keys.filter(pk => pk !== k);
+                                  const allOn = targets.length > 0 && targets.every(pk => copyTargets.includes(pk));
+                                  return (
+                                    <button
+                                      key={preset.label}
+                                      onClick={() => {
+                                        if (allOn) setCopyTargets(prev => prev.filter(pk => !targets.includes(pk)));
+                                        else setCopyTargets(prev => [...new Set([...prev, ...targets])]);
+                                      }}
+                                      style={{ padding: "4px 10px", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.08em", background: allOn ? "var(--ink)" : "var(--parchment)", color: allOn ? "var(--parchment)" : "var(--ink-soft)", border: `1px solid ${allOn ? "var(--ink)" : "var(--rule)"}`, borderRadius: 2, cursor: "pointer", transition: "all 140ms ease" }}
+                                    >
+                                      {preset.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Individual day pills */}
+                              <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 10 }}>
+                                {DAY_KEYS_OH.map((dk, di) => {
+                                  if (dk === k) return null;
+                                  const on = copyTargets.includes(dk);
+                                  return (
+                                    <button
+                                      key={dk}
+                                      onClick={() => toggleCopyTarget(dk)}
+                                      style={{ width: 36, padding: "5px 0", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.04em", background: on ? "var(--aegean-deep)" : "var(--parchment)", color: on ? "oklch(0.97 0.01 220)" : "var(--ink-mute)", border: `1px solid ${on ? "var(--aegean-deep)" : "var(--rule)"}`, borderRadius: 2, cursor: "pointer", transition: "all 140ms ease", textAlign: "center" }}
+                                    >
+                                      {DAY_NAMES_OH[di].slice(0, 2)}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              <button
+                                onClick={() => handleCopyDays(k)}
+                                disabled={copyTargets.length === 0 || ohHoursSaving}
+                                className="ca-btn ca-btn-ghost"
+                                style={{ fontSize: 11, padding: "5px 14px", opacity: copyTargets.length === 0 ? 0.45 : 1 }}
+                              >
+                                {ohHoursSaving ? "Saving…" : `Apply to ${copyTargets.length || "…"} day${copyTargets.length === 1 ? "" : "s"} →`}
                               </button>
                             </div>
                           </div>
