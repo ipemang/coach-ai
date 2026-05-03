@@ -1,21 +1,23 @@
 import { useState } from "react";
 import { useLocation, Link } from "wouter";
 import { createBrowserSupabase } from "../lib/supabase";
-import { getRoleAndRedirect } from "../lib/api";
+import { getRoleAndRedirect, consumeLoginRedirect } from "../lib/api";
 
-function AndesLogo() {
+function AndesLogo({ size = 28 }: { size?: number }) {
+  const cell = Math.floor(size / 4);
+  const gap = 1;
   return (
-    <svg width="32" height="32" viewBox="0 0 32 32" aria-label="Andes.IA">
+    <svg width={size} height={size} viewBox="0 0 32 32" aria-label="Andes.IA">
       <rect x="1" y="1" width="30" height="30" fill="none" stroke="var(--ink)" strokeWidth="0.75" />
-      <rect x="4" y="4" width="6" height="6" fill="var(--terracotta)" opacity="0.9" />
-      <rect x="11" y="4" width="6" height="6" fill="var(--aegean-deep)" opacity="0.9" />
-      <rect x="18" y="4" width="6" height="6" fill="var(--terracotta)" opacity="0.9" />
-      <rect x="4" y="11" width="6" height="6" fill="var(--aegean-deep)" opacity="0.9" />
-      <rect x="11" y="11" width="6" height="6" fill="var(--ochre)" opacity="0.85" />
-      <rect x="18" y="11" width="6" height="6" fill="var(--aegean-deep)" opacity="0.9" />
-      <rect x="4" y="18" width="6" height="6" fill="var(--olive)" opacity="0.85" />
-      <rect x="11" y="18" width="6" height="6" fill="var(--terracotta)" opacity="0.9" />
-      <rect x="18" y="18" width="6" height="6" fill="var(--ochre)" opacity="0.85" />
+      <rect x="4" y="4" width={cell} height={cell} fill="var(--terracotta)" opacity="0.9" />
+      <rect x={4 + cell + gap} y="4" width={cell} height={cell} fill="var(--aegean-deep)" opacity="0.9" />
+      <rect x={4 + (cell + gap) * 2} y="4" width={cell} height={cell} fill="var(--terracotta)" opacity="0.9" />
+      <rect x="4" y={4 + cell + gap} width={cell} height={cell} fill="var(--aegean-deep)" opacity="0.9" />
+      <rect x={4 + cell + gap} y={4 + cell + gap} width={cell} height={cell} fill="var(--ochre)" opacity="0.85" />
+      <rect x={4 + (cell + gap) * 2} y={4 + cell + gap} width={cell} height={cell} fill="var(--aegean-deep)" opacity="0.9" />
+      <rect x="4" y={4 + (cell + gap) * 2} width={cell} height={cell} fill="var(--olive)" opacity="0.85" />
+      <rect x={4 + cell + gap} y={4 + (cell + gap) * 2} width={cell} height={cell} fill="var(--terracotta)" opacity="0.9" />
+      <rect x={4 + (cell + gap) * 2} y={4 + (cell + gap) * 2} width={cell} height={cell} fill="var(--ochre)" opacity="0.85" />
     </svg>
   );
 }
@@ -31,6 +33,48 @@ function GoogleIcon() {
   );
 }
 
+const MOSAIC_COLORS = [
+  ["var(--terracotta)", "var(--aegean-deep)", "var(--ochre)",        "var(--terracotta)"],
+  ["var(--aegean-deep)","var(--ochre)",        "var(--terracotta)",  "var(--olive)"],
+  ["var(--olive)",      "var(--terracotta)",   "var(--aegean-deep)", "var(--ochre)"],
+  ["var(--ochre)",      "var(--olive)",        "var(--terracotta)",  "var(--aegean-deep)"],
+];
+const MOSAIC_OPACITY = [
+  [0.82, 0.88, 0.72, 0.60],
+  [0.78, 0.70, 0.85, 0.80],
+  [0.75, 0.90, 0.68, 0.78],
+  [0.65, 0.82, 0.88, 0.72],
+];
+
+function DecorativeMosaic() {
+  const cell = 52;
+  const gap = 5;
+  const total = cell * 4 + gap * 3;
+  return (
+    <svg width={total} height={total} aria-hidden>
+      {MOSAIC_COLORS.map((row, r) =>
+        row.map((color, c) => (
+          <rect
+            key={`${r}-${c}`}
+            x={c * (cell + gap)}
+            y={r * (cell + gap)}
+            width={cell}
+            height={cell}
+            fill={color}
+            opacity={MOSAIC_OPACITY[r][c]}
+          />
+        ))
+      )}
+    </svg>
+  );
+}
+
+const FEATURES = [
+  { label: "AI training plans tailored to each athlete's data" },
+  { label: "WhatsApp check-ins with intelligent reply drafts" },
+  { label: "Biometric data from Garmin, WHOOP & Oura" },
+];
+
 export default function LoginPage() {
   const [, navigate] = useLocation();
   const [email, setEmail] = useState("");
@@ -39,28 +83,23 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
+  const sessionExpired = new URLSearchParams(window.location.search).get("expired") === "1";
   const anyLoading = loading || googleLoading;
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-
     const supabase = createBrowserSupabase();
     if (!supabase) { setError("Auth is not configured yet. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."); setLoading(false); return; }
-
     const { data, error: authErr } = await supabase.auth.signInWithPassword({ email, password });
-
-    if (authErr) {
-      setError(authErr.message);
-      setLoading(false);
-      return;
-    }
-
+    if (authErr) { setError(authErr.message); setLoading(false); return; }
     const token = data.session?.access_token ?? "";
     const { role, route } = await getRoleAndRedirect(token);
-
-    if (role === "coach" && route === "/onboarding") {
+    const storedPath = consumeLoginRedirect(role);
+    if (storedPath) {
+      navigate(storedPath);
+    } else if (role === "coach" && route === "/onboarding") {
       const name = encodeURIComponent(data.session?.user.user_metadata?.full_name ?? "");
       const emailParam = encodeURIComponent(data.session?.user.email ?? "");
       navigate(`/onboarding?name=${name}&email=${emailParam}`);
@@ -81,58 +120,110 @@ export default function LoginPage() {
     if (authErr) { setError(authErr.message); setGoogleLoading(false); }
   }
 
-  return (
-    <div className="mosaic-bg" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px" }}>
-      <div style={{ width: "100%", maxWidth: 420 }}>
+  const inputStyle: React.CSSProperties = {
+    width: "100%", padding: "10px 13px",
+    background: "var(--parchment)", border: "1px solid var(--rule)",
+    borderRadius: 2, fontFamily: "var(--body)", fontSize: 13,
+    color: "var(--ink)", outline: "none", boxSizing: "border-box",
+  };
+  const labelStyle: React.CSSProperties = {
+    display: "block", fontFamily: "var(--mono)", fontSize: 10,
+    letterSpacing: "0.14em", textTransform: "uppercase",
+    color: "var(--ink-mute)", marginBottom: 6,
+  };
 
-        {/* Brand */}
-        <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
-            <AndesLogo />
-            <span style={{ fontFamily: "var(--serif)", fontSize: 26, fontWeight: 500, letterSpacing: "-0.01em", color: "var(--ink)" }}>
+  return (
+    <div className="ca-login-split">
+
+      {/* ── Left brand panel ── */}
+      <div className="mosaic-bg ca-login-brand">
+        <div style={{ maxWidth: 440, width: "100%" }}>
+
+          {/* Large decorative mosaic */}
+          <div style={{ marginBottom: 36 }}>
+            <DecorativeMosaic />
+          </div>
+
+          {/* Wordmark */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+            <AndesLogo size={32} />
+            <span style={{ fontFamily: "var(--serif)", fontSize: 32, fontWeight: 500, letterSpacing: "-0.01em", color: "var(--ink)" }}>
               Andes<span style={{ color: "var(--terracotta-deep)" }}>.</span>IA
             </span>
           </div>
-          <p style={{ fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--ink-mute)", margin: "6px 0 0" }}>
-            Sign in to your account
-          </p>
-        </div>
 
-        {/* Card */}
-        <div className="ca-panel" style={{ padding: "36px 32px" }}>
+          {/* Tagline */}
+          <h1 style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 28, fontWeight: 400, lineHeight: 1.35, color: "var(--ink)", margin: "0 0 14px" }}>
+            Your athletes.<br />Your voice.<br />Your AI.
+          </h1>
+          <p style={{ fontFamily: "var(--body)", fontSize: 14, color: "var(--ink-soft)", lineHeight: 1.65, margin: "0 0 32px", maxWidth: 360 }}>
+            Andes.IA helps endurance coaches save hours each week on training prescription — without losing your personal touch with each athlete.
+          </p>
+
+          {/* Feature list */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {FEATURES.map((f, i) => (
+              <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                <div style={{ width: 20, height: 20, borderRadius: 1, background: i === 0 ? "var(--terracotta)" : i === 1 ? "var(--aegean-deep)" : "var(--olive)", opacity: 0.85, flexShrink: 0, marginTop: 1 }} />
+                <span style={{ fontFamily: "var(--body)", fontSize: 13.5, color: "var(--ink-soft)", lineHeight: 1.5 }}>{f.label}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Ornament */}
+          <div style={{ marginTop: 48, fontFamily: "var(--mono)", fontSize: 9, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--ink-faint)" }}>
+            COACH · ATHLETE · PURPOSE
+          </div>
+        </div>
+      </div>
+
+      {/* ── Right form panel ── */}
+      <div className="ca-login-form-panel">
+        <div style={{ width: "100%", maxWidth: 360, margin: "0 auto" }}>
+
+          {/* Session expired banner */}
+          {sessionExpired && (
+            <div style={{ marginBottom: 24, padding: "12px 16px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, display: "flex", alignItems: "flex-start", gap: 10 }}>
+              <span style={{ fontSize: 14, lineHeight: 1, marginTop: 1 }}>⏱</span>
+              <div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--terracotta-deep)", marginBottom: 3 }}>Session expired</div>
+                <div style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--terracotta-deep)", lineHeight: 1.5 }}>Your session timed out — please sign in again to continue.</div>
+              </div>
+            </div>
+          )}
+
+          {/* Heading */}
+          <div style={{ marginBottom: 32 }}>
+            <div className="ca-eyebrow" style={{ marginBottom: 8 }}>Coach portal</div>
+            <h2 className="ca-display" style={{ fontSize: 28, margin: 0 }}>Welcome back.</h2>
+          </div>
 
           {/* Google */}
           <button
             onClick={handleGoogle}
             disabled={anyLoading}
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", padding: "10px 14px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontSize: 13, fontFamily: "var(--body)", fontWeight: 500, color: "var(--ink)", cursor: anyLoading ? "not-allowed" : "pointer", opacity: anyLoading ? 0.6 : 1, marginBottom: 20 }}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%", padding: "10px 14px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontSize: 13, fontFamily: "var(--body)", fontWeight: 500, color: "var(--ink)", cursor: anyLoading ? "not-allowed" : "pointer", opacity: anyLoading ? 0.6 : 1, marginBottom: 20, transition: "border-color 150ms ease" }}
           >
             <GoogleIcon />
             {googleLoading ? "Redirecting…" : "Continue with Google"}
           </button>
 
+          {/* Divider */}
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
             <div style={{ flex: 1, height: 1, background: "var(--rule-soft)" }} />
             <span style={{ fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--ink-faint)" }}>or</span>
             <div style={{ flex: 1, height: 1, background: "var(--rule-soft)" }} />
           </div>
 
+          {/* Form */}
           <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div>
-              <label style={{ display: "block", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 6 }}>Email</label>
-              <input
-                type="email" value={email} onChange={e => setEmail(e.target.value)}
-                required autoComplete="email" placeholder="coach@example.com"
-                style={{ width: "100%", padding: "10px 13px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)", outline: "none", boxSizing: "border-box" }}
-              />
+              <label style={labelStyle}>Email</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email" placeholder="coach@example.com" style={inputStyle} />
             </div>
             <div>
-              <label style={{ display: "block", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 6 }}>Password</label>
-              <input
-                type="password" value={password} onChange={e => setPassword(e.target.value)}
-                required autoComplete="current-password" placeholder="••••••••"
-                style={{ width: "100%", padding: "10px 13px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)", outline: "none", boxSizing: "border-box" }}
-              />
+              <label style={labelStyle}>Password</label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} required autoComplete="current-password" placeholder="••••••••" style={inputStyle} />
               <div style={{ textAlign: "right", marginTop: 6 }}>
                 <Link href="/auth/forgot-password" style={{ fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--aegean-deep)", textDecoration: "none" }}>Forgot password?</Link>
               </div>
@@ -152,18 +243,21 @@ export default function LoginPage() {
               {loading ? "Signing in…" : "Sign in →"}
             </button>
           </form>
+
+          {/* Footer */}
+          <div style={{ marginTop: 28, display: "flex", flexDirection: "column", gap: 10 }}>
+            <p style={{ fontFamily: "var(--body)", fontSize: 13, color: "var(--ink-mute)", margin: 0 }}>
+              No account?{" "}
+              <Link href="/signup" style={{ color: "var(--terracotta-deep)", textDecoration: "none", fontWeight: 500 }}>Create one →</Link>
+            </p>
+            <p style={{ fontFamily: "var(--body)", fontSize: 13, color: "var(--ink-mute)", margin: 0 }}>
+              Athlete?{" "}
+              <Link href="/login" style={{ color: "var(--aegean-deep)", textDecoration: "none", fontWeight: 500 }}>Same login — we'll route you correctly.</Link>
+            </p>
+          </div>
         </div>
-
-        <p style={{ textAlign: "center", marginTop: 20, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink-mute)" }}>
-          No account?{" "}
-          <Link href="/signup" style={{ color: "var(--terracotta-deep)", textDecoration: "none", fontWeight: 500 }}>Create one →</Link>
-        </p>
-
-        <p style={{ textAlign: "center", marginTop: 10, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink-mute)" }}>
-          Athlete?{" "}
-          <Link href="/login" style={{ color: "var(--aegean-deep)", textDecoration: "none", fontWeight: 500 }}>Same login — we'll send you to the right place.</Link>
-        </p>
       </div>
+
     </div>
   );
 }

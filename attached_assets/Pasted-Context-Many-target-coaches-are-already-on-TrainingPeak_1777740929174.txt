@@ -1,0 +1,117 @@
+Context
+
+Many target coaches are already on TrainingPeaks or TrainHeroic with established athlete rosters, historical workout data, and workflows they've built over years. Asking them to rip-and-replace creates friction and churn risk. This ticket explores two distinct strategies:
+
+Migration path — make it easy to move from TrainingPeaks to Coach.AI natively
+
+Coexistence mode — let coaches keep TrainingPeaks as their workout delivery tool while using Coach.AI for AI capabilities, WhatsApp communication, and athlete check-ins
+
+Both strategies reduce the barrier to adoption. The right answer likely depends on the coach segment — newer coaches may fully migrate; established coaches with 30+ athletes on TrainingPeaks may want coexistence.
+
+Strategy A: Migration path (Coach.AI as full replacement)
+
+What can be migrated from TrainingPeaks
+
+TrainingPeaks has no official public API for coach data export. Known options:
+
+Manual export: Coaches can export athlete workout history as .fit, .tcx, or .csv files. We could build an importer.
+
+TrainingPeaks API (Partner program): TrainingPeaks has a partner API (api.trainingpeaks.com) but it requires application and approval. Worth investigating — access unlocks athlete workout history, planned workouts, and TSS/ATL/CTL metrics directly.
+
+Screen scraping / browser extension: Not recommended — brittle, violates ToS.
+
+CSV athlete roster import: Simple — coach exports their athlete list from TP and uploads to Coach.AI. Low-hanging fruit.
+
+Migration scope (MVP-level)
+
+Data
+
+Feasibility
+
+Method
+
+Athlete roster (name, email, sport)
+
+High
+
+CSV upload
+
+Planned workout history
+
+Medium
+
+.fit/.tcx file bulk import
+
+TSS/ATL/CTL load metrics
+
+Low (partner API only)
+
+TrainingPeaks Partner API
+
+Athlete notes / annotations
+
+Low
+
+Manual
+
+Existing training plans
+
+Medium
+
+PDF/document import → AI parsing
+
+Strategy B: Coexistence mode (Coach.AI as AI layer on top of TrainingPeaks)
+
+The pitch to the coach
+
+"Keep your athletes on TrainingPeaks. Coach.AI adds the AI brain and the WhatsApp layer you're missing."
+
+What coexistence looks like in practice
+
+WhatsApp check-ins: Coach.AI sends and receives athlete check-ins via WhatsApp. Responses are processed by the AI. Coach sees the triage dashboard in Coach.AI.
+
+Plan push to TrainingPeaks: When a coach approves an AI-generated workout adjustment, Coach.AI pushes it to TrainingPeaks via the Partner API rather than storing it natively. Athletes still see their plan in the TP app.
+
+Biometric data: Rook API already pulls from Garmin/WHOOP/Oura — same data TP uses. No conflict.
+
+AI suggestions: Generated in Coach.AI, delivered via WhatsApp. Coach can push approved suggestions back to TP as planned workouts.
+
+Technical feasibility
+
+TrainingPeaks Partner API supports:
+
+GET /v1/athletes/{athleteId}/workouts — pull planned workouts
+
+POST /v1/athletes/{athleteId}/workouts — push new planned workouts
+
+GET /v1/athletes/{athleteId}/metrics — pull CTL/ATL/TSS
+
+Blocker: Partner API requires approval from TrainingPeaks. Lead time unknown — could be weeks to months. This is the critical path dependency for coexistence mode.
+
+TrainHeroic has no public API — coexistence with TH would require a different approach (potentially webhook-based or manual sync).
+
+Open questions (do not resolve until we have coach interviews)
+
+What % of target coaches are actively paying for TrainingPeaks vs. looking to leave?
+
+Do coaches who want coexistence represent a meaningful segment, or would they just fully migrate with the right incentive?
+
+Is the TrainingPeaks Partner API approval realistic in our timeline, or is this a 6-month+ dependency?
+
+Would a simpler "import your TP athlete list via CSV" cover 80% of the migration friction?
+
+Recommended approach (when ready to act)
+
+First: Build CSV athlete roster import — high value, zero API dependency, 1-2 days of work.
+
+Second: Apply for TrainingPeaks Partner API access early — long lead time, no cost to apply.
+
+Third: Interview 10 coaches to understand split between "full migrate" vs. "coexistence" intent before building either strategy fully.
+
+Do not start until
+
+Coach interviews confirm coexistence is a real segment (not just a nice-to-have)
+
+TrainingPeaks Partner API access is confirmed (or ruled out)
+
+We have 20+ coaches using the product — migration only matters once there's something to migrate to

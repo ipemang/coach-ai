@@ -139,3 +139,38 @@ export async function resolvePostLoginRoute(token: string): Promise<string> {
   const { route } = await getRoleAndRedirect(token);
   return route;
 }
+
+/**
+ * Save the current page path to sessionStorage so the user can be
+ * returned there after re-authentication. Only stores protected paths.
+ */
+export function storeLoginRedirect(): void {
+  const path = window.location.pathname + window.location.search;
+  if (
+    path &&
+    path !== "/" &&
+    !path.startsWith("/login") &&
+    !path.startsWith("/signup") &&
+    !path.startsWith("/auth/")
+  ) {
+    sessionStorage.setItem("login_redirect", path);
+  }
+}
+
+/**
+ * Retrieve and clear the stored redirect path, validated against the
+ * user's role so a coach can't be bounced into an athlete route or vice-versa.
+ * Returns null if nothing is stored or the path doesn't match the role.
+ */
+export function consumeLoginRedirect(role: UserRole): string | null {
+  const path = sessionStorage.getItem("login_redirect");
+  if (!path) return null;
+  sessionStorage.removeItem("login_redirect");
+  // Security: reject anything that isn't a clean internal relative path
+  if (!path.startsWith("/") || path.startsWith("//")) return null;
+  const isCoachPath = path.startsWith("/dashboard") || path.startsWith("/onboarding");
+  const isAthletePath = path.startsWith("/athlete/dashboard");
+  if (role === "coach" && isCoachPath) return path;
+  if (role === "athlete" && isAthletePath) return path;
+  return null;
+}

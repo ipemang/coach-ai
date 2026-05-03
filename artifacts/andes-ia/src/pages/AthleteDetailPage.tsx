@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useLocation, Link } from "wouter";
-import { BACKEND, getAuthToken } from "../lib/api";
+import { BACKEND, getAuthToken, storeLoginRedirect } from "../lib/api";
 import type { Athlete, Suggestion, Workout, CheckIn, StableProfile, CurrentState } from "../lib/types";
 
 function getInitials(name: string | null | undefined): string {
@@ -36,6 +36,106 @@ type AthleteDetailData = {
   checkins: CheckIn[];
 };
 
+type TrainingReport = {
+  id: string;
+  period: string;
+  status: "draft" | "sent" | string;
+  content?: string | null;
+  created_at: string;
+};
+
+type SessionNote = {
+  id: string;
+  note_text: string;
+  sent: boolean;
+  created_at: string;
+};
+
+type MorningPulseConfig = {
+  send_time: string;
+  questions: string[];
+};
+
+function EditMorningPulseModal({ config, athleteId, onClose, onSaved }: {
+  config: MorningPulseConfig;
+  athleteId: string;
+  onClose: () => void;
+  onSaved: (updated: MorningPulseConfig) => void;
+}) {
+  const [sendTime, setSendTime] = useState(config.send_time ?? "07:30");
+  const [questions, setQuestions] = useState<string[]>(config.questions ?? []);
+  const [newQ, setNewQ] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    setSaving(true); setError(null);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/athletes/${athleteId}/morning-pulse`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ send_time: sendTime, questions }),
+      });
+      if (res.ok) { onSaved(await res.json()); onClose(); }
+      else { const b = await res.json().catch(() => ({})); setError((b?.detail as string) ?? `Error ${res.status}`); }
+    } catch { setError("Network error."); }
+    setSaving(false);
+  }
+
+  function addQuestion() {
+    const q = newQ.trim();
+    if (q) { setQuestions(qs => [...qs, q]); setNewQ(""); }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "oklch(0.28 0.022 55 / 0.4)", backdropFilter: "blur(4px)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={onClose}>
+      <div className="ca-panel" style={{ width: "100%", maxWidth: 500, padding: 32 }} onClick={e => e.stopPropagation()}>
+        <div className="ca-eyebrow ca-eyebrow-aegean" style={{ marginBottom: 8 }}>Morning pulse</div>
+        <h2 className="ca-display" style={{ fontSize: 24, margin: "0 0 22px" }}>Edit check-in</h2>
+
+        <div style={{ marginBottom: 20 }}>
+          <div className="ca-eyebrow" style={{ fontSize: 9, marginBottom: 8 }}>Send time</div>
+          <input
+            type="time" value={sendTime} onChange={e => setSendTime(e.target.value)}
+            style={{ padding: "8px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 14, color: "var(--ink)", outline: "none" }}
+          />
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <div className="ca-eyebrow" style={{ fontSize: 9, marginBottom: 10 }}>Questions</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+            {questions.map((q, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-mute)", paddingTop: 9, minWidth: 18 }}>{i + 1}.</span>
+                <div style={{ flex: 1, padding: "8px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontSize: 13, color: "var(--ink)", lineHeight: 1.5 }}>{q}</div>
+                <button onClick={() => setQuestions(qs => qs.filter((_, j) => j !== i))} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-mute)", fontSize: 20, lineHeight: 1, paddingTop: 5 }}>×</button>
+              </div>
+            ))}
+            {questions.length === 0 && <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-faint)", margin: 0 }}>No questions yet.</p>}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="text" value={newQ} onChange={e => setNewQ(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addQuestion())}
+              placeholder="Add a question…"
+              style={{ flex: 1, padding: "8px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)", outline: "none" }}
+            />
+            <button className="ca-btn ca-btn-ghost" onClick={addQuestion} disabled={!newQ.trim()}>Add</button>
+          </div>
+        </div>
+
+        {error && <div style={{ padding: "10px 14px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13, marginBottom: 14 }}>{error}</div>}
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="ca-btn ca-btn-primary" style={{ flex: 1 }} disabled={saving || questions.length === 0} onClick={handleSave}>{saving ? "Saving…" : "Save check-in →"}</button>
+          <button className="ca-btn ca-btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AthleteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [, navigate] = useLocation();
@@ -47,6 +147,25 @@ export default function AthleteDetailPage() {
   const [refineId, setRefineId] = useState<string | null>(null);
   const [refineText, setRefineText] = useState("");
   const [sendMsg, setSendMsg] = useState(false);
+  const [trainingReports, setTrainingReports] = useState<TrainingReport[] | null>(null);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportGenerating, setReportGenerating] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportSending, setReportSending] = useState<string | null>(null);
+  const [reportSendError, setReportSendError] = useState<Record<string, string>>({});
+  const [reportEditDraft, setReportEditDraft] = useState<Record<string, string>>({});
+  const [sessionNotes, setSessionNotes] = useState<SessionNote[] | null>(null);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [noteText, setNoteText] = useState("");
+  const [noteSaving, setNoteSaving] = useState<"save" | "send" | null>(null);
+  const [aiDrafting, setAiDrafting] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
+  const [notesExpanded, setNotesExpanded] = useState(true);
+  const [athleteActive, setAthleteActive] = useState<boolean | null>(null);
+  const [activeSaving, setActiveSaving] = useState(false);
+  const [morningPulse, setMorningPulse] = useState<MorningPulseConfig | null>(null);
+  const [pulseLoading, setPulseLoading] = useState(false);
+  const [editPulseOpen, setEditPulseOpen] = useState(false);
   const [msgText, setMsgText] = useState("");
   const [msgSending, setMsgSending] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -54,12 +173,12 @@ export default function AthleteDetailPage() {
   useEffect(() => {
     async function load() {
       const token = await getAuthToken();
-      if (!token) { navigate("/login"); return; }
+      if (!token) { storeLoginRedirect(); navigate("/login?expired=1"); return; }
       try {
         const res = await fetch(`${BACKEND}/api/v1/athletes/${id}?include_suggestions=true&include_workouts=true&include_checkins=true`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (res.status === 401) { navigate("/login"); return; }
+        if (res.status === 401) { storeLoginRedirect(); navigate("/login?expired=1"); return; }
         if (res.status === 404) { navigate("/dashboard"); return; }
         if (res.ok) { setData(await res.json()); }
         else { setError("Could not load athlete data."); }
@@ -68,6 +187,164 @@ export default function AthleteDetailPage() {
     }
     load();
   }, [id, navigate]);
+
+  useEffect(() => {
+    if (data && athleteActive === null) setAthleteActive(data.athlete.active ?? true);
+  }, [data, athleteActive]);
+
+  useEffect(() => {
+    if (activeTab !== "overview" || morningPulse !== null) return;
+    async function fetchPulse() {
+      setPulseLoading(true);
+      const token = await getAuthToken();
+      try {
+        const res = await fetch(`${BACKEND}/api/v1/athletes/${id}/morning-pulse`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) setMorningPulse(await res.json());
+        else setMorningPulse({ send_time: "07:30", questions: [] });
+      } catch { setMorningPulse({ send_time: "07:30", questions: [] }); }
+      setPulseLoading(false);
+    }
+    fetchPulse();
+  }, [activeTab, id, morningPulse]);
+
+  async function handleToggleActive() {
+    if (activeSaving || athleteActive === null) return;
+    const newVal = !athleteActive;
+    setAthleteActive(newVal);
+    setActiveSaving(true);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/athletes/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ active: newVal }),
+      });
+      if (!res.ok) setAthleteActive(!newVal);
+      else showToast(newVal ? "Check-ins enabled" : "Check-ins paused");
+    } catch { setAthleteActive(!newVal); }
+    setActiveSaving(false);
+  }
+
+  useEffect(() => {
+    if (activeTab !== "overview" || sessionNotes !== null) return;
+    async function fetchNotes() {
+      setNotesLoading(true);
+      const token = await getAuthToken();
+      try {
+        const res = await fetch(`${BACKEND}/api/v1/athletes/${id}/session-notes`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) setSessionNotes(await res.json());
+        else setSessionNotes([]);
+      } catch { setSessionNotes([]); }
+      setNotesLoading(false);
+    }
+    fetchNotes();
+  }, [activeTab, id, sessionNotes]);
+
+  async function handleAiDraft() {
+    setAiDrafting(true);
+    setNoteError(null);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/athletes/${id}/session-notes/ai-draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      if (res.ok) {
+        const body = await res.json();
+        setNoteText(body.draft ?? body.note_text ?? "");
+      } else {
+        const b = await res.json().catch(() => ({}));
+        setNoteError((b?.detail as string) ?? `Error ${res.status} — could not generate draft.`);
+      }
+    } catch { setNoteError("Network error — could not reach the server."); }
+    setAiDrafting(false);
+  }
+
+  async function handleSaveNote(send: boolean) {
+    if (!noteText.trim()) return;
+    setNoteSaving(send ? "send" : "save");
+    setNoteError(null);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/athletes/${id}/session-notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ note_text: noteText.trim(), send }),
+      });
+      if (res.ok) {
+        const newNote: SessionNote = await res.json();
+        setSessionNotes(prev => [newNote, ...(prev ?? [])]);
+        setNoteText("");
+        showToast(send ? "Note sent to athlete" : "Note saved");
+      } else {
+        const b = await res.json().catch(() => ({}));
+        setNoteError((b?.detail as string) ?? `Error ${res.status} — could not save note.`);
+      }
+    } catch { setNoteError("Network error — could not reach the server."); }
+    setNoteSaving(null);
+  }
+
+  useEffect(() => {
+    if (activeTab !== "plan" || trainingReports !== null) return;
+    async function fetchReports() {
+      setReportsLoading(true);
+      const token = await getAuthToken();
+      try {
+        const res = await fetch(`${BACKEND}/api/v1/athletes/${id}/reports`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) setTrainingReports(await res.json());
+        else setTrainingReports([]);
+      } catch { setTrainingReports([]); }
+      setReportsLoading(false);
+    }
+    fetchReports();
+  }, [activeTab, id, trainingReports]);
+
+  async function handleGenerateReport() {
+    setReportGenerating(true);
+    setReportError(null);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/athletes/${id}/reports/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      if (res.ok) {
+        const newReport: TrainingReport = await res.json();
+        setTrainingReports(prev => [newReport, ...(prev ?? [])]);
+      } else {
+        const b = await res.json().catch(() => ({}));
+        setReportError((b?.detail as string) ?? `Error ${res.status} — the server could not generate the report.`);
+      }
+    } catch { setReportError("Network error — could not reach the server."); }
+    setReportGenerating(false);
+  }
+
+  async function handleSendReport(reportId: string, content: string) {
+    setReportSending(reportId);
+    setReportSendError(prev => { const n = { ...prev }; delete n[reportId]; return n; });
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/athletes/${id}/reports/${reportId}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ content }),
+      });
+      if (res.ok) {
+        setTrainingReports(prev => prev ? prev.map(r => r.id === reportId ? { ...r, status: "sent", content } : r) : prev);
+        setReportEditDraft(prev => { const n = { ...prev }; delete n[reportId]; return n; });
+      } else {
+        const b = await res.json().catch(() => ({}));
+        setReportSendError(prev => ({ ...prev, [reportId]: (b?.detail as string) ?? `Error ${res.status}` }));
+      }
+    } catch { setReportSendError(prev => ({ ...prev, [reportId]: "Network error — could not send." })); }
+    setReportSending(null);
+  }
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000); }
 
@@ -188,11 +465,29 @@ export default function AthleteDetailPage() {
               <h1 className="ca-display" style={{ fontSize: 36, margin: 0 }}>{athlete.full_name}</h1>
               {pendingSuggestions.length > 0 && <span className="ca-chip ca-chip-terra">{pendingSuggestions.length} pending</span>}
             </div>
-            <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
               {cs?.training_phase && <span className="ca-chip ca-chip-aegean">{cs.training_phase}{cs.training_week ? ` · Wk ${cs.training_week}` : ""}</span>}
               {sp?.target_race && <span className="ca-chip">{sp.target_race}</span>}
               {athlete.primary_sport && <span className="ca-chip">{athlete.primary_sport}</span>}
               {athlete.phone_number && <span className="ca-mono" style={{ fontSize: 11, color: "var(--ink-mute)", alignSelf: "center" }}>{athlete.phone_number}</span>}
+              {/* Morning pulse active toggle */}
+              {athleteActive !== null && (
+                <button
+                  onClick={handleToggleActive}
+                  disabled={activeSaving}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5, padding: "4px 10px",
+                    background: athleteActive ? "var(--olive)" : "oklch(0.72 0.13 42)",
+                    border: "none", borderRadius: 2, cursor: activeSaving ? "not-allowed" : "pointer",
+                    fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase",
+                    color: "white", opacity: activeSaving ? 0.6 : 1,
+                  }}
+                  title={athleteActive ? "Click to pause morning pulse check-ins" : "Click to enable morning pulse check-ins"}
+                >
+                  <span style={{ fontSize: 7 }}>●</span>
+                  {activeSaving ? "Saving…" : athleteActive ? "Check-ins on" : "Check-ins off"}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -302,7 +597,117 @@ export default function AthleteDetailPage() {
                   </div>
                 </div>
               )}
+
+              {/* Morning Pulse card */}
+              <div className="ca-panel" style={{ padding: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <div className="ca-eyebrow" style={{ fontSize: 9 }}>Morning pulse</div>
+                  {morningPulse && (
+                    <button className="ca-btn ca-btn-ghost" onClick={() => setEditPulseOpen(true)} style={{ fontSize: 11, padding: "4px 10px" }}>Edit</button>
+                  )}
+                </div>
+                {pulseLoading && <p className="ca-eyebrow" style={{ fontSize: 9, color: "var(--ink-faint)" }}>Loading…</p>}
+                {morningPulse && (
+                  <>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 9.5, color: "var(--ink-mute)", marginBottom: 12, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                      Sends at {morningPulse.send_time} · {morningPulse.questions.length} question{morningPulse.questions.length !== 1 ? "s" : ""}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {morningPulse.questions.map((q, i) => (
+                        <div key={i} style={{ fontFamily: "var(--body)", fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.5, paddingLeft: 10, borderLeft: "2px solid var(--rule)" }}>{q}</div>
+                      ))}
+                      {morningPulse.questions.length === 0 && (
+                        <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 12, color: "var(--ink-faint)", margin: 0 }}>No questions yet — click Edit to add some.</p>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
+
+            {/* Session Notes */}
+            <div className="ca-panel" style={{ padding: 0, overflow: "hidden" }}>
+              {/* Header row */}
+              <div
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 20px", cursor: "pointer", userSelect: "none" }}
+                onClick={() => setNotesExpanded(e => !e)}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 14 }}>✏️</span>
+                  <span className="ca-eyebrow ca-eyebrow-ochre" style={{ fontSize: 10 }}>Session notes</span>
+                </div>
+                <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-mute)" }}>{notesExpanded ? "▲" : "▼"}</span>
+              </div>
+
+              {notesExpanded && (
+                <div style={{ padding: "0 20px 20px" }}>
+                  {/* Compose row */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span className="ca-eyebrow" style={{ fontSize: 9 }}>New note</span>
+                    <button
+                      onClick={handleAiDraft}
+                      disabled={aiDrafting}
+                      style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", cursor: aiDrafting ? "not-allowed" : "pointer", color: "var(--ink)", opacity: aiDrafting ? 0.6 : 1 }}
+                    >
+                      <span style={{ fontSize: 12 }}>✦</span>
+                      {aiDrafting ? "Drafting…" : "AI draft"}
+                    </button>
+                  </div>
+                  <textarea
+                    value={noteText}
+                    onChange={e => setNoteText(e.target.value)}
+                    rows={4}
+                    placeholder="Write a post-workout note for this athlete, or click AI draft…"
+                    style={{ width: "100%", padding: "12px 14px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13.5, color: "var(--ink)", outline: "none", resize: "vertical", lineHeight: 1.6, boxSizing: "border-box" }}
+                  />
+                  {noteError && (
+                    <div style={{ padding: "8px 12px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 12, margin: "8px 0", lineHeight: 1.5 }}>
+                      {noteError}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    <button
+                      className="ca-btn ca-btn-ghost"
+                      onClick={() => handleSaveNote(false)}
+                      disabled={!noteText.trim() || !!noteSaving}
+                      style={{ fontSize: 12 }}
+                    >
+                      {noteSaving === "save" ? "Saving…" : "Save (no send)"}
+                    </button>
+                    <button
+                      className="ca-btn ca-btn-primary"
+                      onClick={() => handleSaveNote(true)}
+                      disabled={!noteText.trim() || !!noteSaving}
+                      style={{ fontSize: 12 }}
+                    >
+                      {noteSaving === "send" ? "Sending…" : "Send to athlete →"}
+                    </button>
+                  </div>
+
+                  {/* Notes list */}
+                  <div style={{ marginTop: 16 }}>
+                    {notesLoading && <p className="ca-eyebrow" style={{ fontSize: 10, color: "var(--ink-faint)" }}>Loading notes…</p>}
+                    {!notesLoading && sessionNotes !== null && sessionNotes.length === 0 && (
+                      <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-faint)", margin: 0 }}>No notes yet. Write one above or click AI draft.</p>
+                    )}
+                    {!notesLoading && sessionNotes && sessionNotes.length > 0 && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {sessionNotes.map(n => (
+                          <div key={n.id} style={{ padding: "10px 14px", background: "var(--linen)", border: "1px solid var(--rule)", borderRadius: 2 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+                              <span className="ca-mono" style={{ fontSize: 9, color: "var(--ink-mute)" }}>{new Date(n.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                              {n.sent && <span className="ca-chip ca-chip-aegean" style={{ fontSize: 8 }}>Sent</span>}
+                            </div>
+                            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.55, color: "var(--ink-soft)", fontFamily: "var(--serif)", fontStyle: "italic" }}>{n.note_text}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
           </div>
         )}
 
@@ -352,7 +757,9 @@ export default function AthleteDetailPage() {
 
         {/* Training plan tab */}
         {activeTab === "plan" && (
-          <div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+
+            {/* Weekly workouts */}
             {workouts.length === 0 ? (
               <div style={{ textAlign: "center", padding: 60 }}>
                 <div className="ca-ornament">◆ ◆ ◆</div>
@@ -382,6 +789,93 @@ export default function AthleteDetailPage() {
                 ))}
               </div>
             )}
+
+            {/* Training Reports */}
+            <div className="ca-panel" style={{ padding: 24 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <div className="ca-eyebrow ca-eyebrow-terra">Training reports</div>
+                <button
+                  className="ca-btn ca-btn-ghost"
+                  onClick={handleGenerateReport}
+                  disabled={reportGenerating}
+                  style={{ fontSize: 12, padding: "6px 14px" }}
+                >
+                  {reportGenerating ? "Generating…" : "+ Generate draft"}
+                </button>
+              </div>
+
+              {reportError && (
+                <div style={{ padding: "10px 14px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13, marginBottom: 14, lineHeight: 1.5 }}>
+                  {reportError}
+                </div>
+              )}
+
+              {reportsLoading && (
+                <p className="ca-eyebrow" style={{ fontSize: 11, textAlign: "center", padding: "20px 0" }}>Loading reports…</p>
+              )}
+
+              {!reportsLoading && trainingReports !== null && trainingReports.length === 0 && !reportError && (
+                <div style={{ padding: "28px 0", border: "1px dashed var(--rule)", borderRadius: 2, textAlign: "center" }}>
+                  <p className="ca-display" style={{ fontSize: 16, color: "var(--ink-mute)", margin: "0 0 4px" }}>No reports yet</p>
+                  <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-faint)", margin: 0 }}>Generate a draft from last week's data</p>
+                </div>
+              )}
+
+              {!reportsLoading && trainingReports && trainingReports.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {trainingReports.map(r => {
+                    const isDraft = r.status === "draft";
+                    const isSending = reportSending === r.id;
+                    const editContent = reportEditDraft[r.id] ?? r.content ?? "";
+                    const sendErr = reportSendError[r.id];
+                    return (
+                      <div key={r.id} style={{ padding: "16px 18px", background: isDraft ? "var(--parchment)" : "var(--linen)", border: `1px solid ${isDraft ? "oklch(0.78 0.06 55)" : "var(--rule)"}`, borderRadius: 2 }}>
+                        {/* Header */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+                          <span className="ca-display" style={{ fontSize: 14 }}>{r.period ?? "Weekly report"}</span>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <span className={`ca-chip ${r.status === "sent" ? "ca-chip-aegean" : "ca-chip-ochre"}`} style={{ fontSize: 9 }}>{r.status}</span>
+                            <span className="ca-mono" style={{ fontSize: 10, color: "var(--ink-mute)" }}>{new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                          </div>
+                        </div>
+
+                        {/* Content — editable for drafts, read-only when sent */}
+                        {isDraft ? (
+                          <textarea
+                            value={editContent}
+                            onChange={e => setReportEditDraft(prev => ({ ...prev, [r.id]: e.target.value }))}
+                            rows={6}
+                            style={{ width: "100%", padding: "10px 12px", background: "var(--parchment-2)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, lineHeight: 1.65, color: "var(--ink-soft)", outline: "none", resize: "vertical", boxSizing: "border-box", marginBottom: 12 }}
+                          />
+                        ) : (
+                          r.content && <p style={{ margin: "0 0 0", fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-soft)" }}>{r.content}</p>
+                        )}
+
+                        {/* Send action — only on drafts */}
+                        {isDraft && (
+                          <>
+                            {sendErr && (
+                              <div style={{ padding: "8px 12px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 12, marginBottom: 10, lineHeight: 1.45 }}>{sendErr}</div>
+                            )}
+                            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                              <button
+                                className="ca-btn ca-btn-primary"
+                                onClick={() => handleSendReport(r.id, editContent)}
+                                disabled={isSending || !editContent.trim()}
+                                style={{ fontSize: 12, padding: "7px 18px", opacity: isSending || !editContent.trim() ? 0.6 : 1 }}
+                              >
+                                {isSending ? "Sending…" : "Send to athlete →"}
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
           </div>
         )}
 
@@ -407,6 +901,15 @@ export default function AthleteDetailPage() {
           </div>
         )}
       </div>
+
+      {editPulseOpen && morningPulse && (
+        <EditMorningPulseModal
+          config={morningPulse}
+          athleteId={id!}
+          onClose={() => setEditPulseOpen(false)}
+          onSaved={(updated) => setMorningPulse(updated)}
+        />
+      )}
 
       {/* Send message modal */}
       {sendMsg && (

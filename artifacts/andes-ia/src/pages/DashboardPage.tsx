@@ -1,17 +1,50 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useLocation, Link } from "wouter";
 import { createBrowserSupabase } from "../lib/supabase";
-import { BACKEND, getAuthToken } from "../lib/api";
+import { BACKEND, getAuthToken, storeLoginRedirect } from "../lib/api";
 import type { Athlete, Suggestion, StableProfile, CurrentState, PredictiveFlag } from "../lib/types";
 
 type WeekWorkout = { scheduled_date: string; status: string; distance_km: number | null };
 type BiometricBaseline = { readiness_avg: number | null; hrv_avg: number | null; sleep_avg: number | null };
 type EnrichedAthlete = Athlete & { pending_suggestions?: number; total_checkins?: number; last_checkin_at?: string | null; week_workouts?: WeekWorkout[]; biometric_baseline?: BiometricBaseline | null };
-type Tab = "roster" | "queue" | "media" | "officehours";
+type Tab = "roster" | "queue" | "media" | "officehours" | "aivoice" | "plans";
 type Filter = "all" | "pending";
-interface OfficeHoursData { office_hours: Record<string, unknown> | null; ai_autonomy_override: boolean; is_currently_autonomous: boolean }
+interface OfficeHoursData { office_hours: Record<string, unknown> | null; ai_autonomy_override: boolean; is_currently_autonomous: boolean; after_hours_message?: string | null; urgency_keywords?: string[] | null; }
+interface VoiceProfile { tone: string; formality: string; sentence_length: string; use_emojis: boolean; signature_phrases: string[]; banned_phrases: string[]; example_message?: string | null; }
+type PlanWorkout = { id: string; scheduled_date: string; session_type: string; title: string | null; status: string; duration_min: number | null; distance_km: number | null };
+type AthletePlan = { athlete_id: string; full_name: string; training_phase: string | null; workouts: PlanWorkout[] };
+type PlansData = { week_start: string; athletes: AthletePlan[] };
 type DigestData = { generated_at: string; summary: string; athlete_flags: { athlete_id: string; name: string; reason: string }[] };
 type MediaReview = { id: string; athlete_id: string; media_type: "image" | "video"; ai_analysis: string | null; coach_edited_analysis: string | null; coach_comment: string | null; signed_url: string | null; status: string; created_at: string; athletes?: { full_name: string | null; display_name: string | null } | null };
+
+const PLAN_SPORT_COLORS: Record<string, string> = { swim: "#4a90b8", bike: "#c0704a", run: "#6a8c4a", strength: "#6a7c4a", rest: "#9a9a8a", brick: "#8a5a8a" };
+const PLAN_SPORT_BG: Record<string, string> = { swim: "#e6f2fa", bike: "#fdf0e8", run: "#edf5e8", strength: "#e8f0e0", brick: "#f5f0e0", rest: "#ede8df" };
+const PLAN_DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function planGetMonday(d: Date = new Date()): string {
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + diff);
+  return date.toISOString().split("T")[0];
+}
+function planShiftWeek(monday: string, delta: number): string {
+  const d = new Date(monday + "T12:00:00");
+  d.setDate(d.getDate() + delta * 7);
+  return d.toISOString().split("T")[0];
+}
+function planGetDate(monday: string, offset: number): string {
+  const d = new Date(monday + "T12:00:00");
+  d.setDate(d.getDate() + offset);
+  return d.toISOString().split("T")[0];
+}
+function planFormatWeek(monday: string): string {
+  const start = new Date(monday + "T12:00:00");
+  const end = new Date(monday + "T12:00:00");
+  end.setDate(end.getDate() + 6);
+  const fmt = (dt: Date) => dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return `${fmt(start)} – ${fmt(end)}, ${end.getFullYear()}`;
+}
 
 function getInitials(name: string | null | undefined): string {
   if (!name) return "?";
@@ -377,6 +410,329 @@ function InviteModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function CsvImportModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  const [rows, setRows] = useState<{ name: string; email: string; phone: string }[]>([]);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [results, setResults] = useState<{ name: string; ok: boolean; error?: string }[] | null>(null);
+
+  function parseCSV(text: string): { name: string; email: string; phone: string }[] | string {
+    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const firstLine = normalized.split("\n")[0];
+    const delim = firstLine.includes(";") ? ";" : ",";
+    const lines: string[][] = [];
+    let cur = "", inQ = false;
+    let row: string[] = [];
+    for (const ch of normalized + "\n") {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === delim && !inQ) { row.push(cur.trim()); cur = ""; }
+      else if (ch === "\n" && !inQ) {
+        row.push(cur.trim());
+        if (row.some(c => c)) lines.push(row);
+        row = []; cur = "";
+      } else { cur += ch; }
+    }
+    if (lines.length < 2) return "The file must have a header row and at least one data row.";
+    const headers = lines[0].map(h => h.replace(/"/g, "").toLowerCase().replace(/[\s_-]+/g, " ").trim());
+    function findCol(candidates: string[]): number {
+      for (const c of candidates) { const i = headers.findIndex(h => h === c || h.includes(c)); if (i !== -1) return i; }
+      return -1;
+    }
+    const nameIdx = findCol(["full name", "name", "athlete name", "athlete", "fullname"]);
+    const emailIdx = findCol(["email", "email address", "e mail", "e-mail"]);
+    const phoneIdx = findCol(["phone", "whatsapp", "mobile", "phone number", "mobile number", "cell"]);
+    if (nameIdx === -1) return `No "Name" column found. Detected: ${lines[0].join(", ")}`;
+    if (emailIdx === -1) return `No "Email" column found. Detected: ${lines[0].join(", ")}`;
+    const parsed: { name: string; email: string; phone: string }[] = [];
+    for (const line of lines.slice(1)) {
+      const name = line[nameIdx]?.replace(/"/g, "").trim() ?? "";
+      const email = line[emailIdx]?.replace(/"/g, "").trim() ?? "";
+      const phone = phoneIdx >= 0 ? (line[phoneIdx]?.replace(/"/g, "").trim() ?? "") : "";
+      if (name && email && email.includes("@")) parsed.push({ name, email, phone });
+    }
+    if (!parsed.length) return "No valid rows found. Each row needs a Name and a valid Email.";
+    return parsed;
+  }
+
+  async function handleFile(file: File) {
+    setParseError(null); setRows([]); setResults(null); setFileName(file.name);
+    const text = await file.text();
+    const out = parseCSV(text);
+    if (typeof out === "string") setParseError(out);
+    else setRows(out);
+  }
+
+  async function handleImport() {
+    setImporting(true); setProgress({ done: 0, total: rows.length });
+    const token = await getAuthToken();
+    const res: { name: string; ok: boolean; error?: string }[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      try {
+        const resp = await fetch(`${BACKEND}/api/v1/athletes/invite`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: JSON.stringify({ full_name: r.name, email: r.email, phone_number: r.phone || undefined }),
+        });
+        const body = await resp.json().catch(() => ({}));
+        res.push({ name: r.name, ok: resp.ok, error: resp.ok ? undefined : ((body?.detail as string) ?? "Failed") });
+      } catch { res.push({ name: r.name, ok: false, error: "Network error" }); }
+      setProgress({ done: i + 1, total: rows.length });
+    }
+    setResults(res); setImporting(false);
+    if (res.some(r => r.ok)) onImported();
+  }
+
+  function downloadTemplate() {
+    const csv = "Full Name,Email,WhatsApp\nAlex Thompson,alex@example.com,+1 555 000 1234\nJordan Rivera,jordan@example.com,";
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "andes-ia-roster-template.csv"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const succeeded = results?.filter(r => r.ok).length ?? 0;
+  const failed = results?.filter(r => !r.ok).length ?? 0;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "oklch(0.28 0.022 55 / 0.4)", backdropFilter: "blur(4px)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={onClose}>
+      <div className="ca-panel" style={{ width: "100%", maxWidth: 560, padding: 32, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+        <div className="ca-eyebrow ca-eyebrow-aegean" style={{ marginBottom: 8 }}>Bulk import</div>
+        <h2 className="ca-display" style={{ fontSize: 26, margin: "0 0 4px" }}>Import athlete roster</h2>
+        <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 14, color: "var(--ink-soft)", margin: "0 0 24px", lineHeight: 1.55 }}>
+          Works with exports from TrainingPeaks, TrainHeroic, Google Sheets, or any CSV. Needs at minimum a Name and Email column.
+        </p>
+
+        {!results ? (
+          <>
+            <label style={{ display: "block", border: `2px dashed ${fileName && !parseError ? "var(--aegean-soft)" : parseError ? "oklch(0.80 0.08 45)" : "var(--rule)"}`, borderRadius: 4, padding: "28px 24px", textAlign: "center", cursor: "pointer", background: fileName && !parseError ? "var(--aegean-wash)" : parseError ? "var(--terracotta-soft)" : "var(--parchment)", transition: "all 200ms ease", marginBottom: 16 }}>
+              <input type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+              <div style={{ fontSize: 28, marginBottom: 10 }}>📄</div>
+              {fileName ? (
+                <>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: parseError ? "var(--terracotta-deep)" : "var(--aegean-deep)", marginBottom: 4 }}>{fileName}</div>
+                  {rows.length > 0 && <div style={{ fontSize: 13, color: "var(--aegean-deep)", fontFamily: "var(--serif)", fontStyle: "italic" }}>{rows.length} athlete{rows.length !== 1 ? "s" : ""} ready to import</div>}
+                </>
+              ) : (
+                <>
+                  <div style={{ fontFamily: "var(--body)", fontSize: 14, color: "var(--ink)", marginBottom: 4 }}>Click to choose a CSV file</div>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-mute)" }}>Columns needed: Name, Email — WhatsApp optional</div>
+                </>
+              )}
+            </label>
+
+            {parseError && (
+              <div style={{ padding: "12px 16px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13, marginBottom: 16, lineHeight: 1.5 }}>
+                <strong>Could not parse file:</strong> {parseError}
+              </div>
+            )}
+
+            {rows.length > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <div className="ca-eyebrow" style={{ marginBottom: 10 }}>Preview — first {Math.min(5, rows.length)} of {rows.length}</div>
+                <div style={{ border: "1px solid var(--rule)", borderRadius: 2, overflow: "hidden" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: "var(--linen-deep)" }}>
+                        {["Name", "Email", "WhatsApp"].map(h => (
+                          <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--ink-mute)", borderBottom: "1px solid var(--rule)", fontWeight: 500 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.slice(0, 5).map((r, i) => (
+                        <tr key={i} style={{ background: i % 2 === 0 ? "var(--parchment)" : "var(--linen)" }}>
+                          <td style={{ padding: "8px 12px", borderBottom: "1px solid var(--rule-soft)", fontFamily: "var(--serif)", fontSize: 13 }}>{r.name}</td>
+                          <td style={{ padding: "8px 12px", borderBottom: "1px solid var(--rule-soft)", fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-soft)" }}>{r.email}</td>
+                          <td style={{ padding: "8px 12px", borderBottom: "1px solid var(--rule-soft)", fontFamily: "var(--mono)", fontSize: 11, color: r.phone ? "var(--ink-soft)" : "var(--ink-faint)" }}>{r.phone || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {rows.length > 5 && (
+                    <div style={{ padding: "8px 12px", background: "var(--linen)", borderTop: "1px solid var(--rule)", fontFamily: "var(--mono)", fontSize: 10, color: "var(--ink-mute)", textAlign: "center" }}>
+                      + {rows.length - 5} more athlete{rows.length - 5 !== 1 ? "s" : ""}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {importing && progress && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-soft)" }}>Importing athletes…</span>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-mute)" }}>{progress.done} / {progress.total}</span>
+                </div>
+                <div className="ca-bar-track"><div className="ca-bar-fill" style={{ width: `${(progress.done / progress.total) * 100}%`, transition: "width 200ms ease" }} /></div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <button className="ca-btn ca-btn-primary" disabled={rows.length === 0 || importing} onClick={handleImport} style={{ opacity: rows.length === 0 || importing ? 0.45 : 1, cursor: rows.length === 0 || importing ? "not-allowed" : "pointer" }}>
+                {importing ? `Importing ${progress?.done ?? 0} of ${rows.length}…` : `Import ${rows.length > 0 ? `${rows.length} athlete${rows.length !== 1 ? "s" : ""}` : "athletes"} →`}
+              </button>
+              <button className="ca-btn ca-btn-ghost" onClick={onClose} disabled={importing}>Cancel</button>
+              <div style={{ flex: 1 }} />
+              <button className="ca-btn ca-btn-ghost" style={{ fontSize: 11 }} onClick={downloadTemplate}>↓ Template CSV</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 16, marginBottom: 20 }}>
+              <div className="ca-panel" style={{ flex: 1, padding: "20px", textAlign: "center" }}>
+                <div style={{ fontFamily: "var(--serif)", fontSize: 44, color: "var(--aegean-deep)", lineHeight: 1 }}>{succeeded}</div>
+                <div className="ca-eyebrow ca-eyebrow-aegean" style={{ marginTop: 8, fontSize: 9.5 }}>Imported</div>
+              </div>
+              {failed > 0 && (
+                <div className="ca-panel" style={{ flex: 1, padding: "20px", textAlign: "center" }}>
+                  <div style={{ fontFamily: "var(--serif)", fontSize: 44, color: "var(--terracotta-deep)", lineHeight: 1 }}>{failed}</div>
+                  <div className="ca-eyebrow ca-eyebrow-terra" style={{ marginTop: 8, fontSize: 9.5 }}>Failed</div>
+                </div>
+              )}
+            </div>
+
+            {failed > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <div className="ca-eyebrow" style={{ marginBottom: 8 }}>Could not import</div>
+                <div style={{ border: "1px solid var(--rule)", borderRadius: 2, overflow: "hidden" }}>
+                  {results.filter(r => !r.ok).map((r, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 14px", background: i % 2 === 0 ? "var(--terracotta-soft)" : "var(--parchment)", borderBottom: "1px solid oklch(0.86 0.04 45)" }}>
+                      <span style={{ fontFamily: "var(--serif)", fontSize: 13 }}>{r.name}</span>
+                      <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--terracotta-deep)" }}>{r.error}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, color: "var(--ink-soft)", lineHeight: 1.65, margin: "0 0 20px" }}>
+              {succeeded > 0 ? `${succeeded} invitation${succeeded !== 1 ? "s" : ""} sent. Athletes will receive an onboarding link to set up their profile.` : "No athletes were imported successfully."}
+            </p>
+
+            <button className="ca-btn ca-btn-primary" onClick={onClose} style={{ width: "100%", justifyContent: "center" }}>Done</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const DEFAULT_URGENCY_KEYWORDS = ["injury", "illness", "URGENT", "pain", "emergency", "racing today", "sick"];
+
+function EditVoiceModal({ current, onClose, onSaved }: { current: string; onClose: () => void; onSaved: (msg: string) => void }) {
+  const [message, setMessage] = useState(current);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    setLoading(true); setError(null);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/office-hours`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ after_hours_message: message.trim() }),
+      });
+      if (res.ok) { onSaved(message.trim()); onClose(); }
+      else { const b = await res.json().catch(() => ({})); setError((b?.detail as string) ?? "Failed to save."); }
+    } catch { setError("Network error."); }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "oklch(0.28 0.022 55 / 0.4)", backdropFilter: "blur(4px)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={onClose}>
+      <div className="ca-panel" style={{ width: "100%", maxWidth: 520, padding: 32 }} onClick={e => e.stopPropagation()}>
+        <div className="ca-eyebrow ca-eyebrow-terra" style={{ marginBottom: 8 }}>The understudy's voice</div>
+        <h2 className="ca-display" style={{ fontSize: 24, margin: "0 0 6px" }}>Edit after-hours message</h2>
+        <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, color: "var(--ink-soft)", lineHeight: 1.55, margin: "0 0 20px" }}>
+          This is the opening message athletes receive when they reach out outside your office hours. Write in your own voice — the AI will adapt from here.
+        </p>
+        <textarea
+          value={message}
+          onChange={e => setMessage(e.target.value)}
+          rows={5}
+          style={{ width: "100%", padding: "12px 14px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 15, lineHeight: 1.65, color: "var(--ink)", outline: "none", resize: "vertical", boxSizing: "border-box" }}
+          placeholder="Your coach is off the pitch until morning…"
+        />
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4, marginBottom: 14 }}>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--ink-faint)" }}>{message.length} chars</span>
+        </div>
+        {error && <div style={{ padding: "10px 14px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13, marginBottom: 14 }}>{error}</div>}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="ca-btn ca-btn-terra" style={{ flex: 1 }} disabled={loading || !message.trim()} onClick={handleSave}>{loading ? "Saving…" : "Save voice →"}</button>
+          <button className="ca-btn ca-btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UrgencyRulesModal({ current, onClose, onSaved }: { current: string[]; onClose: () => void; onSaved: (keywords: string[]) => void }) {
+  const [keywords, setKeywords] = useState<string[]>(current.length ? current : DEFAULT_URGENCY_KEYWORDS);
+  const [newKw, setNewKw] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function addKeyword() {
+    const kw = newKw.trim();
+    if (kw && !keywords.includes(kw)) { setKeywords(k => [...k, kw]); setNewKw(""); }
+  }
+
+  async function handleSave() {
+    setLoading(true); setError(null);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/office-hours`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ urgency_keywords: keywords }),
+      });
+      if (res.ok) { onSaved(keywords); onClose(); }
+      else { const b = await res.json().catch(() => ({})); setError((b?.detail as string) ?? "Failed to save."); }
+    } catch { setError("Network error."); }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "oklch(0.28 0.022 55 / 0.4)", backdropFilter: "blur(4px)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={onClose}>
+      <div className="ca-panel" style={{ width: "100%", maxWidth: 480, padding: 32 }} onClick={e => e.stopPropagation()}>
+        <div className="ca-eyebrow ca-eyebrow-ochre" style={{ marginBottom: 8 }}>Emergency response</div>
+        <h2 className="ca-display" style={{ fontSize: 24, margin: "0 0 6px" }}>Urgency rules</h2>
+        <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13.5, color: "var(--ink-soft)", lineHeight: 1.55, margin: "0 0 20px" }}>
+          When an athlete's message contains any of these words or phrases, the AI flags it as urgent and notifies you immediately — regardless of office hours.
+        </p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16, minHeight: 36 }}>
+          {keywords.map((kw, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", background: "var(--ochre-soft)", border: "1px solid var(--ochre)", borderRadius: 2 }}>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink)" }}>{kw}</span>
+              <button onClick={() => setKeywords(k => k.filter((_, j) => j !== i))} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-mute)", fontSize: 16, lineHeight: 1, padding: "0 0 1px 2px" }}>×</button>
+            </div>
+          ))}
+          {keywords.length === 0 && <span style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-faint)" }}>No rules yet — add one below.</span>}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+          <input
+            type="text" value={newKw} onChange={e => setNewKw(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addKeyword())}
+            placeholder="Add a word or phrase…"
+            style={{ flex: 1, padding: "8px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)", outline: "none" }}
+          />
+          <button className="ca-btn ca-btn-ghost" onClick={addKeyword} disabled={!newKw.trim()}>Add</button>
+        </div>
+        {error && <div style={{ padding: "10px 14px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13, marginBottom: 14 }}>{error}</div>}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="ca-btn ca-btn-primary" style={{ flex: 1 }} disabled={loading} onClick={handleSave}>{loading ? "Saving…" : "Save rules →"}</button>
+          <button className="ca-btn ca-btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [, navigate] = useLocation();
   const [athletes, setAthletes] = useState<EnrichedAthlete[]>([]);
@@ -386,6 +742,8 @@ export default function DashboardPage() {
   const [tab, setTab] = useState<Tab>("roster");
   const [filter, setFilter] = useState<Filter>("all");
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [csvImportOpen, setCsvImportOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [refineTarget, setRefineTarget] = useState<Suggestion | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [ohData, setOhData] = useState<OfficeHoursData | null>(null);
@@ -395,24 +753,44 @@ export default function DashboardPage() {
   const [mediaActionLoading, setMediaActionLoading] = useState<string | null>(null);
   const [mediaComment, setMediaComment] = useState<Record<string, string>>({});
   const [digestDismissed, setDigestDismissed] = useState(false);
+  const [voiceEditOpen, setVoiceEditOpen] = useState(false);
+  const [urgencyRulesOpen, setUrgencyRulesOpen] = useState(false);
+  const [ohSaving, setOhSaving] = useState(false);
+  const [editingDay, setEditingDay] = useState<string | null>(null);
+  const [dayDraft, setDayDraft] = useState<{ open: string; close: string; enabled: boolean }>({ open: "09:00", close: "17:00", enabled: true });
+  const [ohHoursSaving, setOhHoursSaving] = useState(false);
+  const [copyTargets, setCopyTargets] = useState<string[]>([]);
+  const [planData, setPlanData] = useState<PlansData | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planWeekStart, setPlanWeekStart] = useState<string>(() => planGetMonday());
+  const [voiceProfile, setVoiceProfile] = useState<VoiceProfile | null>(null);
+  const [voiceProfileLoading, setVoiceProfileLoading] = useState(false);
+  const [voiceProfileSaving, setVoiceProfileSaving] = useState(false);
+  const [voiceProfileDraft, setVoiceProfileDraft] = useState<VoiceProfile | null>(null);
+  const [voiceProfileError, setVoiceProfileError] = useState<string | null>(null);
+  const [voiceProfileSaved, setVoiceProfileSaved] = useState(false);
+  const [newPhrase, setNewPhrase] = useState("");
+  const [newBanned, setNewBanned] = useState("");
+  const [voicePreview, setVoicePreview] = useState<string | null>(null);
+  const [voicePreviewLoading, setVoicePreviewLoading] = useState(false);
 
   useEffect(() => {
     async function load() {
       const token = await getAuthToken();
-      if (!token) { navigate("/login"); return; }
+      if (!token) { storeLoginRedirect(); navigate("/login?expired=1"); return; }
       try {
         const [athletesRes, suggestionsRes] = await Promise.all([
           fetch(`${BACKEND}/api/v1/athletes`, { headers: { Authorization: `Bearer ${token}` } }),
           fetch(`${BACKEND}/api/v1/suggestions/pending`, { headers: { Authorization: `Bearer ${token}` } }),
         ]);
-        if (athletesRes.status === 401) { navigate("/login"); return; }
+        if (athletesRes.status === 401) { storeLoginRedirect(); navigate("/login?expired=1"); return; }
         if (athletesRes.ok) setAthletes(await athletesRes.json());
         if (suggestionsRes.ok) setSuggestions(await suggestionsRes.json());
       } catch { setError("Could not load dashboard. Please check your connection."); }
       setLoading(false);
     }
     load();
-  }, [navigate]);
+  }, [navigate, refreshKey]);
 
   useEffect(() => {
     if (tab !== "media") return;
@@ -436,6 +814,81 @@ export default function DashboardPage() {
       else setOhData({ office_hours: null, ai_autonomy_override: false, is_currently_autonomous: false });
     })();
   }, [tab, ohData]);
+
+  const planTodayStr = new Date().toISOString().split("T")[0];
+  const planTodayMonday = planGetMonday();
+
+  useEffect(() => {
+    if (tab !== "plans") return;
+    setPlanData(null);
+    setPlanLoading(true);
+    (async () => {
+      const token = await getAuthToken();
+      try {
+        const res = await fetch(`${BACKEND}/api/v1/training-plans/weekly?week_start=${planWeekStart}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) setPlanData(await res.json());
+        else setPlanData({ week_start: planWeekStart, athletes: [] });
+      } catch { setPlanData({ week_start: planWeekStart, athletes: [] }); }
+      setPlanLoading(false);
+    })();
+  }, [tab, planWeekStart]);
+
+  const DEFAULT_VOICE: VoiceProfile = { tone: "warm", formality: "casual", sentence_length: "medium", use_emojis: false, signature_phrases: [], banned_phrases: [] };
+
+  useEffect(() => {
+    if (tab !== "aivoice" || voiceProfile !== null) return;
+    (async () => {
+      setVoiceProfileLoading(true);
+      const token = await getAuthToken();
+      try {
+        const res = await fetch(`${BACKEND}/api/v1/coach/voice-profile`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        const data: VoiceProfile = res.ok ? await res.json() : DEFAULT_VOICE;
+        setVoiceProfile(data);
+        setVoiceProfileDraft(data);
+      } catch { setVoiceProfile(DEFAULT_VOICE); setVoiceProfileDraft(DEFAULT_VOICE); }
+      setVoiceProfileLoading(false);
+    })();
+  }, [tab, voiceProfile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleSaveVoiceProfile() {
+    if (!voiceProfileDraft) return;
+    setVoiceProfileSaving(true); setVoiceProfileError(null);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/coach/voice-profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(voiceProfileDraft),
+      });
+      if (res.ok) { const updated = await res.json(); setVoiceProfile(updated); setVoiceProfileDraft(updated); setVoiceProfileSaved(true); setTimeout(() => setVoiceProfileSaved(false), 2500); }
+      else { const b = await res.json().catch(() => ({})); setVoiceProfileError((b?.detail as string) ?? `Error ${res.status}`); }
+    } catch { setVoiceProfileError("Network error."); }
+    setVoiceProfileSaving(false);
+  }
+
+  async function handleVoicePreview() {
+    if (!voiceProfileDraft) return;
+    setVoicePreviewLoading(true);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/coach/voice-profile/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(voiceProfileDraft),
+      });
+      if (res.ok) { const d = await res.json(); setVoicePreview(d.preview ?? d.message ?? null); }
+    } catch {}
+    setVoicePreviewLoading(false);
+  }
+
+  function addPhrase(type: "signature" | "banned") {
+    const val = type === "signature" ? newPhrase.trim() : newBanned.trim();
+    if (!val) return;
+    setVoiceProfileDraft(d => d ? { ...d, [type === "signature" ? "signature_phrases" : "banned_phrases"]: [...(type === "signature" ? d.signature_phrases : d.banned_phrases), val] } : d);
+    if (type === "signature") setNewPhrase(""); else setNewBanned("");
+  }
 
   useEffect(() => {
     async function loadDigest() {
@@ -496,6 +949,77 @@ export default function DashboardPage() {
 
   async function handleSignOut() { const sb = createBrowserSupabase(); if (sb) await sb.auth.signOut(); navigate("/login"); }
 
+  function startEditDay(key: string) {
+    const oh = ohData?.office_hours as Record<string, unknown> | null;
+    const h = oh?.[key];
+    const arr = Array.isArray(h) && h.length >= 2 ? h as string[] : null;
+    setDayDraft({ open: arr?.[0] ?? "09:00", close: arr?.[1] ?? "17:00", enabled: arr !== null });
+    setEditingDay(key);
+    setCopyTargets([]);
+  }
+
+  async function handleCopyDays(sourceKey: string) {
+    if (!ohData || ohHoursSaving || copyTargets.length === 0) return;
+    const value = dayDraft.enabled ? [dayDraft.open, dayDraft.close] : null;
+    const updatedOh = { ...(ohData.office_hours as Record<string, unknown> ?? {}), [sourceKey]: value };
+    for (const t of copyTargets) updatedOh[t] = value;
+    const prevOh = ohData.office_hours;
+    setOhData(d => d ? { ...d, office_hours: updatedOh } : d);
+    setEditingDay(null);
+    setCopyTargets([]);
+    setOhHoursSaving(true);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/office-hours`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ office_hours: updatedOh }),
+      });
+      if (!res.ok) setOhData(d => d ? { ...d, office_hours: prevOh } : d);
+    } catch { setOhData(d => d ? { ...d, office_hours: prevOh } : d); }
+    setOhHoursSaving(false);
+  }
+
+  function toggleCopyTarget(key: string) {
+    setCopyTargets(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+  }
+
+  async function handleSaveDay(key: string) {
+    if (!ohData || ohHoursSaving) return;
+    const updatedOh = { ...(ohData.office_hours as Record<string, unknown> ?? {}), [key]: dayDraft.enabled ? [dayDraft.open, dayDraft.close] : null };
+    const prevOh = ohData.office_hours;
+    setOhData(d => d ? { ...d, office_hours: updatedOh } : d);
+    setEditingDay(null);
+    setOhHoursSaving(true);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/office-hours`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ office_hours: updatedOh }),
+      });
+      if (!res.ok) setOhData(d => d ? { ...d, office_hours: prevOh } : d);
+    } catch { setOhData(d => d ? { ...d, office_hours: prevOh } : d); }
+    setOhHoursSaving(false);
+  }
+
+  async function handleToggleAutonomy() {
+    if (!ohData || ohSaving) return;
+    const newVal = !ohData.ai_autonomy_override;
+    setOhData(d => d ? { ...d, ai_autonomy_override: newVal } : d);
+    setOhSaving(true);
+    const token = await getAuthToken();
+    try {
+      const res = await fetch(`${BACKEND}/api/v1/office-hours`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ ai_autonomy_override: newVal }),
+      });
+      if (!res.ok) setOhData(d => d ? { ...d, ai_autonomy_override: !newVal } : d);
+    } catch { setOhData(d => d ? { ...d, ai_autonomy_override: !newVal } : d); }
+    setOhSaving(false);
+  }
+
   const handleMediaAction = useCallback(async (id: string, action: "approved" | "rejected", comment?: string) => {
     setMediaActionLoading(id);
     const token = await getAuthToken();
@@ -545,18 +1069,21 @@ export default function DashboardPage() {
       {/* Header */}
       <header style={{ borderBottom: "1px solid var(--rule)", background: "var(--linen)", position: "sticky", top: 0, zIndex: 30 }}>
         <div style={{ maxWidth: 1440, margin: "0 auto", padding: "14px 32px", display: "flex", alignItems: "center", gap: 24 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <svg width="32" height="32" viewBox="0 0 32 32">
-              <rect x="2" y="2" width="28" height="28" fill="none" stroke="var(--ink)" strokeWidth="1" />
-              <g fill="var(--terracotta)" opacity="0.85"><rect x="5" y="5" width="5" height="5" /><rect x="16" y="5" width="5" height="5" /><rect x="11" y="11" width="5" height="5" /><rect x="22" y="11" width="5" height="5" /><rect x="5" y="17" width="5" height="5" /><rect x="16" y="17" width="5" height="5" /></g>
-              <g fill="var(--aegean-deep)" opacity="0.9"><rect x="11" y="5" width="5" height="5" /><rect x="22" y="5" width="5" height="5" /><rect x="5" y="11" width="5" height="5" /><rect x="16" y="11" width="5" height="5" /><rect x="11" y="17" width="5" height="5" /><rect x="22" y="17" width="5" height="5" /></g>
-            </svg>
-            <div>
-              <div className="ca-display" style={{ fontSize: 20, lineHeight: 1 }}>Andes<span style={{ color: "var(--terracotta-deep)" }}>.</span>IA</div>
-              <div className="ca-eyebrow" style={{ fontSize: 8.5, marginTop: 2 }}>THE ATHLETE'S ATHLETE</div>
+          <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+              <svg width="32" height="32" viewBox="0 0 32 32">
+                <rect x="2" y="2" width="28" height="28" fill="none" stroke="var(--ink)" strokeWidth="1" />
+                <g fill="var(--terracotta)" opacity="0.85"><rect x="5" y="5" width="5" height="5" /><rect x="16" y="5" width="5" height="5" /><rect x="11" y="11" width="5" height="5" /><rect x="22" y="11" width="5" height="5" /><rect x="5" y="17" width="5" height="5" /><rect x="16" y="17" width="5" height="5" /></g>
+                <g fill="var(--aegean-deep)" opacity="0.9"><rect x="11" y="5" width="5" height="5" /><rect x="22" y="5" width="5" height="5" /><rect x="5" y="11" width="5" height="5" /><rect x="16" y="11" width="5" height="5" /><rect x="11" y="17" width="5" height="5" /><rect x="22" y="17" width="5" height="5" /></g>
+              </svg>
+              <div>
+                <div className="ca-display" style={{ fontSize: 20, lineHeight: 1 }}>Andes<span style={{ color: "var(--terracotta-deep)" }}>.</span>IA</div>
+                <div className="ca-eyebrow" style={{ fontSize: 8.5, marginTop: 2 }}>THE ATHLETE'S ATHLETE</div>
+              </div>
             </div>
-          </div>
+          </Link>
           <div style={{ flex: 1 }} />
+          <button className="ca-btn ca-btn-ghost" onClick={() => setCsvImportOpen(true)} style={{ fontSize: 12 }}>↑ Import CSV</button>
           <button className="ca-btn ca-btn-terra" onClick={() => setInviteOpen(true)} style={{ fontSize: 12 }}><G.Plus /> Invite athlete</button>
           {totalPending > 0 && <div style={{ fontSize: 12, color: "var(--terracotta-deep)", fontFamily: "var(--mono)" }}>{totalPending} pending</div>}
           <button className="ca-btn ca-btn-ghost" onClick={handleSignOut} style={{ fontSize: 12 }}>Sign out</button>
@@ -580,9 +1107,9 @@ export default function DashboardPage() {
             <div>
               <div className="ca-eyebrow ca-eyebrow-aegean" style={{ marginBottom: 8 }}>Today's digest · {new Date(digestData.generated_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</div>
               <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 14.5, lineHeight: 1.65, color: "var(--ink-soft)", margin: 0 }}>{digestData.summary}</p>
-              {digestData.athlete_flags.length > 0 && (
+              {(digestData.athlete_flags ?? []).length > 0 && (
                 <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {digestData.athlete_flags.map(f => (
+                  {(digestData.athlete_flags ?? []).map(f => (
                     <span key={f.athlete_id} className="ca-chip ca-chip-terra" style={{ fontSize: 10 }} title={f.reason}>{f.name}</span>
                   ))}
                 </div>
@@ -598,7 +1125,9 @@ export default function DashboardPage() {
             { id: "roster" as Tab, label: "The stable", badge: athletes.length },
             { id: "queue" as Tab, label: "Replies to approve", badge: totalPending, alert: totalPending > 0 },
             { id: "media" as Tab, label: "Media queue", badge: mediaReviews.length, alert: mediaReviews.length > 0 },
+            { id: "plans" as Tab, label: "Training plans", badge: null },
             { id: "officehours" as Tab, label: "Office hours", badge: null },
+            { id: "aivoice" as Tab, label: "AI voice setup", badge: null },
           ]).map(t => (
             <button key={t.id} className={`ca-tab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
               {t.label}
@@ -697,6 +1226,294 @@ export default function DashboardPage() {
             </div>
           )}
 
+          {tab === "plans" && (
+            <div>
+              {/* Week navigator */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+                <button
+                  className="ca-btn ca-btn-ghost"
+                  onClick={() => setPlanWeekStart(planShiftWeek(planWeekStart, -1))}
+                  style={{ fontSize: 12, padding: "5px 14px" }}
+                >← Prev</button>
+                <div style={{ flex: 1, textAlign: "center" }}>
+                  <span className="ca-display" style={{ fontSize: 18 }}>{planFormatWeek(planWeekStart)}</span>
+                </div>
+                <button
+                  className="ca-btn ca-btn-ghost"
+                  onClick={() => setPlanWeekStart(planTodayMonday)}
+                  disabled={planWeekStart === planTodayMonday}
+                  style={{ fontSize: 11, padding: "5px 12px", opacity: planWeekStart === planTodayMonday ? 0.4 : 1 }}
+                >This week</button>
+                <button
+                  className="ca-btn ca-btn-ghost"
+                  onClick={() => setPlanWeekStart(planShiftWeek(planWeekStart, 1))}
+                  style={{ fontSize: 12, padding: "5px 14px" }}
+                >Next →</button>
+              </div>
+
+              {planLoading && (
+                <div style={{ padding: "60px 0", textAlign: "center" }}>
+                  <p className="ca-eyebrow" style={{ fontSize: 11 }}>Loading training plans…</p>
+                </div>
+              )}
+
+              {!planLoading && planData && (
+                <div className="ca-panel" style={{ padding: 0, overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 720 }}>
+                    <colgroup>
+                      <col style={{ width: 170 }} />
+                      {PLAN_DAY_LABELS.map(d => <col key={d} style={{ width: "calc((100% - 170px - 52px) / 7)" }} />)}
+                      <col style={{ width: 52 }} />
+                    </colgroup>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid var(--rule)" }}>
+                        <th style={{ padding: "10px 16px", textAlign: "left", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--ink-mute)", fontWeight: 400 }}>Athlete</th>
+                        {PLAN_DAY_LABELS.map((d, i) => {
+                          const date = planGetDate(planWeekStart, i);
+                          const isToday = date === planTodayStr;
+                          return (
+                            <th key={d} style={{ padding: "8px 4px", textAlign: "center", fontWeight: 400, background: isToday ? "oklch(0.94 0.03 220 / 0.5)" : "transparent" }}>
+                              <div style={{ fontFamily: "var(--mono)", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", color: isToday ? "var(--aegean-deep)" : "var(--ink-mute)" }}>{d}</div>
+                              <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: isToday ? "var(--aegean-deep)" : "var(--ink-soft)", marginTop: 2, fontWeight: isToday ? 700 : 400 }}>
+                                {new Date(date + "T12:00:00").getDate()}
+                              </div>
+                            </th>
+                          );
+                        })}
+                        <th style={{ padding: "10px 8px", textAlign: "center", fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--ink-mute)", fontWeight: 400 }}>Done</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {planData.athletes.length === 0 && (
+                        <tr>
+                          <td colSpan={9} style={{ padding: "56px 0", textAlign: "center" }}>
+                            <div className="ca-ornament">◆ ◆ ◆</div>
+                            <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 15, color: "var(--ink-soft)", margin: "12px 0 0" }}>No workouts scheduled for this week.</p>
+                          </td>
+                        </tr>
+                      )}
+                      {planData.athletes.map((ap, ri) => {
+                        const byDate: Record<string, PlanWorkout> = {};
+                        for (const w of ap.workouts) byDate[w.scheduled_date] = w;
+                        const prescribed = ap.workouts.filter(w => w.session_type?.toLowerCase() !== "rest").length;
+                        const completed = ap.workouts.filter(w => w.status === "completed").length;
+                        const allDone = prescribed > 0 && completed >= prescribed;
+                        return (
+                          <tr key={ap.athlete_id} style={{ borderBottom: ri < planData.athletes.length - 1 ? "1px solid var(--rule)" : "none" }}>
+                            <td style={{ padding: "10px 16px", verticalAlign: "middle" }}>
+                              <Link href={`/dashboard/athletes/${ap.athlete_id}`} style={{ fontFamily: "var(--serif)", fontSize: 15, color: "var(--ink)", textDecoration: "none", display: "block", lineHeight: 1.2 }}>
+                                {ap.full_name}
+                              </Link>
+                              {ap.training_phase && (
+                                <div style={{ fontFamily: "var(--mono)", fontSize: 8.5, color: "var(--ink-mute)", letterSpacing: "0.1em", textTransform: "uppercase", marginTop: 3 }}>{ap.training_phase}</div>
+                              )}
+                            </td>
+                            {Array.from({ length: 7 }, (_, di) => {
+                              const date = planGetDate(planWeekStart, di);
+                              const w = byDate[date];
+                              const isToday = date === planTodayStr;
+                              const stype = w?.session_type?.toLowerCase() ?? "";
+                              const bg = w ? (PLAN_SPORT_BG[stype] ?? "#f5f2ec") : "transparent";
+                              const accent = w ? (PLAN_SPORT_COLORS[stype] ?? "#9a9a8a") : "var(--rule)";
+                              const borderColor = w?.status === "completed" ? PLAN_SPORT_COLORS["run"] ?? "#6a8c4a" : w?.status === "missed" ? PLAN_SPORT_COLORS["bike"] ?? "#c0704a" : accent;
+                              return (
+                                <td key={di} style={{ padding: "6px 4px", verticalAlign: "middle", background: isToday ? "oklch(0.97 0.01 220 / 0.3)" : "transparent" }}>
+                                  {w ? (
+                                    <div
+                                      title={`${w.title ?? w.session_type}${w.status !== "prescribed" ? ` · ${w.status}` : ""}`}
+                                      style={{ background: bg, border: `1px solid ${borderColor}`, borderRadius: 2, padding: "5px 3px", textAlign: "center", cursor: "default", opacity: w.status === "missed" ? 0.65 : 1 }}
+                                    >
+                                      <div style={{ fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.06em", color: accent, fontWeight: 600 }}>
+                                        {stype.slice(0, 3).toUpperCase()}
+                                      </div>
+                                      {(w.duration_min || w.distance_km) && (
+                                        <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--ink-mute)", marginTop: 2 }}>
+                                          {w.duration_min ? `${w.duration_min}′` : `${w.distance_km}km`}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div style={{ textAlign: "center", fontFamily: "var(--mono)", fontSize: 11, color: "var(--rule)", userSelect: "none" }}>—</div>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            <td style={{ padding: "10px 8px", textAlign: "center", verticalAlign: "middle" }}>
+                              <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: allDone ? "#6a8c4a" : "var(--ink-soft)", fontWeight: allDone ? 700 : 400 }}>
+                                {completed}
+                              </span>
+                              <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--ink-faint)" }}>/{prescribed}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === "aivoice" && (
+            <div>
+              {voiceProfileLoading && <div style={{ padding: "60px 0", textAlign: "center" }}><p className="ca-eyebrow" style={{ fontSize: 11 }}>Loading voice profile…</p></div>}
+              {!voiceProfileLoading && voiceProfileDraft && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, alignItems: "start" }}>
+
+                  {/* Left: Tone + Style */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+                    {/* Tone */}
+                    <div className="ca-panel" style={{ padding: 28 }}>
+                      <div className="ca-eyebrow ca-eyebrow-aegean" style={{ marginBottom: 6 }}>Voice tone</div>
+                      <h3 className="ca-display" style={{ fontSize: 22, margin: "0 0 20px" }}>How do you sound?</h3>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        {([
+                          { id: "direct", label: "Direct & concise", desc: "No fluff — clear cues, clear expectations." },
+                          { id: "warm", label: "Warm & encouraging", desc: "Personal, supportive, first-name basis." },
+                          { id: "technical", label: "Technical & precise", desc: "Data-driven — zones, watts, and paces." },
+                          { id: "motivational", label: "Motivational", desc: "High energy, push-through language." },
+                        ]).map(t => (
+                          <button
+                            key={t.id}
+                            onClick={() => setVoiceProfileDraft(d => d ? { ...d, tone: t.id } : d)}
+                            style={{ padding: "14px 18px", background: voiceProfileDraft.tone === t.id ? "var(--parchment-2)" : "var(--parchment)", border: `1px solid ${voiceProfileDraft.tone === t.id ? "var(--aegean-soft)" : "var(--rule)"}`, borderRadius: 2, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 14, transition: "all 150ms ease" }}
+                          >
+                            <span style={{ width: 13, height: 13, borderRadius: "50%", border: `2px solid ${voiceProfileDraft.tone === t.id ? "var(--aegean-deep)" : "var(--rule)"}`, background: voiceProfileDraft.tone === t.id ? "var(--aegean-deep)" : "transparent", flexShrink: 0, display: "inline-block" }} />
+                            <div>
+                              <div style={{ fontFamily: "var(--mono)", fontSize: 11, letterSpacing: "0.08em", color: "var(--ink)", marginBottom: 3 }}>{t.label}</div>
+                              <div style={{ fontFamily: "var(--body)", fontSize: 12, color: "var(--ink-mute)" }}>{t.desc}</div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Style toggles */}
+                    <div className="ca-panel" style={{ padding: 28 }}>
+                      <div className="ca-eyebrow" style={{ marginBottom: 20 }}>Writing style</div>
+
+                      {/* Formality */}
+                      <div style={{ marginBottom: 20 }}>
+                        <div style={{ fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 10 }}>Formality</div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          {(["casual", "professional"] as const).map(f => (
+                            <button key={f} onClick={() => setVoiceProfileDraft(d => d ? { ...d, formality: f } : d)}
+                              style={{ flex: 1, padding: "9px 0", background: voiceProfileDraft.formality === f ? "var(--ink)" : "var(--parchment)", border: `1px solid ${voiceProfileDraft.formality === f ? "var(--ink)" : "var(--rule)"}`, borderRadius: 2, cursor: "pointer", fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.1em", textTransform: "capitalize", color: voiceProfileDraft.formality === f ? "var(--parchment)" : "var(--ink-soft)", transition: "all 150ms ease" }}>
+                              {f}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Sentence length */}
+                      <div style={{ marginBottom: 22 }}>
+                        <div style={{ fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 10 }}>Sentence length</div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          {(["short", "medium", "long"] as const).map(s => (
+                            <button key={s} onClick={() => setVoiceProfileDraft(d => d ? { ...d, sentence_length: s } : d)}
+                              style={{ flex: 1, padding: "9px 0", background: voiceProfileDraft.sentence_length === s ? "var(--ink)" : "var(--parchment)", border: `1px solid ${voiceProfileDraft.sentence_length === s ? "var(--ink)" : "var(--rule)"}`, borderRadius: 2, cursor: "pointer", fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.1em", textTransform: "capitalize", color: voiceProfileDraft.sentence_length === s ? "var(--parchment)" : "var(--ink-soft)", transition: "all 150ms ease" }}>
+                              {s}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Emoji toggle */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div>
+                          <div style={{ fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 3 }}>Use emojis</div>
+                          <div style={{ fontSize: 12, color: "var(--ink-faint)" }}>{voiceProfileDraft.use_emojis ? "Used sparingly for warmth" : "Plain text only"}</div>
+                        </div>
+                        <button
+                          onClick={() => setVoiceProfileDraft(d => d ? { ...d, use_emojis: !d.use_emojis } : d)}
+                          style={{ width: 46, height: 26, background: voiceProfileDraft.use_emojis ? "var(--olive)" : "var(--rule)", border: "none", borderRadius: 13, cursor: "pointer", position: "relative", transition: "background 0.2s", flexShrink: 0 }}
+                        >
+                          <span style={{ position: "absolute", top: 4, left: voiceProfileDraft.use_emojis ? 23 : 4, width: 18, height: 18, background: "white", borderRadius: "50%", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.15)", display: "block" }} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: Phrases + preview + save */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+                    {/* Signature phrases */}
+                    <div className="ca-panel" style={{ padding: 28 }}>
+                      <div className="ca-eyebrow ca-eyebrow-aegean" style={{ marginBottom: 6 }}>Signature phrases</div>
+                      <p style={{ fontSize: 13, color: "var(--ink-mute)", margin: "0 0 16px", lineHeight: 1.55 }}>Phrases you always use — the AI will weave them in naturally.</p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14, minHeight: 32 }}>
+                        {voiceProfileDraft.signature_phrases.map((p, i) => (
+                          <span key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", background: "var(--parchment-2)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-soft)" }}>
+                            {p}
+                            <button onClick={() => setVoiceProfileDraft(d => d ? { ...d, signature_phrases: d.signature_phrases.filter((_, j) => j !== i) } : d)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-mute)", fontSize: 15, lineHeight: 1, padding: 0 }}>×</button>
+                          </span>
+                        ))}
+                        {voiceProfileDraft.signature_phrases.length === 0 && <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-faint)", margin: 0 }}>None yet — add your first phrase below.</p>}
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input value={newPhrase} onChange={e => setNewPhrase(e.target.value)}
+                          onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addPhrase("signature"))}
+                          placeholder={`e.g. "Trust the process"`}
+                          style={{ flex: 1, padding: "8px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)", outline: "none" }} />
+                        <button className="ca-btn ca-btn-ghost" onClick={() => addPhrase("signature")} disabled={!newPhrase.trim()}>Add</button>
+                      </div>
+                    </div>
+
+                    {/* Never-say phrases */}
+                    <div className="ca-panel" style={{ padding: 28 }}>
+                      <div className="ca-eyebrow ca-eyebrow-terra" style={{ marginBottom: 6 }}>Never say</div>
+                      <p style={{ fontSize: 13, color: "var(--ink-mute)", margin: "0 0 16px", lineHeight: 1.55 }}>Words the AI must avoid entirely — not your style.</p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14, minHeight: 32 }}>
+                        {voiceProfileDraft.banned_phrases.map((p, i) => (
+                          <span key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.82 0.06 45)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 11, color: "var(--terracotta-deep)" }}>
+                            {p}
+                            <button onClick={() => setVoiceProfileDraft(d => d ? { ...d, banned_phrases: d.banned_phrases.filter((_, j) => j !== i) } : d)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--terracotta-deep)", fontSize: 15, lineHeight: 1, padding: 0 }}>×</button>
+                          </span>
+                        ))}
+                        {voiceProfileDraft.banned_phrases.length === 0 && <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-faint)", margin: 0 }}>None yet — add words to block below.</p>}
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input value={newBanned} onChange={e => setNewBanned(e.target.value)}
+                          onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addPhrase("banned"))}
+                          placeholder={`e.g. "amazing" or "crushing it"`}
+                          style={{ flex: 1, padding: "8px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)", outline: "none" }} />
+                        <button className="ca-btn ca-btn-ghost" onClick={() => addPhrase("banned")} disabled={!newBanned.trim()}>Add</button>
+                      </div>
+                    </div>
+
+                    {/* Voice preview */}
+                    <div className="ca-panel" style={{ padding: 28 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                        <div>
+                          <div className="ca-eyebrow" style={{ marginBottom: 4 }}>Voice preview</div>
+                          <p style={{ fontSize: 12, color: "var(--ink-mute)", margin: 0 }}>A sample AI-drafted reply using your current settings.</p>
+                        </div>
+                        <button className="ca-btn ca-btn-ghost" style={{ fontSize: 11, padding: "5px 12px" }} onClick={handleVoicePreview} disabled={voicePreviewLoading}>
+                          {voicePreviewLoading ? "Generating…" : "↻ Preview"}
+                        </button>
+                      </div>
+                      <div style={{ padding: "16px 20px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, minHeight: 90, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 15.5, lineHeight: 1.65, color: "var(--ink-soft)" }}>
+                        {voicePreview
+                          ? <>&ldquo;{voicePreview}&rdquo;</>
+                          : <span style={{ color: "var(--ink-faint)", fontStyle: "normal", fontSize: 13, fontFamily: "var(--body)" }}>Click ↻ Preview to generate a sample reply in your voice…</span>}
+                      </div>
+                    </div>
+
+                    {/* Error + Save */}
+                    {voiceProfileError && (
+                      <div style={{ padding: "10px 14px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13 }}>{voiceProfileError}</div>
+                    )}
+                    <button className="ca-btn ca-btn-primary" style={{ width: "100%", padding: "14px 0", fontSize: 13 }} onClick={handleSaveVoiceProfile} disabled={voiceProfileSaving}>
+                      {voiceProfileSaved ? "Voice profile saved ✓" : voiceProfileSaving ? "Saving…" : "Save voice profile →"}
+                    </button>
+                  </div>
+
+                </div>
+              )}
+            </div>
+          )}
+
           {tab === "officehours" && !ohData && (
             <div style={{ padding: "60px 0", textAlign: "center" }}>
               <p className="ca-eyebrow" style={{ fontSize: 11 }}>Loading office hours…</p>
@@ -705,28 +1522,206 @@ export default function DashboardPage() {
 
           {tab === "officehours" && ohData && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+
+              {/* Left: schedule + autonomy toggle */}
               <div className="ca-panel" style={{ padding: 28 }}>
-                <div className="ca-eyebrow ca-eyebrow-terra">When the door is open</div>
-                <h2 className="ca-display" style={{ margin: "8px 0 4px 0", fontSize: 28 }}>Office hours</h2>
-                <div style={{ marginTop: 20, display: "flex", flexDirection: "column" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                  <div className="ca-eyebrow ca-eyebrow-terra">When the door is open</div>
+                  <div style={{ padding: "3px 10px", background: ohData.is_currently_autonomous ? "var(--olive)" : "var(--aegean-deep)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: "oklch(0.96 0.02 80)" }}>
+                    {ohData.is_currently_autonomous ? "Coach online" : "After hours"}
+                  </div>
+                </div>
+                <h2 className="ca-display" style={{ margin: "4px 0 2px", fontSize: 28 }}>Office hours</h2>
+                <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-soft)", margin: "0 0 20px", lineHeight: 1.5 }}>Outside these windows, athletes hear from the understudy.</p>
+
+                {/* AI autonomy toggle */}
+                <div style={{ marginBottom: 20, padding: "14px 16px", background: "var(--linen)", border: "1px solid var(--rule)", borderRadius: 2, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                  <div>
+                    <div style={{ fontFamily: "var(--body)", fontWeight: 600, fontSize: 13.5, color: "var(--ink)", marginBottom: 2 }}>AI fully autonomous</div>
+                    <div style={{ fontFamily: "var(--body)", fontSize: 12, color: "var(--ink-soft)" }}>Override office hours — AI responds to everything</div>
+                  </div>
+                  <button
+                    onClick={handleToggleAutonomy}
+                    disabled={ohSaving}
+                    style={{
+                      width: 44, height: 24, borderRadius: 12, border: "none", cursor: ohSaving ? "not-allowed" : "pointer",
+                      background: ohData.ai_autonomy_override ? "var(--aegean-deep)" : "var(--rule)",
+                      position: "relative", flexShrink: 0, transition: "background 200ms ease", opacity: ohSaving ? 0.6 : 1,
+                    }}
+                    aria-label={ohData.ai_autonomy_override ? "Disable AI autonomy" : "Enable AI autonomy"}
+                  >
+                    <span style={{
+                      position: "absolute", top: 3, left: ohData.ai_autonomy_override ? 23 : 3, width: 18, height: 18,
+                      background: "white", borderRadius: "50%", transition: "left 200ms ease",
+                      boxShadow: "0 1px 3px oklch(0.3 0.02 60 / 0.3)",
+                    }} />
+                  </button>
+                </div>
+
+                {/* Day grid */}
+                <div style={{ display: "flex", flexDirection: "column" }}>
                   {DAY_KEYS_OH.map((k, i) => {
                     const oh = ohData.office_hours as Record<string, unknown> | null;
                     const h = oh?.[k];
                     const hours = Array.isArray(h) && h.length >= 2 ? `${h[0]} – ${h[1]}` : "Closed";
+                    const isEditing = editingDay === k;
                     return (
-                      <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "14px 0", borderBottom: i < 6 ? "1px dashed var(--rule)" : "none" }}>
-                        <span className="ca-display" style={{ fontSize: 18, color: hours === "Closed" ? "var(--ink-mute)" : "var(--ink)" }}>{DAY_NAMES_OH[i]}</span>
-                        <span className="ca-mono" style={{ fontSize: 14, color: hours === "Closed" ? "var(--ink-mute)" : "var(--aegean-deep)" }}>{hours}</span>
+                      <div key={k} style={{ borderBottom: i < 6 ? "1px dashed var(--rule)" : "none" }}>
+                        {/* Collapsed row — click to edit */}
+                        {!isEditing && (
+                          <div
+                            onClick={() => startEditDay(k)}
+                            style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "12px 0", cursor: "pointer" }}
+                            title="Click to edit"
+                          >
+                            <span className="ca-display" style={{ fontSize: 17, color: hours === "Closed" ? "var(--ink-mute)" : "var(--ink)" }}>{DAY_NAMES_OH[i]}</span>
+                            <span className="ca-mono" style={{ fontSize: 13, color: hours === "Closed" ? "var(--ink-mute)" : "var(--aegean-deep)" }}>{hours}</span>
+                          </div>
+                        )}
+                        {/* Expanded editor */}
+                        {isEditing && (
+                          <div style={{ padding: "12px 0 14px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                              <span className="ca-display" style={{ fontSize: 17, color: "var(--ink)" }}>{DAY_NAMES_OH[i]}</span>
+                              {/* Open / Closed toggle */}
+                              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontFamily: "var(--mono)", fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: dayDraft.enabled ? "var(--aegean-deep)" : "var(--ink-mute)" }}>
+                                <button
+                                  onClick={() => setDayDraft(d => ({ ...d, enabled: !d.enabled }))}
+                                  style={{
+                                    width: 36, height: 20, borderRadius: 10, border: "none", cursor: "pointer",
+                                    background: dayDraft.enabled ? "var(--aegean-deep)" : "var(--rule)",
+                                    position: "relative", flexShrink: 0, transition: "background 180ms ease",
+                                  }}
+                                >
+                                  <span style={{
+                                    position: "absolute", top: 2, left: dayDraft.enabled ? 18 : 2, width: 16, height: 16,
+                                    background: "white", borderRadius: "50%", transition: "left 180ms ease",
+                                    boxShadow: "0 1px 2px oklch(0.3 0.02 60 / 0.25)",
+                                  }} />
+                                </button>
+                                {dayDraft.enabled ? "Open" : "Closed"}
+                              </label>
+                            </div>
+                            {/* Time inputs */}
+                            {dayDraft.enabled && (
+                              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+                                <input
+                                  type="time" value={dayDraft.open}
+                                  onChange={e => setDayDraft(d => ({ ...d, open: e.target.value }))}
+                                  style={{ flex: 1, padding: "6px 10px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 13, color: "var(--ink)", outline: "none" }}
+                                />
+                                <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-mute)" }}>to</span>
+                                <input
+                                  type="time" value={dayDraft.close}
+                                  onChange={e => setDayDraft(d => ({ ...d, close: e.target.value }))}
+                                  style={{ flex: 1, padding: "6px 10px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 13, color: "var(--ink)", outline: "none" }}
+                                />
+                              </div>
+                            )}
+                            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                              <button
+                                onClick={() => handleSaveDay(k)}
+                                disabled={ohHoursSaving}
+                                className="ca-btn ca-btn-primary"
+                                style={{ fontSize: 11, padding: "5px 14px" }}
+                              >
+                                {ohHoursSaving ? "Saving…" : "Save"}
+                              </button>
+                              <button
+                                onClick={() => setEditingDay(null)}
+                                className="ca-btn ca-btn-ghost"
+                                style={{ fontSize: 11, padding: "5px 12px" }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+
+                            {/* Copy to other days */}
+                            <div style={{ borderTop: "1px dashed var(--rule)", paddingTop: 12 }}>
+                              <div style={{ fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 8 }}>Copy these hours to</div>
+
+                              {/* Preset shortcuts */}
+                              <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+                                {[
+                                  { label: "Weekdays", keys: ["mon","tue","wed","thu","fri"] },
+                                  { label: "Weekend", keys: ["sat","sun"] },
+                                  { label: "All days", keys: ["mon","tue","wed","thu","fri","sat","sun"] },
+                                ].map(preset => {
+                                  const targets = preset.keys.filter(pk => pk !== k);
+                                  const allOn = targets.length > 0 && targets.every(pk => copyTargets.includes(pk));
+                                  return (
+                                    <button
+                                      key={preset.label}
+                                      onClick={() => {
+                                        if (allOn) setCopyTargets(prev => prev.filter(pk => !targets.includes(pk)));
+                                        else setCopyTargets(prev => [...new Set([...prev, ...targets])]);
+                                      }}
+                                      style={{ padding: "4px 10px", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.08em", background: allOn ? "var(--ink)" : "var(--parchment)", color: allOn ? "var(--parchment)" : "var(--ink-soft)", border: `1px solid ${allOn ? "var(--ink)" : "var(--rule)"}`, borderRadius: 2, cursor: "pointer", transition: "all 140ms ease" }}
+                                    >
+                                      {preset.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Individual day pills */}
+                              <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 10 }}>
+                                {DAY_KEYS_OH.map((dk, di) => {
+                                  if (dk === k) return null;
+                                  const on = copyTargets.includes(dk);
+                                  return (
+                                    <button
+                                      key={dk}
+                                      onClick={() => toggleCopyTarget(dk)}
+                                      style={{ width: 36, padding: "5px 0", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.04em", background: on ? "var(--aegean-deep)" : "var(--parchment)", color: on ? "oklch(0.97 0.01 220)" : "var(--ink-mute)", border: `1px solid ${on ? "var(--aegean-deep)" : "var(--rule)"}`, borderRadius: 2, cursor: "pointer", transition: "all 140ms ease", textAlign: "center" }}
+                                    >
+                                      {DAY_NAMES_OH[di].slice(0, 2)}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              <button
+                                onClick={() => handleCopyDays(k)}
+                                disabled={copyTargets.length === 0 || ohHoursSaving}
+                                className="ca-btn ca-btn-ghost"
+                                style={{ fontSize: 11, padding: "5px 14px", opacity: copyTargets.length === 0 ? 0.45 : 1 }}
+                              >
+                                {ohHoursSaving ? "Saving…" : `Apply to ${copyTargets.length || "…"} day${copyTargets.length === 1 ? "" : "s"} →`}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
                 </div>
               </div>
-              <div className="ca-panel" style={{ padding: 28, background: "linear-gradient(155deg, oklch(0.68 0.135 42) 0%, oklch(0.56 0.130 38) 100%)", color: "oklch(0.98 0.02 50)" }}>
-                <div className="ca-eyebrow" style={{ color: "oklch(0.88 0.05 45)" }}>The understudy's voice</div>
-                <h2 className="ca-display" style={{ margin: "8px 0 4px 0", fontSize: 28, color: "oklch(0.98 0.02 50)" }}>After-hours reply</h2>
-                <div style={{ marginTop: 20, padding: "18px 22px", background: "oklch(1 0 0 / 0.1)", border: "1px solid oklch(1 0 0 / 0.2)", borderRadius: 2, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 17, lineHeight: 1.55, color: "oklch(0.98 0.02 50)" }}>
-                  &ldquo;Your coach is off the pitch until morning. I've taken your note and they'll see it first thing.&rdquo;
+
+              {/* Right: after-hours voice + buttons */}
+              <div className="ca-panel" style={{ padding: 28, background: "linear-gradient(155deg, oklch(0.68 0.135 42) 0%, oklch(0.56 0.130 38) 100%)", color: "oklch(0.98 0.02 50)", display: "flex", flexDirection: "column" }}>
+                <div className="ca-eyebrow" style={{ color: "oklch(0.88 0.05 45)", marginBottom: 4 }}>The understudy's voice</div>
+                <h2 className="ca-display" style={{ margin: "0 0 20px", fontSize: 28, color: "oklch(0.98 0.02 50)" }}>After-hours reply</h2>
+
+                <div style={{ flex: 1, padding: "18px 22px", background: "oklch(1 0 0 / 0.10)", border: "1px solid oklch(1 0 0 / 0.20)", borderRadius: 2, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 16.5, lineHeight: 1.6, color: "oklch(0.98 0.02 50)", marginBottom: 20 }}>
+                  &ldquo;{ohData.after_hours_message ?? "Your coach is off the pitch until morning. I've taken your note and they'll see it first thing. If this is urgent — pain, illness, racing today — reply URGENT."}&rdquo;
+                </div>
+
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button
+                    className="ca-btn"
+                    onClick={() => setVoiceEditOpen(true)}
+                    style={{ background: "oklch(1 0 0 / 0.14)", border: "1px solid oklch(1 0 0 / 0.28)", color: "oklch(0.98 0.02 50)", fontFamily: "var(--mono)", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", padding: "8px 16px", cursor: "pointer", borderRadius: 2 }}
+                  >
+                    Edit voice
+                  </button>
+                  <button
+                    className="ca-btn"
+                    onClick={() => setUrgencyRulesOpen(true)}
+                    style={{ background: "oklch(1 0 0 / 0.14)", border: "1px solid oklch(1 0 0 / 0.28)", color: "oklch(0.98 0.02 50)", fontFamily: "var(--mono)", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", padding: "8px 16px", cursor: "pointer", borderRadius: 2 }}
+                  >
+                    Urgency rules
+                  </button>
                 </div>
               </div>
             </div>
@@ -739,7 +1734,22 @@ export default function DashboardPage() {
       </div>
 
       {inviteOpen && <InviteModal onClose={() => setInviteOpen(false)} />}
+      {csvImportOpen && <CsvImportModal onClose={() => setCsvImportOpen(false)} onImported={() => { setCsvImportOpen(false); setRefreshKey(k => k + 1); }} />}
       {refineTarget && <RefineModal suggestion={refineTarget} onClose={() => setRefineTarget(null)} onSend={handleModified} />}
+      {voiceEditOpen && ohData && (
+        <EditVoiceModal
+          current={ohData.after_hours_message ?? "Your coach is off the pitch until morning. I've taken your note and they'll see it first thing. If this is urgent — pain, illness, racing today — reply URGENT."}
+          onClose={() => setVoiceEditOpen(false)}
+          onSaved={(msg) => setOhData(d => d ? { ...d, after_hours_message: msg } : d)}
+        />
+      )}
+      {urgencyRulesOpen && ohData && (
+        <UrgencyRulesModal
+          current={ohData.urgency_keywords ?? []}
+          onClose={() => setUrgencyRulesOpen(false)}
+          onSaved={(kws) => setOhData(d => d ? { ...d, urgency_keywords: kws } : d)}
+        />
+      )}
     </div>
   );
 }
