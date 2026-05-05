@@ -14,10 +14,23 @@ export async function POST(
     return NextResponse.json({ error: "Invalid provider" }, { status: 400 });
   }
 
+  // F-C4: Forward the Authorization header — backend requires coach auth.
+  // Previously omitted, causing all sync calls to return 401.
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const res = await fetch(
       `${BACKEND_URL}/api/v1/coach/athletes/${id}/sync-${provider}`,
-      { method: "POST", headers: { "Content-Type": "application/json" } }
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        },
+      }
     );
 
     const data = await res.json();

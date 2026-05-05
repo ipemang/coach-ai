@@ -261,10 +261,9 @@ async def generate_athlete_invite(
         pass  # non-fatal
 
     # Generate a new token
+    # B-10: Removed dead assignment (datetime.now().replace(microsecond=0) was
+    # immediately overwritten by the timedelta calculation below).
     raw_token = secrets.token_hex(32)
-    expires_at = datetime.now(timezone.utc).replace(
-        microsecond=0
-    )
     from datetime import timedelta
     expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
 

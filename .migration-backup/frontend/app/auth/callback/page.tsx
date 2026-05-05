@@ -27,8 +27,11 @@ const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "https://coach-ai-product
 function parseJwtClaims(token: string): Record<string, unknown> {
   try {
     const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    const pad = b64 + "==".slice((b64.length % 4) || 4);
-    return JSON.parse(window.atob(pad));
+    // L2: Corrected base64url padding formula.
+    // Previous: "==".slice((b64.length % 4) || 4) was wrong — produced incorrect
+    // padding for payloads where b64.length % 4 === 1 (should add 3 "=" but only added 1).
+    const pad = "=".repeat((4 - b64.length % 4) % 4);
+    return JSON.parse(window.atob(b64 + pad));
   } catch {
     return {};
   }
@@ -54,6 +57,16 @@ function CallbackInner() {
         }
       }
 
+      // F-C8: Use getUser() as the authoritative auth check — getSession() reads
+      // from localStorage and can be spoofed client-side (Supabase security guidance).
+      // getUser() validates against the Supabase server.
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+      // getSession() is only used here to retrieve the access_token for downstream
+      // API calls — the auth decision was already made by getUser() above.
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         router.replace("/login");

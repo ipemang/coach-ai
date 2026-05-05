@@ -1793,6 +1793,7 @@ export default function DashboardShell({
   }, [tab, ohData]);
 
   // ── Suggestion actions ──
+  // M5: Added error handling — previously failures were silently swallowed.
   const handleApprove = useCallback(async (id: string) => {
     setActionLoading(id);
     try {
@@ -1801,7 +1802,16 @@ export default function DashboardShell({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "approved" }),
       });
-      if (res.ok) setSuggestions(prev => prev.filter(s => s.id !== id));
+      if (res.ok) {
+        setSuggestions(prev => prev.filter(s => s.id !== id));
+      } else {
+        const err = await res.json().catch(() => ({}));
+        console.error("[approve] Failed:", err);
+        alert(`Could not approve suggestion: ${err.error ?? res.statusText}`);
+      }
+    } catch (err) {
+      console.error("[approve] Network error:", err);
+      alert("Network error — could not approve suggestion. Please try again.");
     } finally {
       setActionLoading(null);
     }
@@ -1815,7 +1825,16 @@ export default function DashboardShell({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "ignored" }),
       });
-      if (res.ok) setSuggestions(prev => prev.filter(s => s.id !== id));
+      if (res.ok) {
+        setSuggestions(prev => prev.filter(s => s.id !== id));
+      } else {
+        const err = await res.json().catch(() => ({}));
+        console.error("[ignore] Failed:", err);
+        alert(`Could not dismiss suggestion: ${err.error ?? res.statusText}`);
+      }
+    } catch (err) {
+      console.error("[ignore] Network error:", err);
+      alert("Network error — could not dismiss suggestion. Please try again.");
     } finally {
       setActionLoading(null);
     }
@@ -1829,7 +1848,16 @@ export default function DashboardShell({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "modified", coach_reply }),
       });
-      if (res.ok) setSuggestions(prev => prev.filter(s => s.id !== id));
+      if (res.ok) {
+        setSuggestions(prev => prev.filter(s => s.id !== id));
+      } else {
+        const err = await res.json().catch(() => ({}));
+        console.error("[modified] Failed:", err);
+        alert(`Could not save edit: ${err.error ?? res.statusText}`);
+      }
+    } catch (err) {
+      console.error("[modified] Network error:", err);
+      alert("Network error — could not save edit. Please try again.");
     } finally {
       setActionLoading(null);
     }

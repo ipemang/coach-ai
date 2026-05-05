@@ -531,9 +531,11 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any, query_text
         logger.warning("[webhook] Biometric trend context failed: %s", exc)
 
     # COA-83: Inject rolling athlete memory summary (Tier 1)
+    # B-15: MemoryService.get_summary is synchronous — wrap in threadpool.
     try:
         from app.services.memory_service import MemoryService
-        memory_summary = MemoryService(supabase).get_summary(athlete.athlete_id)
+        from starlette.concurrency import run_in_threadpool as _mem_pool
+        memory_summary = await _mem_pool(MemoryService(supabase).get_summary, athlete.athlete_id)
         if memory_summary:
             prompt_parts.append(f"\n\n## Athlete Memory\n{memory_summary}")
     except Exception as exc:
@@ -799,25 +801,31 @@ async def _handle_media_message(
         import time as _time
         filename = f"{int(_time.time())}_{media_type}.{'jpg' if media_type == 'image' else 'mp4'}"
         storage_path = f"athletes/{athlete_id}/{filename}"
+        # B-03: All Supabase calls below are synchronous blocking I/O.
+        # Wrapped in run_in_threadpool so they don't stall the async event loop.
         try:
-            supabase.storage.from_("media-reviews").upload(
-                path=storage_path,
-                file=media_bytes,
-                file_options={"content-type": "image/jpeg" if media_type == "image" else "video/mp4"},
+            await run_in_threadpool(
+                lambda: supabase.storage.from_("media-reviews").upload(
+                    path=storage_path,
+                    file=media_bytes,
+                    file_options={"content-type": "image/jpeg" if media_type == "image" else "video/mp4"},
+                )
             )
         except Exception as exc:
             logger.warning("[COA-107] Storage upload failed (non-fatal): %s", exc)
             storage_path = f"UPLOAD_FAILED/{athlete_id}/{filename}"
 
         # 3. Create pending_analysis record immediately
-        insert_result = supabase.table("media_reviews").insert({
-            "athlete_id": athlete_id,
-            "coach_id": coach_id,
-            "media_url": storage_path,
-            "media_type": media_type,
-            "whatsapp_media_id": media_id,
-            "status": "pending_analysis",
-        }).execute()
+        insert_result = await run_in_threadpool(
+            lambda: supabase.table("media_reviews").insert({
+                "athlete_id": athlete_id,
+                "coach_id": coach_id,
+                "media_url": storage_path,
+                "media_type": media_type,
+                "whatsapp_media_id": media_id,
+                "status": "pending_analysis",
+            }).execute()
+        )
         review_id = ((insert_result.data or [{}])[0]).get("id")
 
         if not review_id:
@@ -825,9 +833,11 @@ async def _handle_media_message(
             return
 
         # 4. Fetch coach persona + methodology
-        coach_row = supabase.table("coaches").select(
-            "persona_system_prompt, methodology_playbook, full_name"
-        ).eq("id", coach_id).single().execute()
+        coach_row = await run_in_threadpool(
+            lambda: supabase.table("coaches").select(
+                "persona_system_prompt, methodology_playbook, full_name"
+            ).eq("id", coach_id).single().execute()
+        )
         coach_data = coach_row.data or {}
         persona = (coach_data.get("persona_system_prompt") or "").strip()
         playbook = coach_data.get("methodology_playbook") or {}
@@ -859,10 +869,12 @@ async def _handle_media_message(
             ai_analysis = f"Media received ({media_type}). AI analysis unavailable — review directly."
 
         # 6. Update record with analysis
-        supabase.table("media_reviews").update({
-            "ai_analysis": ai_analysis,
-            "status": "pending_coach_review",
-        }).eq("id", review_id).execute()
+        await run_in_threadpool(
+            lambda: supabase.table("media_reviews").update({
+                "ai_analysis": ai_analysis,
+                "status": "pending_coach_review",
+            }).eq("id", review_id).execute()
+        )
 
         logger.info("[COA-107] Media review %s ready for coach", str(review_id)[:8])
 
@@ -918,7 +930,12 @@ async def _extract_message(payload: dict) -> tuple[str | None, str | None, str |
                     try:
                         audio_bytes = await _download_whatsapp_audio(media_id)
                         from app.services.audio_service import AudioMemoInput, AudioService
-                        result = AudioService().process_voice_memo(
+                        # B-02: AudioService.process_voice_memo is synchronous —
+                        # must run in threadpool or it blocks the event loop for
+                        # the full Whisper transcription duration (up to 120s).
+                        from starlette.concurrency import run_in_threadpool as _rtp
+                        result = await _rtp(
+                            AudioService().process_voice_memo,
                             AudioMemoInput(
                                 audio_bytes=audio_bytes,
                                 filename="voice_memo.ogg",
@@ -1157,7 +1174,7 @@ async def _complete_onboarding(
                 "purpose": "strava_connect",
                 "expires_at": expires_at,
             }).execute()
-            base_url = "https://coach-ai-production-a5aa.up.railway.app"
+            base_url = get_settings().frontend_url  # B-04: use env var, not hardcoded URL
             strava_link = f"{base_url}/connect/strava?token={connect_token}"
             logger.info("[onboarding] Generated Strava connect token for %s", _mask_phone(sender))
         except Exception as exc:
@@ -1199,7 +1216,7 @@ async def _complete_onboarding(
                 "purpose": "plan_access",
                 "expires_at": plan_expires,
             }).execute()
-            base_url = "https://coach-ai-production-a5aa.up.railway.app"
+            base_url = get_settings().frontend_url  # B-04: use env var, not hardcoded URL
             await _send_whatsapp_message(
                 request, sender,
                 f"📋 Your training plan is ready! View it anytime here:\n"
@@ -1233,7 +1250,8 @@ async def whatsapp_webhook_handshake(
     hub_verify_token: str | None = Query(default=None, alias="hub.verify_token"),
     hub_challenge: str | None = Query(default=None, alias="hub.challenge"),
 ) -> str:
-    if hub_verify_token == get_settings().whatsapp_verify_token:
+    # B-17: Per Meta spec, must verify hub.mode == "subscribe" before returning challenge.
+    if hub_mode == "subscribe" and hub_verify_token == get_settings().whatsapp_verify_token:
         return hub_challenge or ""
     raise HTTPException(status_code=403)
 
@@ -1267,11 +1285,20 @@ async def whatsapp_webhook(request: Request) -> WhatsAppWebhookResponse:
         if athlete_early:
             import asyncio
             # Fire-and-forget: must return 200 to Meta within 5s
+            # B-01: AthleteRecord is a dataclass — convert to dict so _handle_media_message
+            # can use .get() safely (was crashing with AttributeError on every media message).
             asyncio.create_task(
                 _handle_media_message(
                     request,
                     supabase_early,
-                    athlete_early,
+                    {
+                        "id": athlete_early.athlete_id,
+                        "athlete_id": athlete_early.athlete_id,
+                        "coach_id": athlete_early.coach_id,
+                        "display_name": athlete_early.display_name,
+                        "stable_profile": athlete_early.stable_profile,
+                        "current_state": athlete_early.current_state,
+                    },
                     media_sender,
                     media_type,
                     media_id,

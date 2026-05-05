@@ -3,7 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const COACH_ID = process.env.COACH_ID!;
+// L3: COACH_ID is required — if unset, Supabase queries receive undefined and
+// behave unpredictably (may return all rows or no rows).
+const COACH_ID = process.env.COACH_ID ?? "";
 
 function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -39,6 +41,9 @@ function isCurrentlyAutonomous(
 }
 
 export async function GET() {
+  if (!COACH_ID) {
+    return NextResponse.json({ error: "COACH_ID env var is not configured" }, { status: 503 });
+  }
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("coaches")
@@ -67,6 +72,9 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
+  if (!COACH_ID) {
+    return NextResponse.json({ error: "COACH_ID env var is not configured" }, { status: 503 });
+  }
   const supabase = getSupabase();
   const body = await req.json().catch(() => ({}));
 

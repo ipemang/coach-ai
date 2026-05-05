@@ -72,7 +72,11 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
+  // F-C1: Tightened from "onboard" (matched any path starting with /onboard,
+  // including /athlete/onboarding) to "onboarding" (coach post-signup wizard only).
+  // Athlete routes /athlete/onboarding, /athlete/dashboard, /athlete/profile-update
+  // are explicitly protected by the if-blocks above.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|api/|my-plan|connect|onboard).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/|my-plan|connect|onboarding).*)",
   ],
 };

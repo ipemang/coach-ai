@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from fastapi import HTTPException, Request as FastAPIRequest
@@ -251,7 +252,8 @@ def _lookup_athlete_by_user_id(user_id: str) -> tuple[str, str] | None:
     settings = get_settings()
     if not settings.supabase_url or not settings.supabase_service_role_key:
         return None
-    url = f"{settings.supabase_url.rstrip('/')}/rest/v1/athletes?auth_user_id=eq.{user_id}&archived_at=is.null&select=id,coach_id&limit=1"
+    # B-06: URL-encode user_id to prevent URL injection from malformed JWT subjects.
+    url = f"{settings.supabase_url.rstrip('/')}/rest/v1/athletes?auth_user_id=eq.{quote(user_id, safe='')}&archived_at=is.null&select=id,coach_id&limit=1"
     request = Request(
         url,
         method="GET",

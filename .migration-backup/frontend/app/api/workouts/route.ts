@@ -7,7 +7,30 @@ const adminClient = () =>
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
+/**
+ * F-C3: Verify the bearer token and return the authenticated user.
+ * Both GET and POST were previously unauthenticated — any caller could
+ * read all workouts or insert arbitrary records.
+ */
+async function verifyToken(req: NextRequest) {
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
+  if (!token) return null;
+
+  const anonClient = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+  const { data: { user }, error } = await anonClient.auth.getUser(token);
+  if (error || !user) return null;
+  return user;
+}
+
 export async function GET(req: NextRequest) {
+  // F-C3: Require auth
+  const user = await verifyToken(req);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { searchParams } = new URL(req.url);
   const athleteId = searchParams.get("athlete_id");
   const weekStart = searchParams.get("week_start");
@@ -31,6 +54,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  // F-C3: Require auth
+  const user = await verifyToken(req);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const body = await req.json();
   const { athlete_id, coach_id, scheduled_date, session_type, title,
           distance_km, duration_min, hr_zone, target_pace, coaching_notes } = body;

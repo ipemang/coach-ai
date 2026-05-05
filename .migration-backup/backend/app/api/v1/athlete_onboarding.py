@@ -387,7 +387,8 @@ async def onboarding_complete(
         "memory_summary": ai_profile,  # always refresh — AI profile already incorporates prior memory
     }
 
-    _update_athlete(supabase, athlete_id, update_payload)
+    # B-12: _update_athlete is synchronous — must use run_in_threadpool in async route.
+    await run_in_threadpool(_update_athlete, supabase, athlete_id, update_payload)
 
     logger.info(
         "[onboarding/complete] Athlete %s onboarding complete — AI profile %d chars",
@@ -447,13 +448,14 @@ async def onboarding_refresh(
     if body.secondary_events:
         payload["secondary_events"] = [e.model_dump(exclude_none=True) for e in body.secondary_events]
 
-    _update_athlete(supabase, athlete_id, payload)
+    # B-13: _update_athlete is synchronous — must use run_in_threadpool in async route.
+    await run_in_threadpool(_update_athlete, supabase, athlete_id, payload)
 
     try:
         row = supabase.table("athletes").select("*").eq("id", athlete_id).single().execute()
         if row.data:
             ai_profile = await run_in_threadpool(_generate_ai_profile, row.data)
-            _update_athlete(supabase, athlete_id, {
+            await run_in_threadpool(_update_athlete, supabase, athlete_id, {
                 "ai_profile_summary": ai_profile,
                 "memory_summary": ai_profile,
             })

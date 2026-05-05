@@ -52,7 +52,10 @@ export function OfficeHoursPanel() {
   useEffect(() => {
     setLoading(true);
     fetch("/api/office-hours")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`Office hours load failed (${r.status})`);
+        return r.json();
+      })
       .then((data) => {
         if (data.office_hours) {
           setState({
@@ -77,7 +80,9 @@ export function OfficeHoursPanel() {
           }));
         }
       })
-      .catch(() => {})
+      // M7: Previously .catch(() => {}) silently swallowed load errors.
+      // Coach would see stale defaults with no indication data failed to load.
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load office hours"))
       .finally(() => setLoading(false));
   }, []);
 

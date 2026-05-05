@@ -125,10 +125,22 @@ async def send_suggestion_to_athlete(
 ):
     """Send an approved suggestion to the athlete via WhatsApp.
 
-    Called by the Next.js dashboard after the coach approves a suggestion.
-    No auth required here — request comes from the internal Next.js server, not the browser.
-    The DB update is already done by the time this is called.
+    Called by the Next.js dashboard (server-side) after the coach approves a suggestion.
+    B-05: Protected by INTERNAL_API_SECRET shared between Next.js and backend.
+    Set INTERNAL_API_SECRET in Railway env vars on both services.
     """
+    # B-05: Require shared internal secret when configured.
+    # This prevents unauthenticated callers from triggering WhatsApp sends.
+    internal_secret = get_settings().internal_api_secret
+    if internal_secret:
+        provided = request.headers.get("X-Internal-Secret", "")
+        if not secrets.compare_digest(provided, internal_secret):
+            raise HTTPException(status_code=401, detail="Invalid internal secret")
+    else:
+        logger.warning(
+            "[send_suggestion] INTERNAL_API_SECRET not set — endpoint is unprotected. "
+            "Set INTERNAL_API_SECRET in Railway env vars to secure this endpoint."
+        )
     whatsapp_client = getattr(request.app.state, "whatsapp_client", None)
     if whatsapp_client is None:
         raise HTTPException(status_code=503, detail="WhatsApp client not available")

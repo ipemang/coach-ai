@@ -8,6 +8,22 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // F-L5: Require a valid bearer token — previously any caller who knew a
+  // suggestion UUID could approve it and trigger a real WhatsApp message.
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
+  if (!token) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const anonClient = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+  const { data: { user }, error: authErr } = await anonClient.auth.getUser(token);
+  if (authErr || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -207,11 +223,17 @@ export async function PATCH(
           null;
 
         if (phone && messageText && !phone.startsWith("web:")) {
+          const internalSecret = process.env.INTERNAL_API_SECRET ?? "";
           const backendRes = await fetch(
             `${BACKEND_URL}/api/v1/coach/suggestions/${id}/send`,
             {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                // B-05: Pass shared internal secret so backend can verify the
+                // caller is the Next.js server, not an arbitrary HTTP client.
+                ...(internalSecret ? { "X-Internal-Secret": internalSecret } : {}),
+              },
               body: JSON.stringify({
                 phone_number: phone,
                 message: messageText,
