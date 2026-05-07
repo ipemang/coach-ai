@@ -434,6 +434,31 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any, query_text
     prompt_parts = [base]
     if coach_rules:
         prompt_parts.append(f"\n\nCoaching methodology:\n{coach_rules}")
+
+    # COA-memory Fix 5: Inject last 3 published training reports (coach perspective on training arc)
+    try:
+        report_rows = await _query_rows(
+            supabase.table("training_reports")
+            .select("title, week_of, summary_text, notes, compliance_pct, total_hours")
+            .eq("athlete_id", athlete.athlete_id)
+            .eq("status", "published")
+            .order("published_at", desc=True)
+            .limit(3)
+        )
+        if report_rows:
+            report_lines = ["## Training Reports (coach perspective)"]
+            for r in report_rows:
+                compliance = f"{int(r['compliance_pct'])}% compliance" if r.get("compliance_pct") else ""
+                hours = f"{r['total_hours']}h" if r.get("total_hours") else ""
+                summary_text = (r.get("summary_text") or r.get("notes") or "")[:200]
+                report_lines.append(
+                    f"Week of {r.get('week_of', '?')}: {r.get('title', '')} — "
+                    f"{compliance} {hours}\n  {summary_text}"
+                )
+            prompt_parts.append("\n\n" + "\n".join(report_lines))
+    except Exception as exc:
+        logger.warning("[memory] Failed to fetch training reports: %s", exc)
+
     if athlete_context_parts:
         prompt_parts.append(
             f"\n\nAthlete profile for {athlete.display_name or 'this athlete'}:\n"
@@ -530,14 +555,20 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any, query_text
     except Exception as exc:
         logger.warning("[webhook] Biometric trend context failed: %s", exc)
 
-    # COA-83: Inject rolling athlete memory summary (Tier 1)
-    # B-15: MemoryService.get_summary is synchronous — wrap in threadpool.
+    # COA-83: Inject rolling athlete memory summary (Tier 1) + recency-weighted events (Fix 3)
+    # B-15: MemoryService methods are synchronous — wrap in threadpool.
     try:
         from app.services.memory_service import MemoryService
         from starlette.concurrency import run_in_threadpool as _mem_pool
-        memory_summary = await _mem_pool(MemoryService(supabase).get_summary, athlete.athlete_id)
+        _mem_svc = MemoryService(supabase)
+        memory_summary = await _mem_pool(_mem_svc.get_summary, athlete.athlete_id)
         if memory_summary:
             prompt_parts.append(f"\n\n## Athlete Memory\n{memory_summary}")
+
+        # COA-memory Fix 3: Recency-weighted event list appended below the summary
+        weighted_events = await _mem_pool(_mem_svc.get_recent_events_weighted, athlete.athlete_id, 20)
+        if weighted_events:
+            prompt_parts.append(f"\n\n{weighted_events}")
     except Exception as exc:
         logger.warning("[webhook] Memory summary injection failed: %s", exc)
 
@@ -572,6 +603,15 @@ async def _build_system_prompt(athlete: AthleteRecord, supabase: Any, query_text
                 )
             if kb_block:
                 prompt_parts.append(f"\n\n{kb_block}")
+
+        # COA-memory Fix 2: Tier 3 — semantic search over athlete-uploaded file chunks
+        if query_text:
+            try:
+                tier3_block = await retrieval.retrieve_athlete_files(query_text, athlete.athlete_id)
+                if tier3_block:
+                    prompt_parts.append(f"\n\n{tier3_block}")
+            except Exception as tier3_exc:
+                logger.warning("[RAG tier3] Athlete file chunk search failed (non-fatal): %s", tier3_exc)
     except Exception as exc:
         logger.warning("[webhook] RAG injection failed (non-fatal): %s", exc)
 
@@ -1770,7 +1810,8 @@ async def _handle_athlete_message(
             athlete.athlete_id, exc,
         )
 
-    # COA-83: Append memory event + fire-and-forget summary refresh (non-blocking)
+    # COA-83: Append memory event + throttled fire-and-forget summary refresh (non-blocking)
+    # COA-memory Fix 4: Only refresh if last refresh was >6h ago (avoids per-message LLM calls)
     try:
         from app.services.memory_service import MemoryService
         from starlette.concurrency import run_in_threadpool
@@ -1784,13 +1825,19 @@ async def _handle_athlete_message(
             {"suggestion_id": suggestion_id, "urgency": urgency, "is_voice": is_voice},
         )
 
-        async def _refresh_bg() -> None:
-            try:
-                await run_in_threadpool(mem.refresh_summary, athlete.athlete_id)
-            except Exception as _exc:
-                logger.warning("[memory] Background refresh failed for athlete=%s: %s", athlete.athlete_id[:8], _exc)
+        needs_refresh = await run_in_threadpool(mem.should_refresh, athlete.athlete_id, 6.0)
 
-        asyncio.ensure_future(_refresh_bg())
+        if needs_refresh:
+            async def _refresh_bg() -> None:
+                try:
+                    await run_in_threadpool(mem.refresh_summary, athlete.athlete_id)
+                    logger.info("[memory] Background summary refresh complete for athlete=%s", athlete.athlete_id[:8])
+                except Exception as _exc:
+                    logger.warning("[memory] Background refresh failed for athlete=%s: %s", athlete.athlete_id[:8], _exc)
+
+            asyncio.ensure_future(_refresh_bg())
+        else:
+            logger.debug("[memory] Skipping refresh for athlete=%s — refreshed recently", athlete.athlete_id[:8])
     except Exception as exc:
         logger.warning("[memory] Memory pipeline failed for athlete=%s: %s", athlete.athlete_id[:8], exc)
 

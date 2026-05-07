@@ -3,15 +3,19 @@
 Append-only event log + rolling LLM-consolidated summary so the AI pipeline
 has persistent context across WhatsApp conversations.
 
-Three public methods:
-  append_event()     — insert one event row (fast, no LLM)
-  get_recent_events() — fetch last N events for context injection
-  refresh_summary()  — consolidate last 50 events into a ~300-word rolling
-                       summary written back to athletes.memory_summary
+Public methods:
+  append_event()              — insert one event row (fast, no LLM)
+  get_recent_events()         — fetch last N events for context injection
+  get_recent_events_weighted()— fetch last N events with recency bias formatting
+  refresh_summary()           — consolidate last 50 events into a ~300-word rolling
+                                summary written back to athletes.memory_summary
+  should_refresh()            — returns True if last refresh was >6h ago (or never)
 """
 from __future__ import annotations
 
 import logging
+import math
+from datetime import datetime, timezone
 from typing import Any
 
 from app.services.llm_client import LLMClient, LLMResponse
@@ -73,6 +77,74 @@ class MemoryService:
             logger.warning("[memory] Failed to fetch events for athlete=%s: %s", athlete_id[:8], exc)
             return []
 
+    def get_recent_events_weighted(self, athlete_id: str, limit: int = 20) -> str:
+        """Return last `limit` memory events with recency-bias weight indicators.
+
+        Weight = exp(-days_ago / 14) — 14-day half-life:
+          weight > 0.8  → "Recent"  (last ~3 days)
+          weight > 0.4  → "Noted"   (last ~2 weeks)
+          else          → "Older"   (>2 weeks)
+
+        Returns a formatted block capped at 800 chars to avoid context bloat.
+        Returns empty string if no events found.
+        """
+        events = self.get_recent_events(athlete_id, limit=limit)
+        if not events:
+            return ""
+
+        now = datetime.now(timezone.utc)
+        lines = ["## Recent Athlete Events (recency-weighted)"]
+        total_chars = len(lines[0])
+
+        for ev in events:
+            ts_raw = ev.get("created_at") or ""
+            try:
+                # Parse ISO timestamp (handles both +00:00 and Z suffixes)
+                ts_str = ts_raw.replace("Z", "+00:00")
+                ts = datetime.fromisoformat(ts_str)
+                days_ago = max(0.0, (now - ts).total_seconds() / 86400.0)
+            except Exception:
+                days_ago = 7.0  # default to 1 week if parse fails
+
+            weight = math.exp(-days_ago / 14.0)
+            if weight > 0.8:
+                indicator = "Recent"
+            elif weight > 0.4:
+                indicator = "Noted"
+            else:
+                indicator = "Older"
+
+            event_type = str(ev.get("event_type") or "event")
+            content = str(ev.get("content") or "")[:150]
+            line = f"[{indicator}] {event_type}: {content}"
+
+            if total_chars + len(line) + 1 > 800:
+                break
+            lines.append(line)
+            total_chars += len(line) + 1
+
+        if len(lines) == 1:
+            return ""  # only header, no events fit
+        return "\n".join(lines)
+
+    def should_refresh(self, athlete_id: str, min_hours: float = 6.0) -> bool:
+        """Return True if memory_summary has never been refreshed or was last refreshed
+        more than `min_hours` ago. Used to throttle auto-refresh calls."""
+        try:
+            result = self._db.table("athletes").select(
+                "memory_refreshed_at"
+            ).eq("id", athlete_id).single().execute()
+            refreshed_at_raw = (result.data or {}).get("memory_refreshed_at")
+            if not refreshed_at_raw:
+                return True  # never refreshed
+            ts_str = str(refreshed_at_raw).replace("Z", "+00:00")
+            refreshed_at = datetime.fromisoformat(ts_str)
+            hours_since = (datetime.now(timezone.utc) - refreshed_at).total_seconds() / 3600.0
+            return hours_since >= min_hours
+        except Exception as exc:
+            logger.warning("[memory] should_refresh check failed for athlete=%s: %s", athlete_id[:8], exc)
+            return True  # on error, allow refresh
+
     def get_summary(self, athlete_id: str) -> str:
         """Return current memory_summary from athletes table, or empty string."""
         try:
@@ -115,6 +187,7 @@ class MemoryService:
 
             self._db.table("athletes").update({
                 "memory_summary": summary,
+                "memory_refreshed_at": datetime.now(timezone.utc).isoformat(),
             }).eq("id", athlete_id).execute()
 
             # COA-92: Log token usage for memory refresh (non-fatal)

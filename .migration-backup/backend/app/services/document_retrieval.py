@@ -1,16 +1,20 @@
 """COA-87: Document retrieval service — semantic search over coach knowledge base.
 
-Two-tier RAG at message time:
+Three-tier RAG at message time:
   Tier 1 (always): athlete memory summary + coach notes on this athlete
   Tier 2 (search): top-k chunks from coach's approved documents via pgvector cosine similarity
+  Tier 3 (search): top-k chunks from athlete-uploaded files via pgvector cosine similarity
 
-Both tiers are assembled here and returned as formatted prompt blocks for
+All tiers are assembled here and returned as formatted prompt blocks for
 injection into _build_system_prompt.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
+
+from starlette.concurrency import run_in_threadpool
 
 from app.services.llm_client import LLMClient, LLMResponse
 from app.services.usage_logger import UsageLogger
@@ -132,6 +136,57 @@ class DocumentRetrievalService:
 
         logger.info("[retrieval] Knowledge base: %d chunks for coach=%s", len(lines), coach_id[:8])
         return "## Coach Knowledge Base (relevant excerpts)\n" + "\n\n".join(lines)
+
+    async def retrieve_athlete_files(self, query: str, athlete_id: str) -> str:
+        """Tier 3 RAG: Semantic search over athlete-uploaded file chunks.
+
+        Embeds query and runs cosine similarity against athlete_file_chunks via
+        the match_athlete_file_chunks RPC. Returns empty string if no matches.
+        Max 3s timeout — must not blow Meta's 20s webhook deadline.
+        """
+        if not query.strip():
+            return ""
+
+        try:
+            embed_resp = await asyncio.wait_for(
+                run_in_threadpool(
+                    lambda: self._llm.embed([query.strip()[:1000]])
+                ),
+                timeout=3.0,
+            )
+            if not embed_resp.embeddings:
+                return ""
+            query_embedding = embed_resp.embeddings[0]
+        except Exception as exc:
+            logger.warning("[RAG tier3] Embed failed: %s", exc)
+            return ""
+
+        try:
+            rows_resp = await asyncio.wait_for(
+                run_in_threadpool(
+                    lambda: self._db.rpc("match_athlete_file_chunks", {
+                        "query_embedding": query_embedding,
+                        "match_threshold": 0.72,
+                        "match_count": 3,
+                        "p_athlete_id": athlete_id,
+                    }).execute()
+                ),
+                timeout=3.0,
+            )
+            results = getattr(rows_resp, "data", []) or []
+        except Exception as exc:
+            logger.warning("[RAG tier3] Athlete file search failed: %s", exc)
+            return ""
+
+        if not results:
+            return ""
+
+        lines = ["## Athlete File Excerpts (semantic match)"]
+        for r in results:
+            lines.append(f"- {str(r.get('chunk_text') or '')[:300]}")
+
+        logger.info("[RAG tier3] Athlete file chunks: %d matches for athlete=%s", len(results), athlete_id[:8])
+        return "\n".join(lines)
 
     def _fallback_search(
         self,
