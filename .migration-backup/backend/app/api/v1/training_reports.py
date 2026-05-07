@@ -16,7 +16,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
@@ -377,9 +377,10 @@ async def patch_report(
     scope = resolve_coach_scope(principal)
 
     # Verify ownership
-    existing = supabase.table("training_reports").select("*").eq(
+    existing_res = await run_in_threadpool(lambda: supabase.table("training_reports").select("*").eq(
         "id", report_id
-    ).eq("coach_id", str(scope.coach_id)).single().execute()
+    ).eq("coach_id", str(scope.coach_id)).single().execute())
+    existing = existing_res
     if not existing.data:
         raise HTTPException(status_code=404, detail="Report not found")
     if existing.data.get("status") == "published":
@@ -422,6 +423,7 @@ async def patch_report(
 )
 async def publish_report(
     report_id: str,
+    request: Request,
     principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
 ):
     """Sets status=published, records published_at.
@@ -432,9 +434,10 @@ async def publish_report(
 
     scope = resolve_coach_scope(principal)
 
-    existing = supabase.table("training_reports").select("*").eq(
+    existing_res = await run_in_threadpool(lambda: supabase.table("training_reports").select("*").eq(
         "id", report_id
-    ).eq("coach_id", str(scope.coach_id)).single().execute()
+    ).eq("coach_id", str(scope.coach_id)).single().execute())
+    existing = existing_res
     if not existing.data:
         raise HTTPException(status_code=404, detail="Report not found")
     if existing.data.get("status") == "published":
@@ -468,26 +471,29 @@ async def publish_report(
 
     # WhatsApp notification to athlete (non-fatal)
     try:
-        athlete_row = supabase.table("athletes").select(
+        athlete_row = await run_in_threadpool(lambda: supabase.table("athletes").select(
             "full_name, phone_number"
-        ).eq("id", existing.data["athlete_id"]).single().execute()
+        ).eq("id", existing.data["athlete_id"]).single().execute())
         if athlete_row.data and athlete_row.data.get("phone_number"):
             from app.services.whatsapp_service import WhatsAppRecipient, WhatsAppService
-            wa = WhatsAppService()
-            recipient = WhatsAppRecipient(
-                phone_number=athlete_row.data["phone_number"],
-                display_name=athlete_row.data.get("full_name", "Athlete"),
-            )
-            period_start_fmt = existing.data.get("period_start", "")
-            await wa.send_message(
-                recipient=recipient,
-                body=(
-                    f"📊 Your coach published a new training report.\n\n"
-                    f"*{existing.data.get('title', 'Training Report')}*\n"
-                    f"{existing.data.get('summary_text', '')}\n\n"
-                    "View the full report in your dashboard."
-                ),
-            )
+            _wa_client = getattr(request.app.state, "whatsapp_client", None)
+            if _wa_client is not None:
+                wa = WhatsAppService(whatsapp_client=_wa_client)
+                recipient = WhatsAppRecipient(
+                    athlete_id=str(existing.data["athlete_id"]),
+                    phone_number=athlete_row.data["phone_number"],
+                    timezone_name="UTC",
+                    display_name=athlete_row.data.get("full_name", "Athlete"),
+                )
+                await wa.send_text_message(
+                    recipient=recipient,
+                    body=(
+                        f"📊 Your coach published a new training report.\n\n"
+                        f"*{existing.data.get('title', 'Training Report')}*\n"
+                        f"{existing.data.get('summary_text', '')}\n\n"
+                        "View the full report in your dashboard."
+                    ),
+                )
     except Exception as wa_exc:
         logger.warning("[coa118] WhatsApp notification to athlete failed: %s", wa_exc)
 

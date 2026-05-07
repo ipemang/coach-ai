@@ -47,6 +47,15 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  // ── Protect coach onboarding ─────────────────────────────────────────────
+  // B-NEW-22: /onboarding is the coach post-signup wizard — must be protected.
+  // /athlete/onboarding uses a different auth flow and remains excluded from the matcher.
+  if (pathname.startsWith("/onboarding") && !user) {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    return NextResponse.redirect(loginUrl);
+  }
+
   // ── Protect athlete routes ───────────────────────────────────────────────
   if (
     (pathname.startsWith("/athlete/dashboard") ||
@@ -72,11 +81,12 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // F-C1: Tightened from "onboard" (matched any path starting with /onboard,
-  // including /athlete/onboarding) to "onboarding" (coach post-signup wizard only).
-  // Athlete routes /athlete/onboarding, /athlete/dashboard, /athlete/profile-update
-  // are explicitly protected by the if-blocks above.
+  // B-NEW-22: Removed "onboarding" from the exclusion list so /onboarding (coach
+  // post-signup wizard) is now protected by the middleware. The auth check above
+  // redirects unauthenticated coaches to /login.
+  // /athlete/onboarding is excluded via "athlete/onboarding" — athletes use a
+  // separate token-based auth flow before they have a session cookie.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|api/|my-plan|connect|onboarding).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/|my-plan|connect|athlete/onboarding).*)",
   ],
 };

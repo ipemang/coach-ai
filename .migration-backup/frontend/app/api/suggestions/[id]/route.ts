@@ -120,7 +120,7 @@ export async function PATCH(
         `${BACKEND_URL}/api/v1/coach/suggestions/${id}/decide`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
           body: JSON.stringify({
             action: plan_action,
             decision_type: "plan_modification",
@@ -186,7 +186,7 @@ export async function PATCH(
       `${BACKEND_URL}/api/v1/coach/suggestions/${id}/decide`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: authHeader },
         body: JSON.stringify(decidePayload),
       }
     );

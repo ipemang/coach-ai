@@ -1015,11 +1015,12 @@ async def _find_onboarding_session(supabase: Any, phone_number: str) -> dict | N
 
 async def _start_onboarding(request: Request, supabase: Any, sender: str) -> WhatsAppWebhookResponse:
     """Create a new onboarding session and ask for the athlete's name."""
-    supabase.table("onboarding_sessions").insert({
+    from starlette.concurrency import run_in_threadpool as _onboard_pool
+    await _onboard_pool(lambda: supabase.table("onboarding_sessions").insert({
         "phone_number": sender,
         "step": "ask_name",
         "collected": {},
-    }).execute()
+    }).execute())
 
     await _send_whatsapp_message(
         request, sender,

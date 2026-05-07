@@ -77,15 +77,25 @@ def run_weekly_reports() -> None:
             coach_wa = coach_data.get("whatsapp_number")
             if coach_wa:
                 try:
+                    import asyncio
+                    from app.core.config import get_settings
+                    from app.main import WhatsAppGraphClient
                     from app.services.whatsapp_service import WhatsAppRecipient, WhatsAppService
-                    wa = WhatsAppService()
+
+                    _settings = get_settings()
+                    _wa_client = WhatsAppGraphClient(
+                        access_token=_settings.whatsapp_access_token,
+                        phone_number_id=_settings.whatsapp_phone_number_id,
+                    )
+                    wa = WhatsAppService(whatsapp_client=_wa_client)
                     recipient = WhatsAppRecipient(
+                        athlete_id=coach_id,
                         phone_number=coach_wa,
+                        timezone_name="UTC",
                         display_name=coach_data.get("full_name", "Coach"),
                     )
                     athlete_name = athlete.get("full_name", "your athlete")
-                    import asyncio
-                    asyncio.run(wa.send_message(
+                    asyncio.get_event_loop().run_until_complete(wa.send_text_message(
                         recipient=recipient,
                         body=(
                             f"📊 Weekly report draft ready for {athlete_name}.\n\n"

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.core.security import AuthenticatedPrincipal, require_roles
 from app.services.race_day_simulation import (
     AthleteFitnessMetrics,
     WeatherForecast,
@@ -89,7 +90,7 @@ class RaceSimulationResponse(BaseModel):
 
 
 @router.get("/course-profiles", response_model=list[RaceCourseProfileResponse])
-def read_course_profiles() -> list[RaceCourseProfileResponse]:
+def read_course_profiles(principal: AuthenticatedPrincipal = Depends(require_roles("coach"))) -> list[RaceCourseProfileResponse]:
     return [RaceCourseProfileResponse.model_validate(profile) for profile in list_course_profiles()]
 
 
@@ -103,7 +104,7 @@ def read_course_profile(course_slug: str) -> RaceCourseProfileResponse:
 
 
 @router.post("/simulate", response_model=RaceSimulationResponse)
-def simulate(payload: RaceSimulationRequest) -> RaceSimulationResponse:
+def simulate(payload: RaceSimulationRequest, principal: AuthenticatedPrincipal = Depends(require_roles("coach"))) -> RaceSimulationResponse:
     try:
         result = simulate_race_day(
             course_slug=payload.course_slug,

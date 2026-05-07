@@ -14,6 +14,9 @@ export async function GET(
 ) {
   const { id } = await params;
   const authHeader = req.headers.get("Authorization");
+  // B-NEW-09: Reject requests with no Authorization header — previously a null
+  // header was silently proxied, leaking data to unauthenticated callers.
+  if (!authHeader) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const res = await fetch(
     `${BACKEND_URL}/api/v1/coach/athletes/${id}/morning-pulse`,
@@ -33,6 +36,8 @@ export async function PATCH(
 ) {
   const { id } = await params;
   const authHeader = req.headers.get("Authorization");
+  // B-NEW-09: Reject requests with no Authorization header.
+  if (!authHeader) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: unknown;
   try { body = await req.json(); } catch { body = {}; }

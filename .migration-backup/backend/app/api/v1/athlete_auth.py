@@ -179,7 +179,7 @@ async def send_athlete_invite(
                 f"Once you sign up you'll see your training plan and can chat with your AI coach."
             )
             import asyncio
-            asyncio.ensure_future(whatsapp_client.send_message(to=phone, body=message))
+            asyncio.create_task(whatsapp_client.send_message(to=phone, body=message))
             logger.info("[send-invite] Queued WhatsApp invite to athlete %s", athlete_id[:8])
         except Exception:
             logger.warning("[send-invite] WhatsApp send failed for athlete %s", athlete_id[:8], exc_info=True)
@@ -458,8 +458,15 @@ async def link_athlete_account(
         except ValueError:
             pass
 
-    # Verify email match (principal.email comes from the Supabase JWT)
-    if principal.email and invite.get("email"):
+    # B-NEW-20: Verify email match — if the invite specifies an email, it MUST match.
+    # Previously social-OAuth athletes with no principal.email silently bypassed this check.
+    if invite.get("email"):
+        if not principal.email:
+            raise HTTPException(
+                status_code=403,
+                detail="Could not verify your email address. "
+                       "Please sign up with the email address your coach used to invite you.",
+            )
         if principal.email.lower().strip() != invite["email"].lower().strip():
             raise HTTPException(
                 status_code=403,

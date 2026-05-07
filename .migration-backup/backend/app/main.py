@@ -158,7 +158,8 @@ app = FastAPI(title="Andes.IA API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://coach-ai-production-a5aa.up.railway.app",
+        # B-NEW-25: Removed hardcoded backend self-URL — the backend does not need
+        # to allow CORS from itself. Only the frontend origins are legitimate CORS callers.
         "https://coach-dashboard-production-ae22.up.railway.app",
         "http://localhost:3000",
         "http://localhost:8000",

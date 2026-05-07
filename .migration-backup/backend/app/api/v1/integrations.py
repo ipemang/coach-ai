@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
+from app.core.security import AuthenticatedPrincipal, require_roles
 from app.services.biometrics import BiometricsService
 from app.services.integrations import IntegrationConnectionResult, IntegrationService, IntegrationSyncWorker
 from app.services.scope import DataScope
@@ -135,6 +136,7 @@ async def connect_provider(
     organization_id: str | None = None,
     coach_id: str | None = None,
     redirect_uri: str | None = None,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
 ) -> RedirectResponse:
     integration_service = await _resolve_integration_service(request)
     provider_name = _provider_name(provider)
@@ -159,6 +161,7 @@ async def callback_provider(
     state: str | None = None,
     error: str | None = None,
     error_description: str | None = None,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
 ) -> IntegrationCallbackResponse:
     if error:
         raise HTTPException(status_code=400, detail=error_description or error)
@@ -215,6 +218,7 @@ async def run_backfill(
     request: Request,
     provider: str,
     payload: IntegrationBackfillRequest,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
 ) -> IntegrationBackfillResponse:
     provider_name = _provider_name(provider)
     if provider_name != payload.provider:
@@ -237,10 +241,14 @@ async def run_backfill(
 
 
 @router.post("/{provider}/sync")
-async def sync_single_provider(request: Request, provider: str) -> dict[str, Any]:
+async def sync_single_provider(
+    request: Request,
+    provider: str,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
+) -> dict[str, Any]:
     integration_service = await _resolve_integration_service(request)
     provider_name = _provider_name(provider)
-    result = await integration_service.sync_all_active_connections()
+    result = await integration_service.sync_all_active_connections(provider=provider_name)
     return {"provider": provider_name, **result}
 
 

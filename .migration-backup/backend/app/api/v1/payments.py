@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from app.core.security import AuthenticatedPrincipal, require_roles
 from app.services.stripe_service import StripeService
 
 router = APIRouter(prefix="/api/v1/payments", tags=["payments"])
@@ -92,7 +93,7 @@ async def _resolve_stripe_service(request: Request) -> StripeService:
 
 
 @router.post("/checkout-sessions", response_model=CheckoutSessionResponse)
-async def create_checkout_session(request: Request, payload: CheckoutSessionCreateRequest) -> CheckoutSessionResponse:
+async def create_checkout_session(request: Request, payload: CheckoutSessionCreateRequest, principal: AuthenticatedPrincipal = Depends(require_roles("coach"))) -> CheckoutSessionResponse:
     service = await _resolve_stripe_service(request)
     try:
         result = service.create_checkout_session(
@@ -117,7 +118,7 @@ async def create_checkout_session(request: Request, payload: CheckoutSessionCrea
 
 
 @router.get("/subscriptions/{subscription_id}", response_model=SubscriptionResponse)
-async def retrieve_subscription(request: Request, subscription_id: str) -> SubscriptionResponse:
+async def retrieve_subscription(request: Request, subscription_id: str, principal: AuthenticatedPrincipal = Depends(require_roles("coach"))) -> SubscriptionResponse:
     service = await _resolve_stripe_service(request)
     try:
         result = service.retrieve_subscription(subscription_id)
@@ -132,6 +133,7 @@ async def list_subscriptions(
     customer_id: str,
     status: str | None = None,
     limit: int = Query(default=10, ge=1, le=100),
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
 ) -> SubscriptionsListResponse:
     service = await _resolve_stripe_service(request)
     try:
@@ -147,6 +149,7 @@ async def cancel_subscription(
     request: Request,
     subscription_id: str,
     payload: CancelSubscriptionRequest,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
 ) -> SubscriptionResponse:
     service = await _resolve_stripe_service(request)
     try:
@@ -157,7 +160,7 @@ async def cancel_subscription(
 
 
 @router.post("/subscriptions/{subscription_id}/reactivate", response_model=SubscriptionResponse)
-async def reactivate_subscription(request: Request, subscription_id: str) -> SubscriptionResponse:
+async def reactivate_subscription(request: Request, subscription_id: str, principal: AuthenticatedPrincipal = Depends(require_roles("coach"))) -> SubscriptionResponse:
     service = await _resolve_stripe_service(request)
     try:
         result = service.reactivate_subscription(subscription_id)
@@ -170,6 +173,7 @@ async def reactivate_subscription(request: Request, subscription_id: str) -> Sub
 async def create_billing_portal_session(
     request: Request,
     payload: BillingPortalSessionRequest,
+    principal: AuthenticatedPrincipal = Depends(require_roles("coach")),
 ) -> BillingPortalSessionResponse:
     service = await _resolve_stripe_service(request)
     try:

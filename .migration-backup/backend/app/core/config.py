@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     strava_redirect_uri: Optional[str] = None
     # COA-93: Frontend base URL for invite links
     frontend_url: str = "https://coach-dashboard-production-ae22.up.railway.app"
+    # B-NEW-05: Dedicated secret for invite token signing.
+    # Falls back to supabase_service_role_key if not set (with startup warning).
+    invite_secret: Optional[str] = None
 
     model_config = SettingsConfigDict(
         case_sensitive=False,

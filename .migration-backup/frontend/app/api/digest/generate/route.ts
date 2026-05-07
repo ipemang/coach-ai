@@ -14,6 +14,8 @@ const BACKEND_URL =
 
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("Authorization");
+  // B-NEW-10: Reject requests with no Authorization header — same pattern as B-NEW-09.
+  if (!authHeader) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const force = req.nextUrl.searchParams.get("force") === "true";
 
   let res: Response;

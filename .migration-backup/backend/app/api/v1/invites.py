@@ -9,9 +9,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.core.security import AuthenticatedPrincipal, require_roles
 from app.services import get_settings
 
 router = APIRouter(prefix="/api/v1/invites", tags=["invites"])
@@ -108,10 +109,17 @@ def _string_value(value: Any) -> str | None:
 
 
 def _get_invite_secret() -> str:
+    import logging as _logging
     settings = get_settings()
-    if not settings.supabase_service_role_key:
-        raise HTTPException(status_code=503, detail="Supabase service role key is not configured")
-    return settings.supabase_service_role_key
+    if settings.invite_secret:
+        return settings.invite_secret
+    if settings.supabase_service_role_key:
+        _logging.getLogger(__name__).warning(
+            "INVITE_SECRET env var is not set — falling back to SUPABASE_SERVICE_ROLE_KEY for invite signing. "
+            "Set INVITE_SECRET to a dedicated random secret in Railway environment variables."
+        )
+        return settings.supabase_service_role_key
+    raise HTTPException(status_code=503, detail="Neither INVITE_SECRET nor SUPABASE_SERVICE_ROLE_KEY is configured")
 
 
 def _base64url_encode(value: bytes) -> str:
@@ -240,7 +248,7 @@ async def _update_athlete_roster_membership(supabase_client: Any, athlete_id: st
 
 
 @router.post("", response_model=InviteCreateResponse)
-async def create_invite(request: Request, payload: InviteCreateRequest) -> InviteCreateResponse:
+async def create_invite(request: Request, payload: InviteCreateRequest, principal: AuthenticatedPrincipal = Depends(require_roles("coach"))) -> InviteCreateResponse:
     supabase_client = await _resolve_supabase_client(request)
     coach_record = await _find_coach_record(supabase_client, payload.coach_id, payload.organization_id)
     if coach_record is None:

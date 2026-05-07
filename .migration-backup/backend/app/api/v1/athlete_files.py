@@ -322,13 +322,14 @@ async def upload_athlete_file(
     original_filename = file.filename or f"upload.{file_ext}"
     storage_path = f"{athlete_id}/{file_id}/{original_filename}"
 
-    # Upload to Supabase Storage
+    # Upload to Supabase Storage (wrapped to avoid blocking the event loop)
     try:
-        supabase.storage.from_("athlete-files").upload(
+        _content_type = file.content_type or "application/octet-stream"
+        await run_in_threadpool(lambda: supabase.storage.from_("athlete-files").upload(
             path=storage_path,
             file=file_bytes,
-            file_options={"content-type": file.content_type or "application/octet-stream"},
-        )
+            file_options={"content-type": _content_type},
+        ))
     except Exception as exc:
         logger.error("[athlete_files] Storage upload failed for athlete=%s: %s", athlete_id[:8], exc)
         raise HTTPException(status_code=500, detail="File storage failed")
@@ -351,7 +352,7 @@ async def upload_athlete_file(
         "size_bytes": len(file_bytes),
     }
     try:
-        result = supabase.table("athlete_files").insert(file_row).execute()
+        result = await run_in_threadpool(lambda: supabase.table("athlete_files").insert(file_row).execute())
         row = result.data[0] if result.data else file_row
     except Exception as exc:
         logger.error("[athlete_files] DB insert failed: %s", exc)
@@ -361,9 +362,9 @@ async def upload_athlete_file(
     try:
         cat_label = category or "general"
         mem_note = f"\n\n[Document uploaded: {original_filename} (category: {cat_label}, size: {len(file_bytes) // 1024} KB)]"
-        athlete_row = supabase.table("athletes").select("memory_summary").eq("id", athlete_id).single().execute()
+        athlete_row = await run_in_threadpool(lambda: supabase.table("athletes").select("memory_summary").eq("id", athlete_id).single().execute())
         current_mem = (athlete_row.data.get("memory_summary") or "") if athlete_row.data else ""
-        supabase.table("athletes").update({"memory_summary": current_mem + mem_note}).eq("id", athlete_id).execute()
+        await run_in_threadpool(lambda: supabase.table("athletes").update({"memory_summary": current_mem + mem_note}).eq("id", athlete_id).execute())
     except Exception as mem_exc:
         logger.warning("[athlete_files] Could not update memory_summary for athlete=%s: %s", athlete_id[:8], mem_exc)
 
@@ -379,11 +380,11 @@ async def upload_athlete_file(
             except Exception as exc:
                 logger.error("[athlete_files] Background ingestion failed for file=%s: %s", file_id[:8], exc)
 
-        asyncio.ensure_future(_ingest_bg())
+        asyncio.create_task(_ingest_bg())
     else:
         # CSV and unknown types: mark processed immediately (no embedding)
         try:
-            supabase.table("athlete_files").update({"status": "processed"}).eq("id", file_id).execute()
+            await run_in_threadpool(lambda: supabase.table("athlete_files").update({"status": "processed"}).eq("id", file_id).execute())
             row["status"] = "processed"
         except Exception:
             pass
@@ -699,11 +700,12 @@ async def coach_upload_athlete_file(
     storage_path = f"{athlete_id}/{file_id}/{original_filename}"
 
     try:
-        supabase.storage.from_("athlete-files").upload(
+        _ct = file.content_type or "application/octet-stream"
+        await run_in_threadpool(lambda: supabase.storage.from_("athlete-files").upload(
             path=storage_path,
             file=file_bytes,
-            file_options={"content-type": file.content_type or "application/octet-stream"},
-        )
+            file_options={"content-type": _ct},
+        ))
     except Exception as exc:
         logger.error("[coa66] Storage upload failed for athlete=%s: %s", athlete_id[:8], exc)
         raise HTTPException(status_code=500, detail="File storage failed")
@@ -741,10 +743,10 @@ async def coach_upload_athlete_file(
                 logger.info("[coa66] Coach upload ingestion: file=%s chunks=%d", file_id[:8], count)
             except Exception as exc:
                 logger.error("[coa66] Background ingestion failed: %s", exc)
-        asyncio.ensure_future(_ingest_bg())
+        asyncio.create_task(_ingest_bg())
     else:
         try:
-            supabase.table("athlete_files").update({"status": "processed"}).eq("id", file_id).execute()
+            await run_in_threadpool(lambda: supabase.table("athlete_files").update({"status": "processed"}).eq("id", file_id).execute())
             row["status"] = "processed"
         except Exception:
             pass
