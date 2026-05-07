@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="223" height="223" viewBox="0 0 223 223" aria-label="Andes.IA decorative mosaic">
+  
+  <g>
+    <rect x="0" y="0" width="52" height="52" fill="oklch(0.66 0.135 42)" opacity="0.82"></rect>
+    <rect x="57" y="0" width="52" height="52" fill="oklch(0.42 0.080 200)" opacity="0.88"></rect>
+    <rect x="114" y="0" width="52" height="52" fill="oklch(0.75 0.090 78)" opacity="0.72"></rect>
+    <rect x="171" y="0" width="52" height="52" fill="oklch(0.66 0.135 42)" opacity="0.60"></rect>
+
+    <rect x="0" y="57" width="52" height="52" fill="oklch(0.42 0.080 200)" opacity="0.78"></rect>
+    <rect x="57" y="57" width="52" height="52" fill="oklch(0.75 0.090 78)" opacity="0.70"></rect>
+    <rect x="114" y="57" width="52" height="52" fill="oklch(0.66 0.135 42)" opacity="0.85"></rect>
+    <rect x="171" y="57" width="52" height="52" fill="oklch(0.55 0.050 125)" opacity="0.80"></rect>
+
+    <rect x="0" y="114" width="52" height="52" fill="oklch(0.55 0.050 125)" opacity="0.75"></rect>
+    <rect x="57" y="114" width="52" height="52" fill="oklch(0.66 0.135 42)" opacity="0.90"></rect>
+    <rect x="114" y="114" width="52" height="52" fill="oklch(0.42 0.080 200)" opacity="0.68"></rect>
+    <rect x="171" y="114" width="52" height="52" fill="oklch(0.75 0.090 78)" opacity="0.78"></rect>
+
+    <rect x="0" y="171" width="52" height="52" fill="oklch(0.75 0.090 78)" opacity="0.65"></rect>
+    <rect x="57" y="171" width="52" height="52" fill="oklch(0.55 0.050 125)" opacity="0.82"></rect>
+    <rect x="114" y="171" width="52" height="52" fill="oklch(0.66 0.135 42)" opacity="0.88"></rect>
+    <rect x="171" y="171" width="52" height="52" fill="oklch(0.42 0.080 200)" opacity="0.72"></rect>
+  </g>
+</svg>

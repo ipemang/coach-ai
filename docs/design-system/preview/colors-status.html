@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Status colors</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  body { background: var(--parchment); padding: 18px; }
+  .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .col h4 { font: var(--t-eyebrow); text-transform: uppercase; letter-spacing: 0.16em; color: var(--ink-mute); margin-bottom: 8px; font-size: 10px; }
+  .tile {
+    height: 70px; border: 1px solid var(--rule-soft); border-radius: 2px;
+    display: grid; place-items: center;
+    font-family: var(--serif); font-size: 24px;
+  }
+  .legend { font: var(--t-display-italic); font-size: 13px; color: var(--ink-soft); margin-top: 10px; }
+  .label { font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; margin-top: 6px; opacity: 0.8; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="col">
+      <h4>Done</h4>
+      <div class="tile" style="background: var(--aegean-wash); border-color: var(--aegean-soft); color: var(--aegean-deep)">12</div>
+      <div class="label" style="color: var(--aegean-deep)">aegean · session complete</div>
+    </div>
+    <div class="col">
+      <h4>Today</h4>
+      <div class="tile" style="background: var(--ochre-soft); border-color: oklch(0.78 0.07 80); color: oklch(0.40 0.08 75); font-weight: 600">10</div>
+      <div class="label" style="color: oklch(0.40 0.08 75)">ochre · happening now</div>
+    </div>
+    <div class="col">
+      <h4>Planned</h4>
+      <div class="tile" style="background: var(--olive-wash); border-color: oklch(0.80 0.04 125); color: var(--olive-deep)">8</div>
+      <div class="label" style="color: var(--olive-deep)">olive · scheduled</div>
+    </div>
+    <div class="col">
+      <h4>Missed</h4>
+      <div class="tile" style="background: var(--terracotta-soft); border-color: oklch(0.80 0.08 45); color: var(--terracotta-deep)">—</div>
+      <div class="label" style="color: var(--terracotta-deep)">terracotta · skipped / late</div>
+    </div>
+  </div>
+  <p class="legend">Status colors are fixed — never remap. They appear on week tiles, chips, and athlete cards across both surfaces.</p>
+</body>
+</html>
