@@ -101,14 +101,15 @@ def handle_answer(
     display_name: str,
     current_state: dict,
     answer_text: str,
-) -> tuple[str | None, bool]:
+) -> tuple[str | None, bool, str | None]:
     """
     Process an athlete's answer to the current pulse question.
 
     Returns:
-        (reply_text, is_complete)
+        (reply_text, is_complete, coach_summary)
         - reply_text: the next question to send, OR the wrap-up "Thanks" message
         - is_complete: True when all 3 answers are collected and session is stored
+        - coach_summary: AI-generated summary for the coach (only when is_complete=True)
     """
     pulse_state = current_state.get("morning_pulse_state", {})
     questions: list[str] = pulse_state.get("questions") or DEFAULT_QUESTIONS
@@ -142,7 +143,7 @@ def handle_answer(
             "[morning_pulse] Athlete=%s answered Q%d, sending Q%d",
             athlete_id[:8], q_idx, next_q_idx,
         )
-        return next_q_text, False
+        return next_q_text, False, None
 
     else:
         # All questions answered — generate summary, persist session, clear state
@@ -156,7 +157,7 @@ def handle_answer(
             "Your coach can see this — keep it up."
         )
         logger.info("[morning_pulse] Session complete for athlete=%s", athlete_id[:8])
-        return thanks, True
+        return thanks, True, summary
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

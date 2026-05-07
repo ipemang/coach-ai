@@ -38,20 +38,43 @@ class WhatsAppGraphClient:
         self.phone_number_id = phone_number_id
         self.graph_api_version = "v19.0"
 
+    @staticmethod
+    def _normalize_e164(phone: str) -> str:
+        """Normalize a phone number to E.164 format required by Meta Graph API.
+
+        Meta requires numbers like +12025551234 — with the leading '+' and
+        country code. Numbers stored without '+' (e.g. '12025551234') or
+        without country code (e.g. '2025551234') cause messages to sit as
+        'pending' and never deliver.
+        """
+        digits = "".join(ch for ch in phone if ch.isdigit())
+        if not digits:
+            return phone  # can't normalize — return as-is and let Meta error
+        if len(digits) == 10:
+            # Assume US/Canada
+            digits = f"1{digits}"
+        # Always prefix with +
+        return f"+{digits}"
+
     async def send_message(self, to: str, body: str, **kwargs: Any) -> dict[str, Any]:
         if not self.access_token or not self.phone_number_id:
             raise RuntimeError("WhatsApp client is not configured")
 
+        # Normalize to E.164 — Meta requires '+COUNTRYCODE...' format
+        to_normalized = self._normalize_e164(to)
+        if to_normalized != to:
+            logger.info("[whatsapp] Normalized phone %r → %r", to[:4] + "***", to_normalized[:4] + "***")
+
         url = f"https://graph.facebook.com/{self.graph_api_version}/{self.phone_number_id}/messages"
         payload: dict[str, Any] = {
             "messaging_product": "whatsapp",
-            "to": to,
+            "to": to_normalized,
             "type": "text",
             "text": {"body": body},
         }
         payload.update(kwargs)
 
-        logger.info("[whatsapp] Sending message to %s via %s", to, url)
+        logger.info("[whatsapp] Sending message to %s via %s", to_normalized[:4] + "***", url)
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
@@ -114,6 +137,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         whatsapp_service.scope = scope
         logger.info("[startup] WhatsApp client initialized")
+        # Warn if COACH_WHATSAPP_NUMBER is missing — coach will never receive
+        # athlete message notifications or morning pulse summaries.
+        if not settings.coach_whatsapp_number:
+            logger.warning(
+                "[startup] COACH_WHATSAPP_NUMBER is not set — coach will not receive "
+                "WhatsApp notifications when athletes send messages. "
+                "Set COACH_WHATSAPP_NUMBER in Railway environment variables (E.164 format: +12025551234). "
+                "Alternatively, ensure coaches.whatsapp_number is populated in Supabase."
+            )
     else:
         logger.warning("[startup] WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID not set — WhatsApp disabled")
     app.state.whatsapp_client = whatsapp_client

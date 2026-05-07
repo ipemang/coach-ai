@@ -1427,7 +1427,7 @@ async def _handle_athlete_message(
         cs = athlete.current_state or {}
         pulse_state = cs.get("morning_pulse_state")
         if pulse_state and is_session_active(pulse_state):
-            reply_text, is_complete = handle_answer(
+            reply_text, is_complete, coach_summary = handle_answer(
                 supabase=supabase,
                 athlete_id=athlete.athlete_id,
                 coach_id=athlete.coach_id,
@@ -1441,6 +1441,29 @@ async def _handle_athlete_message(
                 "[COA-103] Pulse response processed for athlete=%s complete=%s",
                 athlete.athlete_id[:8], is_complete,
             )
+            # COA-103: Notify coach when the full pulse session is complete.
+            # Previously the coach received nothing — they had no idea what the
+            # athlete said until they opened the dashboard.
+            if is_complete and coach_summary:
+                coach_wa = athlete.coach_whatsapp_number
+                if coach_wa:
+                    athlete_name = athlete.display_name or "Your athlete"
+                    coach_notification = (
+                        f"📊 Morning pulse complete — {athlete_name}:\n"
+                        f"{coach_summary}\n\n"
+                        f"View full session in the dashboard."
+                    )
+                    await _send_whatsapp_message(request, coach_wa, coach_notification)
+                    logger.info(
+                        "[COA-103] Sent pulse summary to coach for athlete=%s",
+                        athlete.athlete_id[:8],
+                    )
+                else:
+                    logger.warning(
+                        "[COA-103] Pulse complete for athlete=%s but no coach WhatsApp — "
+                        "set COACH_WHATSAPP_NUMBER in Railway or coaches.whatsapp_number in DB",
+                        athlete.athlete_id[:8],
+                    )
             return WhatsAppWebhookResponse(
                 status="pulse_answered",
                 athlete_id=athlete.athlete_id,
@@ -1682,7 +1705,12 @@ async def _handle_athlete_message(
             logger.info("[webhook] Sent coach review notification for athlete=%s workout_context=%s",
                         athlete.athlete_id, workout_context)
         else:
-            logger.warning("[webhook] No coach WhatsApp number found — skipping coach notification")
+            logger.warning(
+                "[webhook] No coach WhatsApp number found — skipping coach notification. "
+                "Fix: set coaches.whatsapp_number in Supabase for coach_id=%s "
+                "OR set COACH_WHATSAPP_NUMBER env var in Railway (E.164: +12025551234).",
+                athlete.coach_id,
+            )
 
     # 7. COA-43: Persist check-in state to memory_states so future AI calls have
     # a running record of this athlete's readiness trends. Wrapped in try/except
