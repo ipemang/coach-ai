@@ -311,54 +311,199 @@ class WhatsAppTaskAdapter:
     def _fetch_athlete_context(self, athlete_id: str) -> dict[str, Any]:
         """
         Return a dict with:
-          current_state  – oura_readiness_score, oura_avg_hrv, oura_sleep_score,
-                           predictive_flags, training_phase
-          last_checkin   – most recent athlete message text
-          last_reply     – most recent coach reply or approved AI draft
+          current_state   – oura_readiness_score, oura_avg_hrv, oura_sleep_score,
+                            predictive_flags, training_phase
+          stable_profile  – sport, target_race, injury_history, coach_notes
+          memory_summary  – rolling AI memory summary
+          last_checkin    – most recent athlete message text
+          last_reply      – most recent coach reply or approved AI draft
+          recent_workouts – last 5 workouts (type, date, distance, notes, status)
         Falls back to empty dict on any error.
         """
         import logging as _logging
+        from datetime import date, timedelta
         _logger = _logging.getLogger(__name__)
         ctx: dict[str, Any] = {}
+
+        # ── Athlete profile + biometrics ──────────────────────────────────────
         try:
             athlete_rows = self._sync_rows(
                 self.supabase_client.table("athletes")
-                .select("current_state, stable_profile")
+                .select("current_state, stable_profile, memory_summary")
                 .eq("id", athlete_id)
                 .limit(1)
             )
             if athlete_rows:
                 ctx["current_state"] = athlete_rows[0].get("current_state") or {}
                 ctx["stable_profile"] = athlete_rows[0].get("stable_profile") or {}
+                ctx["memory_summary"] = (athlete_rows[0].get("memory_summary") or "").strip()
         except Exception as exc:
             _logger.warning("[checkin] Could not fetch athlete row for %s: %s", athlete_id, exc)
 
+        # ── Recent conversation (last 3 check-ins + coach replies) ────────────
         try:
             suggestion_rows = self._sync_rows(
                 self.supabase_client.table("suggestions")
                 .select("id, suggestion_text, coach_reply, status, created_at")
                 .eq("athlete_id", athlete_id)
                 .order("created_at", desc=True)
-                .limit(2)
+                .limit(3)
             )
-            if suggestion_rows:
-                latest = suggestion_rows[0]
-                # Get the athlete's own message for that suggestion
+            thread: list[dict[str, str]] = []
+            for row in suggestion_rows:
                 checkin_rows = self._sync_rows(
                     self.supabase_client.table("athlete_checkins")
                     .select("message_text")
-                    .eq("suggestion_id", latest["id"])
+                    .eq("suggestion_id", row["id"])
                     .limit(1)
                 )
-                ctx["last_checkin"] = (checkin_rows[0].get("message_text") or "").strip() if checkin_rows else ""
-                coach_reply = latest.get("coach_reply") or ""
-                if not coach_reply and latest.get("status") == "approved":
-                    coach_reply = (latest.get("suggestion_text") or "")[:200]
-                ctx["last_reply"] = coach_reply.strip()
+                athlete_msg = (checkin_rows[0].get("message_text") or "").strip() if checkin_rows else ""
+                coach_reply = (row.get("coach_reply") or "").strip()
+                if not coach_reply and row.get("status") == "approved":
+                    coach_reply = (row.get("suggestion_text") or "")[:200].strip()
+                if athlete_msg:
+                    thread.append({"athlete": athlete_msg, "coach": coach_reply})
+            ctx["conversation_thread"] = thread
+            # Backward compat — keep last_checkin / last_reply for _build_checkin_message
+            if thread:
+                ctx["last_checkin"] = thread[0].get("athlete", "")
+                ctx["last_reply"] = thread[0].get("coach", "")
         except Exception as exc:
             _logger.warning("[checkin] Could not fetch conversation thread for %s: %s", athlete_id, exc)
 
+        # ── Recent workouts (last 5 days) ─────────────────────────────────────
+        try:
+            since = (date.today() - timedelta(days=5)).isoformat()
+            workout_rows = self._sync_rows(
+                self.supabase_client.table("workouts")
+                .select("session_type, scheduled_date, distance_km, duration_min, coaching_notes, status, title")
+                .eq("athlete_id", athlete_id)
+                .gte("scheduled_date", since)
+                .order("scheduled_date", desc=True)
+                .limit(5)
+            )
+            ctx["recent_workouts"] = workout_rows
+        except Exception as exc:
+            _logger.warning("[checkin] Could not fetch recent workouts for %s: %s", athlete_id, exc)
+
         return ctx
+
+    # ------------------------------------------------------------------
+    # Personalized question generation (LLM-driven)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _generate_personalized_questions(display_name: str, ctx: dict[str, Any]) -> list[str]:
+        """
+        Use the LLM to generate 3 personalized check-in questions based on:
+        - Recent workouts (type, intensity, date)
+        - Last conversation thread (what athlete said, what coach replied)
+        - Biometrics (readiness, HRV, sleep)
+        - Memory summary (persistent athlete notes)
+
+        Falls back to DEFAULT_QUESTIONS if the LLM call fails.
+        Examples of what this produces:
+          "How are your legs feeling after that threshold run yesterday?"
+          "You mentioned tight calves last time — is that still bothering you?"
+          "Your readiness was 58 this morning — how's the energy level?"
+        """
+        import logging as _logging
+        _logger = _logging.getLogger(__name__)
+
+        from app.services.morning_pulse import DEFAULT_QUESTIONS
+
+        try:
+            from app.services.llm_client import LLMClient
+
+            cs = ctx.get("current_state") or {}
+            sp = ctx.get("stable_profile") or {}
+            memory = ctx.get("memory_summary") or ""
+            workouts = ctx.get("recent_workouts") or []
+            thread = ctx.get("conversation_thread") or []
+
+            # Build workout context block
+            workout_lines = []
+            for w in workouts:
+                wdate = w.get("scheduled_date", "")
+                wtype = w.get("session_type") or w.get("title") or "workout"
+                wdist = f"{w.get('distance_km')}km" if w.get("distance_km") else ""
+                wdur = f"{w.get('duration_min')}min" if w.get("duration_min") else ""
+                wnotes = w.get("coaching_notes") or ""
+                wstatus = w.get("status") or ""
+                line = f"- {wdate}: {wtype} {wdist} {wdur} [{wstatus}]"
+                if wnotes:
+                    line += f" — notes: {wnotes[:80]}"
+                workout_lines.append(line.strip())
+
+            # Build conversation context block
+            conv_lines = []
+            for turn in thread[:2]:
+                if turn.get("athlete"):
+                    conv_lines.append(f"Athlete said: \"{turn['athlete'][:120]}\"")
+                if turn.get("coach"):
+                    conv_lines.append(f"Coach replied: \"{turn['coach'][:120]}\"")
+
+            # Build biometrics block
+            bio_parts = []
+            if cs.get("oura_readiness_score") is not None:
+                bio_parts.append(f"Readiness: {int(cs['oura_readiness_score'])}/100")
+            if cs.get("oura_avg_hrv") is not None:
+                bio_parts.append(f"HRV: {int(cs['oura_avg_hrv'])}ms")
+            if cs.get("oura_sleep_score") is not None:
+                bio_parts.append(f"Sleep score: {int(cs['oura_sleep_score'])}/100")
+
+            context_block = "\n".join(filter(None, [
+                f"Athlete name: {display_name}",
+                f"Sport: {sp.get('sport') or 'endurance'}",
+                f"Target race: {sp.get('target_race') or 'n/a'}",
+                ("Recent workouts:\n" + "\n".join(workout_lines)) if workout_lines else "",
+                ("Last conversation:\n" + "\n".join(conv_lines)) if conv_lines else "",
+                ("Biometrics today: " + ", ".join(bio_parts)) if bio_parts else "",
+                (f"Athlete memory notes: {memory[:300]}") if memory else "",
+            ]))
+
+            client = LLMClient()
+            resp = client.chat_completions(
+                system=(
+                    "You are an expert endurance sports coach AI. "
+                    "Generate exactly 3 personalized morning check-in questions for the athlete. "
+                    "Rules:\n"
+                    "1. Each question must be specific — reference an actual recent workout, "
+                    "complaint, or metric if available. NOT generic.\n"
+                    "2. Examples of GOOD questions:\n"
+                    "   - 'How are your legs feeling after yesterday's threshold run?'\n"
+                    "   - 'You mentioned tight calves last time — is that still an issue?'\n"
+                    "   - 'Your readiness was 62 this morning — how's the energy?'\n"
+                    "3. Examples of BAD (generic) questions:\n"
+                    "   - 'How are you feeling today?'\n"
+                    "   - 'How did you sleep?'\n"
+                    "4. Keep each question under 20 words, conversational, no jargon.\n"
+                    "5. Return ONLY a JSON array of 3 strings. No other text.\n"
+                    "   Example: [\"Q1\", \"Q2\", \"Q3\"]"
+                ),
+                user=f"Athlete context:\n{context_block}\n\nGenerate 3 personalized questions:",
+            )
+            import json as _json
+            raw = resp.content.strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+                raw = raw.strip()
+            questions = _json.loads(raw)
+            if isinstance(questions, list) and len(questions) >= 1 and all(isinstance(q, str) for q in questions):
+                # Pad to 3 if LLM returned fewer
+                while len(questions) < 3:
+                    questions.append(DEFAULT_QUESTIONS[len(questions)])
+                _logger.info(
+                    "[checkin] Generated personalized questions for %s: %s",
+                    display_name, questions
+                )
+                return questions[:3]
+        except Exception as exc:
+            _logger.warning("[checkin] Personalized question generation failed, using defaults: %s", exc)
+
+        return list(DEFAULT_QUESTIONS)
 
     # ------------------------------------------------------------------
     # COA-39: build a personalised check-in message
@@ -459,23 +604,24 @@ class WhatsAppTaskAdapter:
             except Exception as exc:
                 _logger.warning("[checkin] Context fetch failed for %s — using generic message: %s", athlete_id, exc)
 
-        # COA-103: Use structured morning pulse (3-question sequence) if the athlete
-        # has morning_pulse_questions configured. Otherwise fall back to the legacy
-        # open-ended check-in message.
+        # COA-103: Use structured morning pulse (3-question sequence).
+        # Questions are now LLM-generated and personalized to the athlete's recent
+        # workouts, conversation history, and biometrics. Falls back to generic
+        # questions if LLM call fails.
         use_pulse = False
         pulse_q1: str | None = None
         try:
-            from app.services.morning_pulse import get_athlete_questions, start_session
+            from app.services.morning_pulse import start_session
             athlete_rows = self._sync_rows(
                 self.supabase_client.table("athletes")
-                .select("morning_pulse_questions, current_state")
+                .select("current_state")
                 .eq("id", athlete_id)
                 .limit(1)
             ) if athlete_id and self.supabase_client else []
             if athlete_rows:
-                athlete_row = athlete_rows[0]
-                questions = get_athlete_questions(athlete_row)
-                current_state = athlete_row.get("current_state") or {}
+                current_state = athlete_rows[0].get("current_state") or {}
+                # Generate personalized questions using full athlete context already fetched
+                questions = self._generate_personalized_questions(display_name, ctx)
                 pulse_q1 = start_session(
                     supabase=self.supabase_client,
                     athlete_id=athlete_id,
@@ -484,8 +630,9 @@ class WhatsAppTaskAdapter:
                 )
                 use_pulse = True
                 _logger.info(
-                    "[COA-103] Using morning pulse for athlete=%s Q1 set",
+                    "[COA-103] Using personalized morning pulse for athlete=%s Q1=%s",
                     athlete_id[:8] if athlete_id else "?",
+                    pulse_q1[:60] if pulse_q1 else "?",
                 )
         except Exception as pulse_exc:
             _logger.warning("[COA-103] Pulse init failed for %s, falling back: %s", athlete_id, pulse_exc)

@@ -10,6 +10,12 @@
   },
   "crons": [
     {
+      "name": "checkin-scheduler",
+      "schedule": "*/30 * * * *",
+      "command": "cd /app && python run_checkin_scheduler.py",
+      "comment": "COA-29: Send personalized morning check-in WhatsApp messages. Runs every 30 min — timezone-aware scheduler fires only when athlete is in their send window."
+    },
+    {
       "name": "oura-daily-sync",
       "schedule": "0 6 * * *",
       "command": "cd /app/backend && python -m app.services.oura_service",
