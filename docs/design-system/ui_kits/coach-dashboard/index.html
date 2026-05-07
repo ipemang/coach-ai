@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Andes.IA — Coach dashboard</title>
+<link rel="icon" href="../../assets/andes-favicon.svg"/>
+<link rel="stylesheet" href="../../colors_and_type.css"/>
+<style>
+  body { background: var(--parchment); color: var(--ink); }
+  .nav {
+    position: sticky; top: 0; z-index: 30;
+    background: var(--linen);
+    border-bottom: 1px solid var(--rule);
+    padding: 12px 28px;
+    display: flex; align-items: center; gap: 22px;
+  }
+  .nav .word { font-family: var(--serif); font-weight: 500; font-size: 22px; letter-spacing: -0.01em; }
+  .nav .word i { color: var(--terracotta-deep); font-style: normal; }
+  .nav .crumb { color: var(--ink-mute); font: var(--t-eyebrow); }
+  .nav .right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+
+  .tabs { padding: 0 28px; border-bottom: 1px solid var(--rule); background: var(--linen); display: flex; }
+
+  /* Greeting band */
+  .greet { padding: 36px 28px 16px; max-width: 1280px; margin: 0 auto; display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: end; }
+  .greet h1 { font: var(--t-display-2); letter-spacing: -0.01em; }
+  .greet h1 i { font-style: italic; color: var(--ink-soft); font-weight: 500; }
+  .greet .aside { font: var(--t-display-italic); color: var(--ink-soft); margin-top: 8px; }
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .kpi { background: var(--linen); padding: 14px 22px; min-width: 130px; text-align: right; }
+  .kpi .lbl { font: var(--t-eyebrow); color: var(--ink-mute); }
+  .kpi .v { font-family: var(--serif); font-weight: 500; font-size: 32px; line-height: 1; font-feature-settings: "lnum","tnum"; margin-top: 6px; }
+  .kpi .v.terra { color: var(--terracotta-deep); }
+  .kpi .v.aegean { color: var(--aegean-deep); }
+  .kpi .v small { font-family: var(--body); font-size: 12px; color: var(--ink-mute); margin-left: 4px; }
+
+  /* Main grid */
+  .main { max-width: 1280px; margin: 8px auto 64px; padding: 0 28px; display: grid; grid-template-columns: 1.3fr 0.7fr; gap: 18px; }
+
+  /* Roster */
+  .section-head { display: flex; align-items: end; gap: 14px; margin-bottom: 12px; }
+  .section-head h2 { font-family: var(--serif); font-weight: 500; font-size: 24px; }
+  .section-head .ca-eyebrow { color: var(--ink-mute); }
+  .section-head .right { margin-left: auto; display: flex; gap: 8px; }
+
+  .roster { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .athlete { padding: 16px 18px; }
+  .athlete .top { display: grid; grid-template-columns: 44px 1fr auto; gap: 14px; align-items: center; }
+  .athlete .name { font-family: var(--serif); font-size: 19px; }
+  .athlete .meta { font: var(--t-eyebrow); color: var(--ink-mute); margin-top: 3px; }
+  .athlete .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 14px; max-width: 460px; }
+  .week-tile { background: var(--parchment-2); border-radius: 2px; border: 1px solid var(--rule-soft); min-height: 32px; display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:12px;color:var(--ink-soft); }
+  .week-tile.done { background: var(--aegean-wash); border-color: var(--aegean-soft); color: var(--aegean-deep); }
+  .week-tile.missed { background: var(--terracotta-soft); border-color: oklch(0.80 0.08 45); color: var(--terracotta-deep); }
+  .week-tile.planned { background: var(--olive-wash); border-color: oklch(0.80 0.04 125); color: var(--olive-deep); }
+  .week-tile.today { background: var(--ochre-soft); border-color: oklch(0.78 0.07 80); color: oklch(0.40 0.08 75); font-weight: 600; }
+  .athlete .quote { border-left: 2px solid var(--ochre); padding: 4px 0 4px 12px; margin-top: 14px; font-family: var(--serif); font-style: italic; font-size: 13.5px; color: var(--ink-soft); line-height: 1.55; }
+
+  /* Queue side panel */
+  .queue { padding: 18px 20px; }
+  .queue h3 { font-family: var(--serif); font-size: 22px; }
+  .queue .item { padding: 14px 0; border-top: 1px dashed var(--rule-soft); }
+  .queue .item:first-of-type { border-top: none; }
+  .queue .item .who { display: flex; align-items: center; gap: 10px; }
+  .queue .item .who .nm { font-family: var(--serif); font-size: 16px; }
+  .queue .item .body { font: var(--t-body-sm); color: var(--ink-soft); margin-top: 8px; padding-left: 0; line-height: 1.55; }
+  .queue .item .reply { background: var(--parchment-2); border: 1px solid var(--rule-soft); border-radius: 2px; padding: 10px 12px; margin-top: 10px; }
+  .queue .item .reply .ca-eyebrow { color: var(--aegean-deep); font-size: 9px; }
+  .queue .item .reply p { font: var(--t-body-sm); color: var(--ink); margin-top: 4px; }
+  .queue .item .acts { margin-top: 10px; display: flex; gap: 6px; }
+
+  .empty { padding: 28px 20px; text-align: center; }
+  .empty .ca-display { font-size: 18px; }
+  .empty .aside { font: var(--t-display-italic); color: var(--ink-soft); margin-top: 8px; }
+
+  /* Search field in nav */
+  .search { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: var(--parchment); border: 1px solid var(--rule); border-radius: 2px; min-width: 220px; }
+  .search input { border: none; background: transparent; outline: none; font: var(--t-body-sm); width: 100%; color: var(--ink); }
+  .search input::placeholder { color: var(--ink-faint); }
+</style>
+</head>
+<body data-screen-label="Coach dashboard — roster">
+  <header class="nav">
+    <img src="../../assets/andes-logo.svg" width="28" height="28" alt=""/>
+    <div class="word">Andes<i>.</i>IA</div>
+    <span class="crumb">Coach portal · Felipe</span>
+    <div class="right">
+      <div class="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--ink-mute)"><circle cx="10" cy="10" r="6"/><path d="M15 15 L20 20"/></svg>
+        <input placeholder="Find an athlete or workout…"/>
+      </div>
+      <button class="ca-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg> Add athlete</button>
+      <div class="ca-avatar" style="width:32px;height:32px;font-size:11px;background:var(--terracotta-soft);border-color:oklch(0.80 0.08 45);color:var(--terracotta-deep)"><span>FD</span></div>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="ca-tab active">Roster</button>
+    <button class="ca-tab">Training queue</button>
+    <button class="ca-tab">Plans</button>
+    <button class="ca-tab">AI Voice</button>
+    <button class="ca-tab">Office hours</button>
+    <button class="ca-tab">Settings</button>
+  </nav>
+
+  <section class="greet">
+    <div>
+      <div class="ca-eyebrow ca-eyebrow-terra">Friday · 7 May</div>
+      <h1 class="ca-display" style="margin-top:8px;line-height:1.15">Good morning, Felipe.<br/><i>Here is the day, quietly.</i></h1>
+      <p class="aside">3 messages waiting on you. Two athletes are racing this weekend — Sara and Daniel.</p>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Athletes</div><div class="v">22</div></div>
+      <div class="kpi"><div class="lbl">In queue</div><div class="v terra">3 <small>pending</small></div></div>
+      <div class="kpi"><div class="lbl">This week</div><div class="v aegean">86<small>%</small></div></div>
+    </div>
+  </section>
+
+  <main class="main">
+    <section>
+      <div class="section-head">
+        <h2 class="ca-display">Roster</h2>
+        <span class="ca-eyebrow">22 active</span>
+        <div class="right">
+          <button class="ca-btn ca-btn-ghost">Sort: last activity</button>
+          <button class="ca-btn ca-btn-ghost">Filter</button>
+        </div>
+      </div>
+
+      <div class="roster">
+        <article class="tessera athlete">
+          <div class="top">
+            <div class="ca-avatar" style="width:44px;height:44px;font-size:14px;background:var(--aegean-wash);border-color:var(--aegean-soft);color:var(--aegean-deep)"><span>PT</span></div>
+            <div>
+              <div class="name">Patrick Torres</div>
+              <div class="meta">Triathlon · Build phase · Wk 8 · 38 yrs</div>
+            </div>
+            <span class="ca-chip ca-chip-terra">1 pending</span>
+          </div>
+          <div class="week">
+            <div class="week-tile done">8</div>
+            <div class="week-tile done">12</div>
+            <div class="week-tile missed">—</div>
+            <div class="week-tile done">10</div>
+            <div class="week-tile today">15</div>
+            <div class="week-tile planned">22</div>
+            <div class="week-tile planned">6</div>
+          </div>
+          <div class="quote">"Legs felt heavy on the long run today, but held target pace. Should I rest tomorrow?"</div>
+        </article>
+
+        <article class="tessera athlete">
+          <div class="top">
+            <div class="ca-avatar" style="width:44px;height:44px;font-size:14px;background:var(--terracotta-soft);border-color:oklch(0.80 0.08 45);color:var(--terracotta-deep)"><span>SL</span></div>
+            <div>
+              <div class="name">Sara Lima</div>
+              <div class="meta">Marathon · Race week · Race Sun · 32 yrs</div>
+            </div>
+            <span class="ca-chip ca-chip-aegean">Caught up</span>
+          </div>
+          <div class="week">
+            <div class="week-tile done">7</div>
+            <div class="week-tile done">5</div>
+            <div class="week-tile done">8</div>
+            <div class="week-tile done">5</div>
+            <div class="week-tile today">3</div>
+            <div class="week-tile planned">—</div>
+            <div class="week-tile planned">42</div>
+          </div>
+          <div class="quote">"Race kit packed. Slept 7h30. Resting HR steady. Excited."</div>
+        </article>
+
+        <article class="tessera athlete">
+          <div class="top">
+            <div class="ca-avatar" style="width:44px;height:44px;font-size:14px;background:var(--ochre-soft);border-color:oklch(0.80 0.08 80);color:oklch(0.40 0.08 75)"><span>MV</span></div>
+            <div>
+              <div class="name">Marcos V.</div>
+              <div class="meta">Cycling · Base phase · Wk 3 · 45 yrs</div>
+            </div>
+            <span class="ca-chip ca-chip-terra">2 missed</span>
+          </div>
+          <div class="week">
+            <div class="week-tile done">60</div>
+            <div class="week-tile missed">—</div>
+            <div class="week-tile missed">—</div>
+            <div class="week-tile done">90</div>
+            <div class="week-tile today">45</div>
+            <div class="week-tile planned">120</div>
+            <div class="week-tile planned">30</div>
+          </div>
+          <div class="quote">"Work travel hit again. Will be back on the bike Saturday — promise."</div>
+        </article>
+
+        <article class="tessera athlete">
+          <div class="top">
+            <div class="ca-avatar" style="width:44px;height:44px;font-size:14px;background:var(--olive-soft);border-color:oklch(0.75 0.05 125);color:var(--olive-deep)"><span>DR</span></div>
+            <div>
+              <div class="name">Daniel R.</div>
+              <div class="meta">Trail · Race week · Race Sat · 29 yrs</div>
+            </div>
+            <span class="ca-chip ca-chip-olive">Tapering</span>
+          </div>
+          <div class="week">
+            <div class="week-tile done">10</div>
+            <div class="week-tile done">8</div>
+            <div class="week-tile done">6</div>
+            <div class="week-tile done">5</div>
+            <div class="week-tile today">3</div>
+            <div class="week-tile planned">50</div>
+            <div class="week-tile planned">—</div>
+          </div>
+          <div class="quote">"Felt sluggish in the shakeout. Normal for taper week, right?"</div>
+        </article>
+      </div>
+    </section>
+
+    <aside>
+      <article class="ca-panel queue">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <h3 class="ca-display" style="white-space:nowrap;flex:0 1 auto">Training queue</h3>
+          <span class="ca-chip ca-chip-terra" style="margin-left:auto">3 pending</span>
+        </div>
+
+        <div class="item">
+          <div class="who">
+            <div class="ca-avatar" style="width:30px;height:30px;font-size:11px;background:var(--aegean-wash);border-color:var(--aegean-soft);color:var(--aegean-deep)"><span>PT</span></div>
+            <div class="nm">Patrick Torres</div>
+            <span class="ca-eyebrow" style="margin-left:auto">2m ago</span>
+          </div>
+          <p class="body">"Legs felt heavy on the long run today, but held target pace. Should I rest tomorrow?"</p>
+          <div class="reply">
+            <div class="ca-eyebrow ca-eyebrow-aegean">Suggested reply</div>
+            <p>Heavy legs after a long run at target pace is a great sign — you're adapting. Take Tuesday easy, then we'll see how Thursday's intervals feel. Trust the process.</p>
+          </div>
+          <div class="acts">
+            <button class="ca-btn ca-btn-primary" style="flex:1;justify-content:center">Approve & send</button>
+            <button class="ca-btn">Edit</button>
+          </div>
+        </div>
+
+        <div class="item">
+          <div class="who">
+            <div class="ca-avatar" style="width:30px;height:30px;font-size:11px;background:var(--ochre-soft);border-color:oklch(0.80 0.08 80);color:oklch(0.40 0.08 75)"><span>MV</span></div>
+            <div class="nm">Marcos V.</div>
+            <span class="ca-eyebrow" style="margin-left:auto">14m ago</span>
+          </div>
+          <p class="body">"Work travel hit again. Will be back on the bike Saturday."</p>
+          <div class="reply">
+            <div class="ca-eyebrow ca-eyebrow-aegean">Suggested reply</div>
+            <p>No worries — life happens. I'll trim Friday's session so Saturday's ride feels right. Send me your hotel city and I'll find a 30-min hotel room circuit, just in case.</p>
+          </div>
+          <div class="acts">
+            <button class="ca-btn ca-btn-primary" style="flex:1;justify-content:center">Approve & send</button>
+            <button class="ca-btn">Edit</button>
+          </div>
+        </div>
+
+        <div class="item">
+          <div class="who">
+            <div class="ca-avatar" style="width:30px;height:30px;font-size:11px;background:var(--olive-soft);border-color:oklch(0.75 0.05 125);color:var(--olive-deep)"><span>DR</span></div>
+            <div class="nm">Daniel R.</div>
+            <span class="ca-eyebrow" style="margin-left:auto">42m ago</span>
+          </div>
+          <p class="body">"Felt sluggish in the shakeout. Normal for taper week, right?"</p>
+          <div class="reply">
+            <div class="ca-eyebrow ca-eyebrow-aegean">Suggested reply</div>
+            <p>Yes — sluggish in taper is the body banking energy for race day. Sleep well tonight, hydrate, and trust what's already in your legs. You're ready.</p>
+          </div>
+          <div class="acts">
+            <button class="ca-btn ca-btn-primary" style="flex:1;justify-content:center">Approve & send</button>
+            <button class="ca-btn">Edit</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="ca-panel" style="padding:18px 20px;margin-top:14px">
+        <div class="ca-eyebrow ca-eyebrow-terra">Office hours · today</div>
+        <h3 class="ca-display" style="font-size:20px;margin-top:6px">3 pm — Sara Lima</h3>
+        <p style="font:var(--t-body-sm);color:var(--ink-soft);margin-top:6px">Race-week call. 30 min. WhatsApp video.</p>
+        <hr class="ca-hairline" style="margin:14px 0"/>
+        <div class="ca-eyebrow">Next free slot</div>
+        <p style="font-family:var(--serif);font-size:18px;margin-top:6px">Mon, 11 May · 10:30 am</p>
+        <button class="ca-btn ca-btn-ghost" style="margin-top:10px;padding-left:0">Open calendar →</button>
+      </article>
+
+      <div class="ca-ornament" style="margin:18px 0">◆ ◆ ◆</div>
+      <div class="empty">
+        <div class="ca-display">All else, quiet.</div>
+        <div class="aside">No alerts. No overdue plans.</div>
+      </div>
+    </aside>
+  </main>
+</body>
+</html>

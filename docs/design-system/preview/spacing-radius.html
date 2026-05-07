@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><title>Spacing & radius</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>body{background:var(--parchment);padding:18px}.lbl{font:var(--t-eyebrow);text-transform:uppercase;color:var(--ink-mute);font-size:10px;margin-bottom:6px;letter-spacing:.16em}.row{display:flex;gap:10px;align-items:flex-end;margin-bottom:14px}.box{background:var(--linen);border:1px solid var(--rule);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;color:var(--ink-mute)}</style>
+</head><body>
+  <div class="lbl">Border radius — only 2px or 4px</div>
+  <div class="row">
+    <div class="box" style="width:64px;height:64px;border-radius:2px">2px</div>
+    <div class="box" style="width:64px;height:64px;border-radius:4px">4px</div>
+    <div class="box" style="width:64px;height:64px;border-radius:8px;opacity:.4">8px ✗</div>
+    <div class="box" style="width:64px;height:64px;border-radius:50%;opacity:.4">round ✗</div>
+  </div>
+  <div class="lbl">Spacing scale (in use)</div>
+  <div class="row">
+    <div class="box" style="width:4px;height:32px"></div>
+    <div class="box" style="width:8px;height:32px"></div>
+    <div class="box" style="width:12px;height:32px"></div>
+    <div class="box" style="width:16px;height:32px"></div>
+    <div class="box" style="width:24px;height:32px"></div>
+    <div class="box" style="width:32px;height:32px"></div>
+    <div class="box" style="width:48px;height:32px"></div>
+    <div class="box" style="width:64px;height:32px"></div>
+    <div class="box" style="width:80px;height:32px">80</div>
+  </div>
+</body></html>

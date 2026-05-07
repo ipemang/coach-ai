@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Andes.IA — Sign in</title>
+<link rel="icon" href="../../assets/andes-favicon.svg"/>
+<link rel="stylesheet" href="../../colors_and_type.css"/>
+<style>
+  body { background: var(--parchment); }
+  .brand-content { max-width: 460px; }
+  .brand-content .word { font-family: var(--serif); font-weight: 500; font-size: 32px; letter-spacing: -0.01em; }
+  .brand-content .word i { color: var(--terracotta-deep); font-style: normal; }
+  .brand-content h1 { font: var(--t-display-2); margin-top: 28px; letter-spacing: -0.01em; }
+  .brand-content .lede { font-family: var(--serif); font-style: italic; font-size: 18px; line-height: 1.55; color: var(--ink-soft); margin-top: 16px; }
+  .brand-content .meta { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; }
+
+  .form-card {
+    background: var(--linen);
+    width: 100%;
+    max-width: 380px;
+    margin: 0 auto;
+  }
+  .form-card .word { font-family: var(--serif); font-weight: 500; font-size: 22px; letter-spacing: -0.01em; }
+  .form-card .word i { color: var(--terracotta-deep); font-style: normal; }
+  .form-card h2 { font: var(--t-display-3); margin-top: 22px; }
+  .form-card p.hint { font: var(--t-body-sm); color: var(--ink-soft); margin-top: 6px; }
+  .form-card .field { margin-top: 18px; }
+
+  .gbtn {
+    width: 100%;
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    padding: 11px 14px;
+    background: var(--parchment);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    font-family: var(--body); font-size: 13px; font-weight: 500;
+    color: var(--ink); cursor: pointer; transition: all 160ms ease;
+  }
+  .gbtn:hover { background: var(--linen-deep); border-color: var(--ink-mute); }
+
+  .divider {
+    margin: 22px 0;
+    display: flex; align-items: center; gap: 12px;
+    color: var(--ink-mute);
+    font: var(--t-eyebrow);
+  }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+
+  .footnote { margin-top: 22px; text-align: center; font: var(--t-body-sm); color: var(--ink-soft); }
+  .footnote a { color: var(--terracotta-deep); text-decoration: none; font-weight: 500; }
+  .footnote a:hover { text-decoration: underline; }
+
+  /* mode tabs at top of form */
+  .modes { display: flex; gap: 0; border: 1px solid var(--rule); border-radius: 2px; overflow: hidden; }
+  .modes button {
+    flex: 1; padding: 9px 10px;
+    background: transparent; border: none;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-mute); cursor: pointer; transition: all 160ms ease;
+  }
+  .modes button.active { background: var(--ink); color: var(--parchment); }
+
+  .ornament { color: var(--rule); font-family: var(--serif); font-size: 14px; letter-spacing: 0.6em; }
+</style>
+</head>
+<body data-screen-label="Auth — split sign in">
+  <div class="ca-login-split">
+    <aside class="ca-login-brand mosaic-bg">
+      <div class="brand-content">
+        <div style="display:flex;align-items:center;gap:14px">
+          <img src="../../assets/andes-logo.svg" width="44" height="44" alt=""/>
+          <div class="word">Andes<i>.</i>IA</div>
+        </div>
+
+        <h1 class="ca-display">Welcome back.</h1>
+        <p class="lede">Your athletes are waiting on you. Andes is waiting on you, too — quietly, at the kitchen table.</p>
+
+        <img src="../../assets/andes-mosaic-decorative.svg" width="220" height="220" alt="" style="margin-top:36px;display:block"/>
+
+        <div class="meta">
+          <span class="ca-eyebrow ca-eyebrow-terra">Coach portal</span>
+          <span class="ca-eyebrow">v 0.7 · build 412</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="ca-login-form-panel">
+      <article class="form-card">
+        <div style="display:flex;align-items:center;gap:10px">
+          <img src="../../assets/andes-logo.svg" width="28" height="28" alt=""/>
+          <div class="word">Andes<i>.</i>IA</div>
+        </div>
+
+        <div class="modes" style="margin-top:24px">
+          <button class="active">Sign in</button>
+          <button>Create account</button>
+        </div>
+
+        <h2 class="ca-display">Sign in to your portal</h2>
+        <p class="hint">Use your coaching email — or continue with Google.</p>
+
+        <button class="gbtn" style="margin-top:20px">
+          <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.5 12.3c0-.7-.1-1.4-.2-2.1H12v4h5.9a5 5 0 0 1-2.2 3.3v2.7h3.5c2.1-1.9 3.3-4.7 3.3-7.9z"/><path fill="#34A853" d="M12 23c3 0 5.5-1 7.3-2.7l-3.5-2.7c-1 .7-2.2 1-3.8 1-2.9 0-5.4-2-6.3-4.6H2v2.8A11 11 0 0 0 12 23z"/><path fill="#FBBC04" d="M5.7 13.9a6.6 6.6 0 0 1 0-4.2V6.9H2a11 11 0 0 0 0 9.8l3.7-2.8z"/><path fill="#EA4335" d="M12 5.4c1.6 0 3.1.6 4.2 1.7l3.1-3.1A11 11 0 0 0 2 6.9l3.7 2.8c.9-2.6 3.4-4.3 6.3-4.3z"/></svg>
+          Continue with Google
+        </button>
+
+        <div class="divider"><span>or</span></div>
+
+        <div class="field">
+          <label class="ca-label">Email</label>
+          <input class="ca-input" type="email" placeholder="coach@example.com" value="felipe@deidan.coach"/>
+        </div>
+
+        <div class="field">
+          <label class="ca-label" style="display:flex;justify-content:space-between"><span>Password</span><a href="#" style="color:var(--ink-soft);text-decoration:none;font-size:9.5px;letter-spacing:.14em">Forgot?</a></label>
+          <input class="ca-input" type="password" value="••••••••••"/>
+        </div>
+
+        <button class="ca-btn ca-btn-primary" style="width:100%;margin-top:22px;justify-content:center;padding:11px 16px">Sign in →</button>
+
+        <p class="footnote">No account yet? <a href="#">Create one →</a></p>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

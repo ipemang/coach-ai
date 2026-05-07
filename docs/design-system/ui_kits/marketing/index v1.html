@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Andes.IA — AI for endurance coaches</title>
+<link rel="icon" href="../../assets/andes-favicon.svg"/>
+<link rel="stylesheet" href="../../colors_and_type.css"/>
+<style>
+  body { background: var(--parchment); color: var(--ink); }
+  .nav {
+    position: sticky; top: 0; z-index: 30;
+    background: var(--linen);
+    border-bottom: 1px solid var(--rule);
+    padding: 14px 32px;
+    display: flex; align-items: center; gap: 24px;
+  }
+  .nav .brand { display: flex; align-items: center; gap: 10px; }
+  .nav .word { font-family: var(--serif); font-weight: 500; font-size: 22px; letter-spacing: -0.01em; }
+  .nav .word i { color: var(--terracotta-deep); font-style: normal; }
+  .nav a:not(.ca-btn) { font-family: var(--body); font-size: 13px; color: var(--ink-soft); text-decoration: none; padding: 6px 12px; border-radius: 2px; }
+  .nav a:not(.ca-btn):hover { background: var(--linen-deep); color: var(--ink); }
+  .nav .right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+
+  .hero {
+    position: relative;
+    padding: 80px 32px 96px;
+  }
+  .hero-inner { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 64px; align-items: center; }
+  .hero h1 { font: var(--t-display-1); letter-spacing: -0.015em; color: var(--ink); }
+  .hero h1 i { font-style: italic; color: var(--terracotta-deep); font-weight: 500; }
+  .hero p.lede { font-family: var(--serif); font-style: italic; font-size: 21px; line-height: 1.5; color: var(--ink-soft); margin-top: 22px; max-width: 520px; }
+  .hero .cta-row { margin-top: 32px; display: flex; gap: 12px; align-items: center; }
+  .hero .meta { margin-top: 32px; display: flex; gap: 22px; align-items: center; color: var(--ink-mute); }
+  .hero .meta .ca-eyebrow { font-size: 10px; }
+
+  .preview {
+    background: var(--linen);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    box-shadow: var(--shadow-panel);
+    padding: 22px 24px;
+    position: relative;
+  }
+  .preview::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60'><g fill='none' stroke='%23a89375' stroke-width='0.4' opacity='0.18'><rect x='0.5' y='0.5' width='18' height='18'/><rect x='20.5' y='0.5' width='18' height='18'/><rect x='40.5' y='0.5' width='18' height='18'/><rect x='0.5' y='20.5' width='18' height='18'/><rect x='20.5' y='20.5' width='18' height='18'/><rect x='40.5' y='20.5' width='18' height='18'/><rect x='0.5' y='40.5' width='18' height='18'/><rect x='20.5' y='40.5' width='18' height='18'/><rect x='40.5' y='40.5' width='18' height='18'/></g></svg>");
+    opacity: 0.6; pointer-events: none; border-radius: 4px;
+  }
+  .preview > * { position: relative; z-index: 1; }
+  .preview-head { display: flex; align-items: center; gap: 12px; }
+  .preview-head .name { font-family: var(--serif); font-size: 19px; }
+  .preview-quote {
+    border-left: 2px solid var(--ochre);
+    padding: 4px 0 4px 14px;
+    margin-top: 16px;
+    font-family: var(--serif); font-style: italic; font-size: 14px;
+    color: var(--ink-soft); line-height: 1.55;
+  }
+  .preview-reply {
+    margin-top: 16px;
+    background: var(--parchment-2);
+    border: 1px solid var(--rule-soft);
+    border-radius: 2px;
+    padding: 12px 14px;
+  }
+  .preview-reply p { font: var(--t-body-sm); color: var(--ink); margin-top: 6px; }
+  .preview-actions { margin-top: 12px; display: flex; gap: 8px; }
+
+  /* Sections */
+  section { max-width: 1200px; margin: 0 auto; padding: 72px 32px; }
+  .section-eyebrow { text-align: center; }
+  .section-title { font: var(--t-display-2); text-align: center; margin-top: 8px; max-width: 720px; margin-left: auto; margin-right: auto; }
+  .section-aside { font: var(--t-display-italic); text-align: center; color: var(--ink-soft); margin-top: 12px; max-width: 540px; margin-left: auto; margin-right: auto; }
+
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 48px; }
+  .step { background: var(--linen); border: 1px solid var(--rule); border-radius: 4px; padding: 28px 24px; min-height: 200px; }
+  .step .num { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; color: var(--terracotta-deep); }
+  .step .step-title { font-family: var(--serif); font-size: 22px; margin-top: 8px; }
+  .step p { margin-top: 10px; font: var(--t-body-sm); color: var(--ink-soft); }
+
+  .quotes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 48px; }
+  .quote { background: var(--linen); border: 1px solid var(--rule); border-radius: 4px; padding: 28px 26px; }
+  .quote q {
+    font-family: var(--serif); font-style: italic; font-size: 21px;
+    line-height: 1.5; color: var(--ink); display: block;
+    quotes: "\201C" "\201D";
+  }
+  .quote-by { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
+  .quote-by .ca-display { font-size: 14px; }
+
+  .pricing { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 48px; }
+  .tier { background: var(--linen); border: 1px solid var(--rule); border-radius: 4px; padding: 28px 24px; display: flex; flex-direction: column; }
+  .tier.featured { border-color: var(--aegean-deep); box-shadow: var(--shadow-panel); }
+  .tier .price { font-family: var(--serif); font-size: 44px; font-feature-settings: "lnum","tnum"; margin-top: 14px; }
+  .tier .price small { font-family: var(--body); font-size: 13px; color: var(--ink-mute); }
+  .tier ul { list-style: none; margin-top: 18px; padding: 0; flex: 1; }
+  .tier li { font: var(--t-body-sm); color: var(--ink-soft); padding: 6px 0; border-top: 1px dashed var(--rule-soft); display: flex; gap: 8px; align-items: flex-start; }
+  .tier li::before { content: "✓"; color: var(--aegean-deep); font-family: var(--serif); }
+  .tier .ca-btn { justify-content: center; margin-top: 18px; }
+
+  .cta {
+    background: var(--linen);
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: 80px 32px;
+    text-align: center;
+  }
+  .cta h2 { font: var(--t-display-2); }
+  .cta p { font: var(--t-display-italic); color: var(--ink-soft); margin-top: 14px; }
+  .cta .row { margin-top: 28px; display: flex; gap: 12px; justify-content: center; }
+
+  footer {
+    padding: 40px 32px 56px; max-width: 1200px; margin: 0 auto;
+    display: flex; align-items: center; gap: 24px;
+    border-top: 1px solid var(--rule-soft);
+  }
+  footer .ca-eyebrow { color: var(--ink-mute); }
+  footer .links { margin-left: auto; display: flex; gap: 18px; }
+  footer .links a { font: var(--t-body-sm); color: var(--ink-soft); text-decoration: none; }
+
+  .ornament { text-align: center; color: var(--rule); font-family: var(--serif); font-size: 14px; letter-spacing: 0.6em; margin: 16px 0; user-select: none; }
+
+  /* Hero background */
+  .hero {
+    background-image:
+      radial-gradient(circle at 12% 20%, oklch(0.88 0.04 45 / 0.25) 0, transparent 40%),
+      radial-gradient(circle at 92% 78%, oklch(0.88 0.04 195 / 0.18) 0, transparent 45%),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'><g fill='none' stroke='%23c9b59a' stroke-width='0.5' opacity='0.30'><path d='M0 14 L14 0 L28 14 L14 28 Z'/><path d='M7 7 L21 7 L21 21 L7 21 Z'/></g></svg>");
+    background-size: auto, auto, 28px 28px;
+  }
+
+  @media (max-width: 880px) {
+    .hero-inner { grid-template-columns: 1fr; }
+    .steps, .quotes, .pricing { grid-template-columns: 1fr; }
+    .nav .right a:nth-child(1) { display: none; }
+  }
+</style>
+</head>
+<body data-screen-label="Marketing — landing">
+  <header class="nav">
+    <div class="brand">
+      <img src="../../assets/andes-logo.svg" width="32" height="32" alt=""/>
+      <div class="word">Andes<i>.</i>IA</div>
+    </div>
+    <a href="#how">How it works</a>
+    <a href="#pricing">Pricing</a>
+    <a href="#voices">Coaches</a>
+    <div class="right">
+      <a href="#">Sign in</a>
+      <a href="#" class="ca-btn ca-btn-primary">Get started →</a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="hero-inner">
+      <div>
+        <div class="ca-eyebrow ca-eyebrow-terra">For endurance coaches</div>
+        <h1 style="margin-top:18px">Your athletes.<br/>Your voice. <i>Your AI.</i></h1>
+        <p class="lede">Andes.IA helps endurance coaches save hours each week on training prescription — without losing your personal touch with each athlete.</p>
+        <div class="cta-row">
+          <a href="#" class="ca-btn ca-btn-primary" style="padding:12px 22px;font-size:14px">Get started →</a>
+          <a href="#" class="ca-btn ca-btn-ghost">Watch how it works</a>
+        </div>
+        <div class="meta">
+          <span class="ca-eyebrow">Triathlon · Running · Cycling</span>
+          <span class="ca-eyebrow">Garmin · WHOOP · Oura</span>
+        </div>
+      </div>
+
+      <article class="preview">
+        <div class="preview-head">
+          <div class="ca-avatar" style="width:42px;height:42px;font-size:14px;background:var(--aegean-wash);border-color:var(--aegean-soft);color:var(--aegean-deep)"><span>PT</span></div>
+          <div>
+            <div class="name">Patrick Torres</div>
+            <div class="ca-eyebrow" style="margin-top:2px">Build phase · Wk 8</div>
+          </div>
+          <span class="ca-chip ca-chip-terra" style="margin-left:auto">1 pending</span>
+        </div>
+        <div class="preview-quote">"Legs felt heavy on the long run today, but I held target pace. Should I rest tomorrow?"</div>
+        <div class="preview-reply">
+          <div class="ca-eyebrow ca-eyebrow-aegean">Suggested reply</div>
+          <p>Heavy legs after a long run at target pace is a great sign — your body is adapting. Take Tuesday easy, then we'll see how Thursday's intervals feel. Trust the process.</p>
+        </div>
+        <div class="preview-actions">
+          <button class="ca-btn ca-btn-primary" style="flex:1;justify-content:center">Approve & send</button>
+          <button class="ca-btn">Edit</button>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="ca-eyebrow section-eyebrow">How it works</div>
+    <h2 class="section-title ca-display">Built for real coaching</h2>
+    <p class="section-aside">Three steps a day. The AI drafts; you decide.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="num">01</div>
+        <div class="step-title">Athlete checks in</div>
+        <p>Your athlete sends a quick voice note or message on WhatsApp — about today's run, their sleep, how they feel.</p>
+      </div>
+      <div class="step">
+        <div class="num">02</div>
+        <div class="step-title">Andes drafts a reply</div>
+        <p>It pulls in plan context, recent workouts, and your past replies. Then it writes one in your voice.</p>
+      </div>
+      <div class="step">
+        <div class="num">03</div>
+        <div class="step-title">You approve and send</div>
+        <p>Edit anything, or send as-is in one tap. The athlete just sees their coach replying — same as ever.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="ornament">◆ ◆ ◆</div>
+
+  <section id="voices">
+    <div class="ca-eyebrow section-eyebrow">Coaches say</div>
+    <h2 class="section-title ca-display">Listen first.<br/>Change the plan second.</h2>
+
+    <div class="quotes">
+      <article class="quote">
+        <q>It used to take me two hours every evening to message all 22 of my athletes. Now it's twenty minutes — and the messages sound more like me, not less.</q>
+        <div class="quote-by">
+          <div class="ca-avatar" style="width:40px;height:40px;font-size:13px;background:var(--terracotta-soft);border-color:oklch(0.80 0.08 45);color:var(--terracotta-deep)"><span>FD</span></div>
+          <div>
+            <div class="ca-display">Felipe Deidan</div>
+            <div class="ca-eyebrow" style="margin-top:3px">Triathlon · 22 athletes</div>
+          </div>
+        </div>
+      </article>
+      <article class="quote">
+        <q>I was nervous about the AI replying for me. After two weeks I trust it more than I trust my own typing on the phone at 9pm.</q>
+        <div class="quote-by">
+          <div class="ca-avatar" style="width:40px;height:40px;font-size:13px;background:var(--ochre-soft);border-color:oklch(0.80 0.08 80);color:oklch(0.40 0.08 75)"><span>SL</span></div>
+          <div>
+            <div class="ca-display">Sara Lima</div>
+            <div class="ca-eyebrow" style="margin-top:3px">Marathon · 14 athletes</div>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section id="pricing">
+    <div class="ca-eyebrow section-eyebrow">Pricing</div>
+    <h2 class="section-title ca-display">Pay for the athletes you coach.</h2>
+    <p class="section-aside">Start free. Add seats as your roster grows.</p>
+
+    <div class="pricing">
+      <div class="tier">
+        <div class="ca-eyebrow">Starter</div>
+        <div class="price">$0<small> / forever</small></div>
+        <p style="font:var(--t-body-sm);color:var(--ink-soft);margin-top:8px">Up to 3 athletes. Try it on a few.</p>
+        <ul>
+          <li>WhatsApp drafts in your voice</li>
+          <li>Plan templates · 4-week build</li>
+          <li>Daily check-in summary</li>
+        </ul>
+        <a href="#" class="ca-btn">Start free</a>
+      </div>
+      <div class="tier featured">
+        <div class="ca-eyebrow ca-eyebrow-aegean">Coach · most picked</div>
+        <div class="price">$99<small> / month</small></div>
+        <p style="font:var(--t-body-sm);color:var(--ink-soft);margin-top:8px">Up to 25 athletes. Everything you need to run a coaching business.</p>
+        <ul>
+          <li>Everything in Starter</li>
+          <li>Voice cloning for replies</li>
+          <li>Garmin · WHOOP · Oura sync</li>
+          <li>Office hours scheduling</li>
+          <li>Athlete mobile app</li>
+        </ul>
+        <a href="#" class="ca-btn ca-btn-primary">Start 14-day trial →</a>
+      </div>
+      <div class="tier">
+        <div class="ca-eyebrow">Studio</div>
+        <div class="price">$249<small> / month</small></div>
+        <p style="font:var(--t-body-sm);color:var(--ink-soft);margin-top:8px">Unlimited athletes. For coaching teams and clubs.</p>
+        <ul>
+          <li>Everything in Coach</li>
+          <li>Multi-coach roster sharing</li>
+          <li>Custom plan library</li>
+          <li>Onboarding support</li>
+        </ul>
+        <a href="#" class="ca-btn">Talk to us</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta">
+    <h2 class="ca-display">You stay the coach.</h2>
+    <p>Andes.IA just gives you the time back.</p>
+    <div class="row">
+      <a href="#" class="ca-btn ca-btn-primary" style="padding:12px 22px;font-size:14px">Get started →</a>
+      <a href="#" class="ca-btn ca-btn-ghost">Book a 15-min walkthrough</a>
+    </div>
+  </section>
+
+  <footer>
+    <img src="../../assets/andes-logo.svg" width="28" height="28" alt=""/>
+    <div class="ca-eyebrow">Coach · athlete · purpose</div>
+    <div class="links">
+      <a href="#">Privacy</a>
+      <a href="#">Terms</a>
+      <a href="#">Contact</a>
+      <a href="#">© 2026 Andes.IA</a>
+    </div>
+  </footer>
+</body>
+</html>

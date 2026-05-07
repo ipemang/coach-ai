@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Colors — Accents</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  body { background: var(--parchment); padding: 18px; }
+  .stack { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .row { display: grid; grid-template-columns: 100px repeat(4, 1fr); gap: 6px; align-items: center; }
+  .lbl { font: var(--t-eyebrow); text-transform: uppercase; color: var(--ink); font-size: 10px; letter-spacing: 0.16em; }
+  .sw { height: 56px; border: 1px solid var(--rule); border-radius: 4px; display: flex; flex-direction: column; justify-content: flex-end; padding: 6px 8px; }
+  .nm { font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .vl { font-family: var(--mono); font-size: 8.5px; opacity: 0.7; }
+</style>
+</head>
+<body>
+  <div class="stack">
+    <div class="row">
+      <div class="lbl">Aegean</div>
+      <div class="sw" style="background: var(--aegean-wash); color: var(--aegean-deep)"><div class="nm">wash</div><div class="vl">0.92 0.030 190</div></div>
+      <div class="sw" style="background: var(--aegean-soft); color: var(--aegean-deep)"><div class="nm">soft</div><div class="vl">0.86 0.050 190</div></div>
+      <div class="sw" style="background: var(--aegean); color: oklch(0.97 0.02 190)"><div class="nm">aegean</div><div class="vl">0.58 0.095 195</div></div>
+      <div class="sw" style="background: var(--aegean-deep); color: oklch(0.97 0.02 190)"><div class="nm">deep</div><div class="vl">0.42 0.080 200</div></div>
+    </div>
+    <div class="row">
+      <div class="lbl">Terracotta</div>
+      <div class="sw" style="background: var(--terracotta-soft); color: var(--terracotta-deep)"><div class="nm">soft</div><div class="vl">0.86 0.055 45</div></div>
+      <div class="sw" style="background: var(--terracotta); color: oklch(0.98 0.01 50)"><div class="nm">terracotta</div><div class="vl">0.66 0.135 42</div></div>
+      <div class="sw" style="background: var(--terracotta-deep); color: oklch(0.98 0.01 50)"><div class="nm">deep</div><div class="vl">0.52 0.130 38</div></div>
+      <div class="sw" style="background: oklch(0.96 0.02 25); color: var(--terracotta-deep); border-color: var(--terracotta-soft)"><div class="nm">tinge</div><div class="vl">0.96 0.02 25</div></div>
+    </div>
+    <div class="row">
+      <div class="lbl">Ochre</div>
+      <div class="sw" style="background: var(--ochre-soft); color: oklch(0.40 0.08 75)"><div class="nm">soft</div><div class="vl">0.88 0.045 80</div></div>
+      <div class="sw" style="background: var(--ochre); color: oklch(0.30 0.06 75)"><div class="nm">ochre</div><div class="vl">0.75 0.090 78</div></div>
+      <div class="sw" style="background: oklch(0.40 0.08 75); color: var(--ochre-soft)"><div class="nm">deep</div><div class="vl">0.40 0.08 75</div></div>
+      <div class="sw" style="background: oklch(0.78 0.07 80); color: oklch(0.30 0.06 75)"><div class="nm">edge</div><div class="vl">0.78 0.07 80</div></div>
+    </div>
+    <div class="row">
+      <div class="lbl">Olive</div>
+      <div class="sw" style="background: var(--olive-wash); color: var(--olive-deep)"><div class="nm">wash</div><div class="vl">0.92 0.025 125</div></div>
+      <div class="sw" style="background: var(--olive-soft); color: var(--olive-deep)"><div class="nm">soft</div><div class="vl">0.82 0.040 125</div></div>
+      <div class="sw" style="background: var(--olive); color: oklch(0.95 0.02 125)"><div class="nm">olive</div><div class="vl">0.55 0.050 125</div></div>
+      <div class="sw" style="background: var(--olive-deep); color: oklch(0.95 0.02 125)"><div class="nm">deep</div><div class="vl">0.38 0.045 125</div></div>
+    </div>
+    <div class="row">
+      <div class="lbl">Rule</div>
+      <div class="sw" style="background: var(--rule-soft); color: var(--ink-soft)"><div class="nm">rule-soft</div><div class="vl">0.86 0.022 75</div></div>
+      <div class="sw" style="background: var(--rule); color: var(--ink)"><div class="nm">rule</div><div class="vl">0.80 0.025 70</div></div>
+      <div class="sw" style="background: var(--stone); color: oklch(0.95 0.02 70)"><div class="nm">stone</div><div class="vl">0.55 0.015 70</div></div>
+      <div class="sw" style="background: oklch(1 0 0); color: var(--ink-mute)"><div class="nm">— never —</div><div class="vl">no pure white</div></div>
+    </div>
+  </div>
+</body>
+</html>

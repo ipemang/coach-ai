@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Colors — Surface & Ink</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  body { background: var(--parchment); padding: 18px; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .sw { border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .sw .top { height: 70px; }
+  .sw .meta { padding: 8px 10px; background: var(--linen); }
+  .sw .name { font: var(--t-eyebrow); text-transform: uppercase; letter-spacing: 0.18em; color: var(--ink); font-size: 9.5px; }
+  .sw .val { font-family: var(--mono); font-size: 9.5px; color: var(--ink-mute); margin-top: 3px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  h4 { font: var(--t-eyebrow); text-transform: uppercase; color: var(--ink-mute); margin-bottom: 8px; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div>
+      <h4>Surface · parchment & linen</h4>
+      <div class="grid">
+        <div class="sw"><div class="top" style="background: var(--parchment)"></div><div class="meta"><div class="name">parchment</div><div class="val">0.965 0.018 85</div></div></div>
+        <div class="sw"><div class="top" style="background: var(--parchment-2)"></div><div class="meta"><div class="name">parchment-2</div><div class="val">0.945 0.022 82</div></div></div>
+        <div class="sw"><div class="top" style="background: var(--linen)"></div><div class="meta"><div class="name">linen</div><div class="val">0.925 0.025 78</div></div></div>
+        <div class="sw"><div class="top" style="background: var(--linen-deep)"></div><div class="meta"><div class="name">linen-deep</div><div class="val">0.885 0.028 75</div></div></div>
+      </div>
+    </div>
+    <div>
+      <h4>Ink · text on parchment</h4>
+      <div class="grid">
+        <div class="sw"><div class="top" style="background: var(--ink)"></div><div class="meta"><div class="name" style="color: var(--ink)">ink</div><div class="val">0.28 0.022 55</div></div></div>
+        <div class="sw"><div class="top" style="background: var(--ink-soft)"></div><div class="meta"><div class="name">ink-soft</div><div class="val">0.42 0.022 60</div></div></div>
+        <div class="sw"><div class="top" style="background: var(--ink-mute)"></div><div class="meta"><div class="name">ink-mute</div><div class="val">0.58 0.018 65</div></div></div>
+        <div class="sw"><div class="top" style="background: var(--ink-faint)"></div><div class="meta"><div class="name">ink-faint</div><div class="val">0.70 0.015 68</div></div></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
