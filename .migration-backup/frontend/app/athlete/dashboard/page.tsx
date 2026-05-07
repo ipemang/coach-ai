@@ -1336,8 +1336,6 @@ function DashboardInner({athlete, files, reports, onSignOut, uploading, onUpload
   const [dbMemory, setDbMemory] = useState<{at:number;kind:string;text:string}[]>([]);
   const coach = useMemo(()=>buildCoachDisplay(coachProfile), [coachProfile]);
 
-  useEffect(()=>{ setSeasonData(buildSeasonData(currentWeek, lastWeek)); },[currentWeek, lastWeek]);
-
   // COA-117: load memory events from API on mount
   useEffect(()=>{
     if(!authToken) return;
@@ -1362,6 +1360,7 @@ function DashboardInner({athlete, files, reports, onSignOut, uploading, onUpload
   const prevBounds = useMemo(()=>getWeekBounds(-1), []);
   const currentWeek = useMemo(()=>mergeWorkouts(initialCurrentWeek ?? [], appState.workouts),[initialCurrentWeek, appState.workouts]);
   const lastWeek = useMemo(()=>initialLastWeek ?? [], [initialLastWeek]);
+  useEffect(()=>{ setSeasonData(buildSeasonData(currentWeek, lastWeek)); },[currentWeek, lastWeek]);
   const week = weekOffset===0?currentWeek:weekOffset===-1?lastWeek:currentWeek;
   const weekStart = weekOffset===0?curBounds.start:weekOffset===-1?prevBounds.start:curBounds.start;
   const weekLabel = weekOffset===0?curBounds.label:weekOffset===-1?prevBounds.label:curBounds.label;
