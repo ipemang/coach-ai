@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useState } from "react";
 
 const INK        = "oklch(0.28 0.022 55)";
 const INK_SOFT   = "oklch(0.42 0.022 60)";
@@ -33,6 +36,72 @@ const MOSAIC_BG = {
 
 const TESSERA_OVERLAY = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60'><g fill='none' stroke='%23a89375' stroke-width='0.4' opacity='0.18'><rect x='0.5' y='0.5' width='18' height='18'/><rect x='20.5' y='0.5' width='18' height='18'/><rect x='40.5' y='0.5' width='18' height='18'/><rect x='0.5' y='20.5' width='18' height='18'/><rect x='20.5' y='20.5' width='18' height='18'/><rect x='40.5' y='20.5' width='18' height='18'/><rect x='0.5' y='40.5' width='18' height='18'/><rect x='20.5' y='40.5' width='18' height='18'/><rect x='40.5' y='40.5' width='18' height='18'/></g></svg>")`;
 
+const FAQS = [
+  {
+    q: "Does Andes.IA replace me as a coach?",
+    a: "No — and that's the whole point. Andes.IA handles the communication layer: drafting replies, sending check-ins, flagging outliers. You make every final call. Your athletes still hear your voice, your judgment, your methodology. We make you faster, not replaceable.",
+  },
+  {
+    q: "How does the AI learn my coaching voice?",
+    a: "During onboarding, you complete a short voice calibration: a few example replies to common athlete messages. Andes.IA uses these — plus the replies you approve over time — to continuously refine drafts that sound like you, not like a generic chatbot.",
+  },
+  {
+    q: "Which messaging platforms do you support?",
+    a: "WhatsApp is fully supported today, with two-way messaging. SMS and email are on the roadmap. Most coaches find WhatsApp covers 90%+ of their athlete communication as-is.",
+  },
+  {
+    q: "Can I manage multiple athletes at different training phases?",
+    a: "Yes. Each athlete has their own profile, training plan, and phase context. Andes.IA reads that context when drafting replies, so a week-8 build-phase athlete gets different guidance than someone in a recovery taper.",
+  },
+  {
+    q: "What happens after my 14-day trial?",
+    a: "You choose a plan that matches your roster size. No automatic charge at trial end — we'll remind you a few days before and ask you to confirm. If you don't convert, your account pauses and your data is preserved for 90 days.",
+  },
+  {
+    q: "Is my athletes' data private?",
+    a: "Athlete messages, check-ins, and training data are encrypted at rest and in transit. We do not use your athletes' data to train models for other coaches. Your data is yours.",
+  },
+];
+
+function FAQAccordion() {
+  const [open, setOpen] = useState<number | null>(null);
+
+  return (
+    <div style={{ border: `1px solid ${RULE}`, borderRadius: 4, overflow: "hidden" }}>
+      {FAQS.map((item, i) => (
+        <div key={i} style={{ borderBottom: i < FAQS.length - 1 ? `1px solid ${RULE}` : undefined }}>
+          <button
+            onClick={() => setOpen(open === i ? null : i)}
+            style={{
+              width: "100%", textAlign: "left", background: "none", border: "none",
+              padding: "22px 28px", cursor: "pointer",
+              display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16,
+            }}
+          >
+            <span style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500, color: INK, lineHeight: 1.3 }}>
+              {item.q}
+            </span>
+            <span style={{
+              fontFamily: MONO, fontSize: 18, color: TERRA_DEEP, flexShrink: 0,
+              transition: "transform 0.2s", transform: open === i ? "rotate(45deg)" : "rotate(0deg)",
+            }}>+</span>
+          </button>
+          {open === i && (
+            <div style={{ padding: "0 28px 24px", paddingLeft: 28 }}>
+              <p style={{
+                fontFamily: SERIF, fontStyle: "italic", fontSize: 17, lineHeight: 1.65,
+                color: INK_SOFT, margin: 0, maxWidth: 760,
+              }}>
+                {item.a}
+              </p>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function LandingPage() {
   return (
     <div style={{ minHeight: "100vh", fontFamily: BODY, color: INK, background: PARCHMENT }}>
@@ -54,7 +123,6 @@ export default function LandingPage() {
         background: LINEN, borderBottom: `1px solid ${RULE}`,
         padding: "14px 32px", display: "flex", alignItems: "center", gap: 24,
       }}>
-        {/* Wordmark */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <svg width="26" height="26" viewBox="0 0 32 32">
             <rect x="2" y="2" width="28" height="28" fill="none" stroke={INK} strokeWidth="1" />
@@ -74,13 +142,18 @@ export default function LandingPage() {
           </span>
         </div>
 
-        {/* Nav links */}
         <div style={{ display: "flex", gap: 4 }}>
-          {["How it works", "Methodology", "For coaches", "Pricing", "FAQ"].map(l => (
-            <a key={l} href={`#${l.toLowerCase().replace(/ /g, "-")}`} style={{
+          {[
+            ["How it works", "#how-it-works"],
+            ["Methodology", "#methodology"],
+            ["For coaches", "#for-coaches"],
+            ["Pricing", "#pricing"],
+            ["FAQ", "#faq"],
+          ].map(([label, href]) => (
+            <a key={href} href={href} style={{
               fontFamily: BODY, fontSize: 13, color: INK_SOFT, textDecoration: "none",
               padding: "6px 12px", borderRadius: 2,
-            }}>{l}</a>
+            }}>{label}</a>
           ))}
         </div>
 
@@ -102,19 +175,16 @@ export default function LandingPage() {
       <section style={{ ...MOSAIC_BG, padding: "80px 32px 96px" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", display: "grid", gridTemplateColumns: "1.05fr 0.95fr", gap: 64, alignItems: "center" }}>
           <div>
-            {/* Eyebrow */}
             <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: TERRA_DEEP, marginBottom: 20 }}>
               For endurance coaches
             </div>
 
-            {/* Display headline */}
             <h1 style={{ fontFamily: SERIF, fontSize: 60, fontWeight: 500, lineHeight: 1.05, letterSpacing: "-0.015em", margin: "0 0 24px", color: INK }}>
               Your athletes.<br />
               Your voice.<br />
               <em style={{ fontStyle: "italic", color: TERRA_DEEP }}>Your AI.</em>
             </h1>
 
-            {/* Lede */}
             <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 20, lineHeight: 1.55, color: INK_SOFT, margin: "0 0 36px", maxWidth: 500 }}>
               Andes.IA is the communication layer for serious endurance coaches.
               Bring your own methodology — we make you superhuman at the human side:
@@ -122,7 +192,6 @@ export default function LandingPage() {
               &ldquo;I&apos;m exhausted&rdquo; message you&apos;re tired of missing.
             </p>
 
-            {/* CTAs */}
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <Link href="/signup" style={{
                 display: "inline-flex", alignItems: "center", gap: 8,
@@ -141,7 +210,6 @@ export default function LandingPage() {
               </Link>
             </div>
 
-            {/* Tagline chips */}
             <div style={{ marginTop: 28, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
               {["Triathlon", "Running", "Cycling", "14-day free trial", "No card required"].map((t, i) => (
                 <span key={t} style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: INK_MUTE }}>
@@ -158,10 +226,8 @@ export default function LandingPage() {
             borderRadius: 4, boxShadow: `0 1px 0 oklch(1 0 0 / 0.6) inset, 0 6px 20px -12px oklch(0.3 0.05 60 / 0.25)`,
             padding: "22px 24px", overflow: "hidden",
           }}>
-            {/* Tessera overlay */}
             <div style={{ position: "absolute", inset: 0, backgroundImage: TESSERA_OVERLAY, opacity: 0.6, pointerEvents: "none", borderRadius: 4 }} />
             <div style={{ position: "relative", zIndex: 1 }}>
-              {/* Card header */}
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
                 <div style={{
                   width: 40, height: 40, borderRadius: 2, background: AEGEAN_WASH,
@@ -181,7 +247,6 @@ export default function LandingPage() {
                 }}>1 Pending</span>
               </div>
 
-              {/* Athlete quote */}
               <div style={{
                 borderLeft: `2px solid ${OCHRE}`, paddingLeft: 12, marginBottom: 14,
                 fontFamily: SERIF, fontStyle: "italic", fontSize: 13.5, color: INK_SOFT, lineHeight: 1.55,
@@ -189,7 +254,6 @@ export default function LandingPage() {
                 &ldquo;Legs felt heavy on the long run today, but held target pace. Should I rest tomorrow?&rdquo;
               </div>
 
-              {/* Suggested reply */}
               <div style={{ background: PARCHMENT2, border: `1px solid ${RULE_SOFT}`, borderRadius: 2, padding: "12px 14px", marginBottom: 12 }}>
                 <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: AEGEAN, marginBottom: 6 }}>
                   Suggested reply · <span style={{ color: TERRA_DEEP }}>in your voice</span>
@@ -200,7 +264,6 @@ export default function LandingPage() {
                 </p>
               </div>
 
-              {/* Actions */}
               <div style={{ display: "flex", gap: 8 }}>
                 <button style={{
                   flex: 1, padding: "10px 16px", background: AEGEAN, color: "oklch(0.97 0.02 190)",
@@ -260,93 +323,165 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Pricing */}
-      <section id="pricing" style={{ background: LINEN_DEEP, borderTop: `1px solid ${RULE}`, borderBottom: `1px solid ${RULE}` }}>
+      {/* Methodology */}
+      <section id="methodology" style={{ background: LINEN_DEEP, borderTop: `1px solid ${RULE}`, borderBottom: `1px solid ${RULE}` }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "72px 32px" }}>
-          <div style={{ textAlign: "center", marginBottom: 48 }}>
-            <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: TERRA_DEEP, marginBottom: 12 }}>
-              Pricing
-            </div>
-            <h2 style={{ fontFamily: SERIF, fontSize: 42, fontWeight: 500, letterSpacing: "-0.01em", margin: "0 0 12px", color: INK }}>
-              Pay for the athletes you coach.
-            </h2>
-            <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 17, color: INK_SOFT, margin: 0 }}>
-              One coach. As many athletes as your plan allows.
-            </p>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1, background: RULE, border: `1px solid ${RULE}`, borderRadius: 4, overflow: "hidden" }}>
-            {[
-              { name: "Starter", price: "$49", period: "/mo", sub: "Up to 10 athletes", features: ["AI reply drafts", "WhatsApp check-ins", "Suggestion review dashboard", "Training plan assistant"], cta: "Start free trial", highlight: false },
-              { name: "Growth", price: "$99", period: "/mo", sub: "Up to 25 athletes", features: ["Everything in Starter", "Office hours automation", "AI profile per athlete", "File uploads & analysis"], cta: "Most popular →", highlight: true },
-              { name: "Pro", price: "$149", period: "/mo", sub: "Unlimited athletes", features: ["Everything in Growth", "Priority support", "Early access to new features", "Custom AI voice tuning"], cta: "Get started →", highlight: false },
-            ].map(plan => (
-              <div key={plan.name} style={{
-                background: plan.highlight ? AEGEAN : LINEN,
-                color: plan.highlight ? "oklch(0.97 0.02 190)" : INK,
-                padding: "36px 32px",
-              }}>
-                <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", opacity: 0.7, marginBottom: 12 }}>{plan.name}</div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 6 }}>
-                  <span style={{ fontFamily: SERIF, fontSize: 52, fontWeight: 500, lineHeight: 1 }}>{plan.price}</span>
-                  <span style={{ fontFamily: BODY, fontSize: 15, opacity: 0.6 }}>{plan.period}</span>
-                </div>
-                <div style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 14, opacity: 0.75, marginBottom: 28 }}>{plan.sub}</div>
-                <div style={{ borderTop: `1px solid ${plan.highlight ? "oklch(1 0 0 / 0.2)" : RULE}`, paddingTop: 24, marginBottom: 28 }}>
-                  {plan.features.map(f => (
-                    <div key={f} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "flex-start" }}>
-                      <span style={{ color: plan.highlight ? "oklch(0.88 0.05 190)" : AEGEAN, flexShrink: 0 }}>✓</span>
-                      <span style={{ fontFamily: BODY, fontSize: 13.5, lineHeight: 1.4 }}>{f}</span>
-                    </div>
-                  ))}
-                </div>
-                <Link href="/signup" style={{
-                  display: "block", textAlign: "center", padding: "11px 20px",
-                  background: plan.highlight ? "oklch(1 0 0 / 0.15)" : AEGEAN,
-                  color: "oklch(0.97 0.02 190)",
-                  border: plan.highlight ? "1px solid oklch(1 0 0 / 0.3)" : "none",
-                  borderRadius: 2, textDecoration: "none",
-                  fontFamily: BODY, fontSize: 14, fontWeight: 600,
-                }}>
-                  {plan.cta}
-                </Link>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 80, alignItems: "start" }}>
+            <div>
+              <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: TERRA_DEEP, marginBottom: 16 }}>
+                Methodology
               </div>
-            ))}
+              <h2 style={{ fontFamily: SERIF, fontSize: 40, fontWeight: 500, letterSpacing: "-0.01em", margin: "0 0 20px", color: INK, lineHeight: 1.1 }}>
+                Bring your system.<br />We amplify it.
+              </h2>
+              <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 18, lineHeight: 1.65, color: INK_SOFT, margin: "0 0 28px" }}>
+                Andes.IA is not a coaching methodology. It&apos;s an amplifier for whatever methodology you already use — polarized, pyramidal, Lydiard, your own hybrid.
+              </p>
+              <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 18, lineHeight: 1.65, color: INK_SOFT, margin: 0 }}>
+                We read your athlete&apos;s training context, their week-over-week history, and what they just told you. Then we draft a response as close to what you&apos;d say as the model can get — and put the final word in your hands every time.
+              </p>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              {[
+                { label: "Your voice", body: "Voice calibration from your own examples. Drafts improve as you approve or edit over time." },
+                { label: "Your plan", body: "Training plans live inside Andes.IA. Every reply is written against the athlete's actual week." },
+                { label: "Your rules", body: "Set boundaries — recovery weeks, taper protocols, no-contact hours. The AI respects them." },
+                { label: "Your call", body: "You approve every message before it sends. Nothing leaves your name without your sign-off." },
+              ].map(item => (
+                <div key={item.label} style={{
+                  background: PARCHMENT, border: `1px solid ${RULE_SOFT}`, borderRadius: 4, padding: "24px 22px",
+                }}>
+                  <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: AEGEAN, marginBottom: 10 }}>
+                    {item.label}
+                  </div>
+                  <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 15.5, lineHeight: 1.6, color: INK_SOFT, margin: 0 }}>
+                    {item.body}
+                  </p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
 
+      {/* Pricing */}
+      <section id="pricing" style={{ maxWidth: 1200, margin: "0 auto", padding: "72px 32px" }}>
+        <div style={{ textAlign: "center", marginBottom: 48 }}>
+          <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: TERRA_DEEP, marginBottom: 12 }}>
+            Pricing
+          </div>
+          <h2 style={{ fontFamily: SERIF, fontSize: 42, fontWeight: 500, letterSpacing: "-0.01em", margin: "0 0 12px", color: INK }}>
+            Pay for the athletes you coach.
+          </h2>
+          <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 17, color: INK_SOFT, margin: 0 }}>
+            One coach. As many athletes as your plan allows.
+          </p>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1, background: RULE, border: `1px solid ${RULE}`, borderRadius: 4, overflow: "hidden" }}>
+          {[
+            { name: "Starter", price: "$49", period: "/mo", sub: "Up to 10 athletes", features: ["AI reply drafts", "WhatsApp check-ins", "Suggestion review dashboard", "Training plan assistant"], cta: "Start free trial", highlight: false },
+            { name: "Growth", price: "$99", period: "/mo", sub: "Up to 25 athletes", features: ["Everything in Starter", "Office hours automation", "AI profile per athlete", "File uploads & analysis"], cta: "Most popular →", highlight: true },
+            { name: "Pro", price: "$149", period: "/mo", sub: "Unlimited athletes", features: ["Everything in Growth", "Priority support", "Early access to new features", "Custom AI voice tuning"], cta: "Get started →", highlight: false },
+          ].map(plan => (
+            <div key={plan.name} style={{
+              background: plan.highlight ? AEGEAN : LINEN,
+              color: plan.highlight ? "oklch(0.97 0.02 190)" : INK,
+              padding: "36px 32px",
+            }}>
+              <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", opacity: 0.7, marginBottom: 12 }}>{plan.name}</div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 6 }}>
+                <span style={{ fontFamily: SERIF, fontSize: 52, fontWeight: 500, lineHeight: 1 }}>{plan.price}</span>
+                <span style={{ fontFamily: BODY, fontSize: 15, opacity: 0.6 }}>{plan.period}</span>
+              </div>
+              <div style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 14, opacity: 0.75, marginBottom: 28 }}>{plan.sub}</div>
+              <div style={{ borderTop: `1px solid ${plan.highlight ? "oklch(1 0 0 / 0.2)" : RULE}`, paddingTop: 24, marginBottom: 28 }}>
+                {plan.features.map(f => (
+                  <div key={f} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "flex-start" }}>
+                    <span style={{ color: plan.highlight ? "oklch(0.88 0.05 190)" : AEGEAN, flexShrink: 0 }}>✓</span>
+                    <span style={{ fontFamily: BODY, fontSize: 13.5, lineHeight: 1.4 }}>{f}</span>
+                  </div>
+                ))}
+              </div>
+              <Link href="/signup" style={{
+                display: "block", textAlign: "center", padding: "11px 20px",
+                background: plan.highlight ? "oklch(1 0 0 / 0.15)" : AEGEAN,
+                color: "oklch(0.97 0.02 190)",
+                border: plan.highlight ? "1px solid oklch(1 0 0 / 0.3)" : "none",
+                borderRadius: 2, textDecoration: "none",
+                fontFamily: BODY, fontSize: 14, fontWeight: 600,
+              }}>
+                {plan.cta}
+              </Link>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* Coach / Athlete CTA split */}
-      <section style={{ maxWidth: 1200, margin: "0 auto", padding: "72px 32px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-          <div style={{ background: LINEN, border: `1px solid ${RULE}`, borderRadius: 4, padding: "40px" }}>
-            <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: TERRA_DEEP, marginBottom: 12 }}>For coaches</div>
-            <h3 style={{ fontFamily: SERIF, fontSize: 32, fontWeight: 500, margin: "0 0 16px", color: INK }}>Ready to coach smarter?</h3>
-            <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 16, color: INK_SOFT, lineHeight: 1.6, margin: "0 0 28px" }}>
-              Join coaches who are spending less time drafting messages and more time thinking about their athletes&apos; progress.
-            </p>
-            <Link href="/signup" style={{
-              display: "inline-flex", alignItems: "center", gap: 8,
-              padding: "11px 24px", background: AEGEAN,
-              color: "oklch(0.97 0.02 190)", borderRadius: 2, textDecoration: "none",
-              fontFamily: BODY, fontSize: 14, fontWeight: 600,
-            }}>Create coach account →</Link>
+      <section id="for-coaches" style={{ background: LINEN_DEEP, borderTop: `1px solid ${RULE}`, borderBottom: `1px solid ${RULE}` }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "72px 32px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+            <div style={{ background: LINEN, border: `1px solid ${RULE}`, borderRadius: 4, padding: "40px" }}>
+              <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: TERRA_DEEP, marginBottom: 12 }}>For coaches</div>
+              <h3 style={{ fontFamily: SERIF, fontSize: 32, fontWeight: 500, margin: "0 0 16px", color: INK }}>Ready to coach smarter?</h3>
+              <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 16, color: INK_SOFT, lineHeight: 1.6, margin: "0 0 28px" }}>
+                Join coaches who are spending less time drafting messages and more time thinking about their athletes&apos; progress.
+              </p>
+              <Link href="/signup" style={{
+                display: "inline-flex", alignItems: "center", gap: 8,
+                padding: "11px 24px", background: AEGEAN,
+                color: "oklch(0.97 0.02 190)", borderRadius: 2, textDecoration: "none",
+                fontFamily: BODY, fontSize: 14, fontWeight: 600,
+              }}>Create coach account →</Link>
+            </div>
+            <div style={{
+              background: `linear-gradient(155deg, ${TERRA} 0%, ${TERRA_DEEP} 100%)`,
+              borderRadius: 4, padding: "40px", color: "oklch(0.98 0.02 50)",
+            }}>
+              <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: "oklch(0.88 0.05 45)", marginBottom: 12 }}>For athletes</div>
+              <h3 style={{ fontFamily: SERIF, fontSize: 32, fontWeight: 500, margin: "0 0 16px" }}>Already working with a coach?</h3>
+              <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 16, color: "oklch(0.95 0.03 50)", lineHeight: 1.6, margin: "0 0 28px" }}>
+                Your coach will send you an invite link. Already have one? Sign in to view your training plan and send check-ins.
+              </p>
+              <Link href="/login" style={{
+                display: "inline-flex", alignItems: "center", gap: 8,
+                padding: "11px 24px", background: "oklch(1 0 0 / 0.15)",
+                color: "oklch(0.98 0.02 50)", border: "1px solid oklch(1 0 0 / 0.3)",
+                borderRadius: 2, textDecoration: "none", fontFamily: BODY, fontSize: 14, fontWeight: 600,
+              }}>Athlete sign in →</Link>
+            </div>
           </div>
-          <div style={{
-            background: `linear-gradient(155deg, ${TERRA} 0%, ${TERRA_DEEP} 100%)`,
-            borderRadius: 4, padding: "40px", color: "oklch(0.98 0.02 50)",
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section id="faq" style={{ maxWidth: 1200, margin: "0 auto", padding: "72px 32px" }}>
+        <div style={{ textAlign: "center", marginBottom: 56 }}>
+          <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: TERRA_DEEP, marginBottom: 12 }}>
+            FAQ
+          </div>
+          <h2 style={{ fontFamily: SERIF, fontSize: 42, fontWeight: 500, letterSpacing: "-0.01em", margin: "0 0 12px", color: INK }}>
+            Common questions.
+          </h2>
+          <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 17, color: INK_SOFT, margin: 0 }}>
+            Honest answers, no fluff.
+          </p>
+        </div>
+        <div style={{ maxWidth: 800, margin: "0 auto" }}>
+          <FAQAccordion />
+        </div>
+        <div style={{ textAlign: "center", marginTop: 48 }}>
+          <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 17, color: INK_SOFT, marginBottom: 20 }}>
+            Still have questions? We&apos;re real people.
+          </p>
+          <a href="mailto:hello@andes.ia" style={{
+            display: "inline-flex", alignItems: "center", gap: 8,
+            padding: "11px 24px", background: "transparent",
+            border: `1px solid ${RULE}`, color: INK,
+            borderRadius: 2, textDecoration: "none", fontFamily: BODY, fontSize: 14,
           }}>
-            <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: "oklch(0.88 0.05 45)", marginBottom: 12 }}>For athletes</div>
-            <h3 style={{ fontFamily: SERIF, fontSize: 32, fontWeight: 500, margin: "0 0 16px" }}>Already working with a coach?</h3>
-            <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 16, color: "oklch(0.95 0.03 50)", lineHeight: 1.6, margin: "0 0 28px" }}>
-              Your coach will send you an invite link. Already have one? Sign in to view your training plan and send check-ins.
-            </p>
-            <Link href="/login" style={{
-              display: "inline-flex", alignItems: "center", gap: 8,
-              padding: "11px 24px", background: "oklch(1 0 0 / 0.15)",
-              color: "oklch(0.98 0.02 50)", border: "1px solid oklch(1 0 0 / 0.3)",
-              borderRadius: 2, textDecoration: "none", fontFamily: BODY, fontSize: 14, fontWeight: 600,
-            }}>Athlete sign in →</Link>
-          </div>
+            Email us →
+          </a>
         </div>
       </section>
 
