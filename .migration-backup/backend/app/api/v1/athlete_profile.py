@@ -11,6 +11,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
@@ -43,6 +44,13 @@ class AthleteProfileOut(BaseModel):
     ai_profile_summary: Optional[str]
     target_event_name: Optional[str]
     target_event_date: Optional[str]
+    ftp: Optional[int] = None
+    threshold_pace: Optional[str] = None
+    css_pace: Optional[str] = None
+    oura_readiness: Optional[int] = None
+    oura_hrv: Optional[int] = None
+    oura_sleep_score: Optional[int] = None
+    oura_readiness_trend: Optional[list] = None
 
 
 class AthleteProfileIn(BaseModel):
@@ -76,7 +84,7 @@ async def get_athlete_profile(
     def _fetch():
         return (
             supabase.table("athletes")
-            .select("id,full_name,email,primary_sport,ai_profile_summary,target_event_name,target_event_date")
+            .select("id,full_name,email,primary_sport,ai_profile_summary,target_event_name,target_event_date,ftp,threshold_pace,css_pace,current_state")
             .eq("id", athlete_id)
             .single()
             .execute()
@@ -87,6 +95,25 @@ async def get_athlete_profile(
         if not result.data:
             raise HTTPException(status_code=404, detail="Athlete profile not found")
         row = result.data
+        cs = row.get("current_state") or {}
+        oura_readiness = None
+        oura_hrv = None
+        oura_sleep = None
+        try:
+            if cs.get("oura_readiness_score") is not None:
+                oura_readiness = int(cs["oura_readiness_score"])
+        except (TypeError, ValueError):
+            pass
+        try:
+            if cs.get("oura_avg_hrv") is not None:
+                oura_hrv = int(cs["oura_avg_hrv"])
+        except (TypeError, ValueError):
+            pass
+        try:
+            if cs.get("oura_sleep_score") is not None:
+                oura_sleep = int(cs["oura_sleep_score"])
+        except (TypeError, ValueError):
+            pass
         return AthleteProfileOut(
             id=str(row["id"]),
             full_name=row.get("full_name") or "Athlete",
@@ -95,6 +122,12 @@ async def get_athlete_profile(
             ai_profile_summary=row.get("ai_profile_summary"),
             target_event_name=row.get("target_event_name"),
             target_event_date=row.get("target_event_date"),
+            ftp=row.get("ftp"),
+            threshold_pace=row.get("threshold_pace"),
+            css_pace=row.get("css_pace"),
+            oura_readiness=oura_readiness,
+            oura_hrv=oura_hrv,
+            oura_sleep_score=oura_sleep,
         )
     except HTTPException:
         raise
@@ -182,3 +215,33 @@ async def update_athlete_profile(
     except Exception as exc:
         logger.exception("[athlete_profile] update failed athlete=%s", athlete_id[:8])
         raise HTTPException(status_code=500, detail="Failed to update profile") from exc
+
+
+@router.get("/api/v1/athlete/reports")
+async def get_athlete_reports(
+    principal: AuthenticatedPrincipal = Depends(require_roles("athlete")),
+):
+    """Return published training reports for the athlete (newest first)."""
+    from app.core.supabase import get_supabase_client
+    supabase = get_supabase_client()
+
+    athlete_id, _ = resolve_athlete_scope(principal)
+
+    def _fetch():
+        return (
+            supabase.table("training_reports")
+            .select("id,title,week_of,published_at,compliance_pct,total_hours,notes,summary_text")
+            .eq("athlete_id", athlete_id)
+            .eq("status", "published")
+            .order("published_at", desc=True)
+            .limit(20)
+            .execute()
+        )
+
+    try:
+        result = await run_in_threadpool(_fetch)
+        rows = result.data or []
+        return JSONResponse(content=rows)
+    except Exception as exc:
+        logger.exception("[athlete_profile] get reports failed athlete=%s", athlete_id[:8])
+        return JSONResponse(content=[])

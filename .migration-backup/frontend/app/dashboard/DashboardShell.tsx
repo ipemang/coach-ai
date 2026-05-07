@@ -295,11 +295,13 @@ function KpiTile({ eyebrow, value, label, glyph, large = false, valueColor = "va
 
 // ─── TopBand ──────────────────────────────────────────────────────────────────
 
-function TopBand({ totalPending, onInvite, onSignOut, coachName }: {
+function TopBand({ totalPending, onInvite, onSignOut, coachName, searchQuery, onSearchChange }: {
   totalPending: number;
   onInvite: () => void;
   onSignOut: () => void;
   coachName: string | null;
+  searchQuery: string;
+  onSearchChange: (q: string) => void;
 }) {
   const initials = coachName
     ? coachName.split(" ").slice(0, 2).map(w => w[0] ?? "").join("").toUpperCase()
@@ -336,7 +338,7 @@ function TopBand({ totalPending, onInvite, onSignOut, coachName }: {
         {/* Search */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, width: 260 }}>
           <G.Search size={14} color="var(--ink-mute)" />
-          <input placeholder="Find an athlete…" style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)" }} />
+          <input placeholder="Find an athlete…" value={searchQuery} onChange={e => onSearchChange(e.target.value)} style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)" }} />
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1330,7 +1332,7 @@ function OfficeHoursView({ data, onToggle, toggleLoading }: {
         </div>
         <div style={{ marginTop: 18, display: "flex", gap: 10 }}>
           {[{ label: "Edit voice" }, { label: "Urgency rules" }].map(b => (
-            <button key={b.label} className="ca-btn" style={{ background: "oklch(1 0 0 / 0.15)", color: "oklch(0.98 0.02 50)", borderColor: "oklch(1 0 0 / 0.3)", fontSize: 12 }}>
+            <button key={b.label} className="ca-btn" title="Coming soon" onClick={() => alert('Coming soon — this feature is in development.')} style={{ background: "oklch(1 0 0 / 0.15)", color: "oklch(0.98 0.02 50)", borderColor: "oklch(1 0 0 / 0.3)", fontSize: 12 }}>
               {b.label}
             </button>
           ))}
@@ -1569,6 +1571,7 @@ export default function DashboardShell({
   const [filter, setFilter] = useState<Filter>("all");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [refineTarget, setRefineTarget] = useState<Suggestion | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // ── Live suggestions (start from SSR data, updated by real-time + actions) ──
   const [suggestions, setSuggestions] = useState<Suggestion[]>(initialSuggestions);
@@ -1916,7 +1919,7 @@ export default function DashboardShell({
         return diff >= 0 && diff <= 4; // show ≤4 weeks for "racing soon" filter
       });
       return athletes;
-    })();
+    })().filter(a => searchQuery === '' || a.full_name?.toLowerCase().includes(searchQuery.toLowerCase()));
 
     // Urgency sort: high AI flags → pending suggestions → medium AI flags → rest
     return [...base].sort((a, b) => {
@@ -1939,7 +1942,7 @@ export default function DashboardShell({
 
   return (
     <div className="mosaic-bg" style={{ minHeight: "100vh" }}>
-      <TopBand totalPending={totalPending} onInvite={() => setInviteOpen(true)} onSignOut={handleSignOut} coachName={coachName} />
+      <TopBand totalPending={totalPending} onInvite={() => setInviteOpen(true)} onSignOut={handleSignOut} coachName={coachName} searchQuery={searchQuery} onSearchChange={setSearchQuery} />
 
       <div style={{ maxWidth: 1440, margin: "0 auto", padding: "24px 32px 60px 32px" }}>
         <Greeting athleteCount={athletes.length} racingCount={racing} coachName={coachName} />

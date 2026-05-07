@@ -103,7 +103,7 @@ interface WorkoutItem {
 }
 interface AthleteFile { id: string; original_filename: string; file_type: string; category: string | null; status: string; size_bytes: number; created_at: string; document_type?: string | null; ai_summary?: string | null; ai_categorized?: boolean; ai_accessible?: boolean; uploaded_by?: string; }
 interface TrainingReport { id: string; athlete_id: string; coach_id: string; period_type: string; period_start: string; period_end: string; title: string; summary_text: string | null; full_text: string | null; highlights: string[]; watchouts: string[]; status: string; published_at: string | null; created_at: string; }
-interface LiveAthlete { firstName: string; fullName: string; initials: string; email: string; type: string; goal: string; goalDate: string; weeksOut: number; aiProfile: string; ftp: number; thresholdPace: string; cssPace: string; }
+interface LiveAthlete { firstName: string; fullName: string; initials: string; email: string; type: string; goal: string; goalDate: string; weeksOut: number; aiProfile: string; ftp: number | null; thresholdPace: string | null; cssPace: string | null; }
 interface AppState { workouts: Record<string, Partial<WorkoutItem>>; blocks: Record<string, {order?:number}>; memory: {at:number;kind:string;text:string}[]; lastSync: Record<string,number>; pendingCount: number; }
 interface CoachProfile { id: string; name: string; initials: string; whatsapp: string | null; email: string | null; }
 
@@ -172,15 +172,15 @@ const PAST_REPORTS = [
 const STATIC_COACH = { name:'Coach Andes', initials:'CA', title:'Head Coach · Endurance', bio:'Coaches endurance athletes with a polarized, periodized approach. Believes the long, easy work is the work.', philosophy:"Discipline is freedom. The plan is the plan — until it isn't.", whatsapp:'+15551234567', whatsappLabel:'+1 (555) 123-4567', reportCadence:'weekly', reportDay:'Monday', email:'coach@andes.ia' };
 function buildCoachDisplay(live: CoachProfile | null) {
   if (!live) return STATIC_COACH;
-  const wa = live.whatsapp || STATIC_COACH.whatsapp;
+  const wa = live.whatsapp || null;
   const waDigits = wa?.replace(/\D/g,'') || '';
-  const waLabel = waDigits.length >= 10 ? `+${waDigits.slice(0,1)} (${waDigits.slice(1,4)}) ${waDigits.slice(4,7)}-${waDigits.slice(7)}` : wa || '';
+  const waLabel = wa ? (waDigits.length >= 10 ? `+${waDigits.slice(0,1)} (${waDigits.slice(1,4)}) ${waDigits.slice(4,7)}-${waDigits.slice(7)}` : wa) : null;
   return {
     ...STATIC_COACH,
     name: live.name,
     initials: live.initials,
-    email: live.email || STATIC_COACH.email,
-    whatsapp: wa || STATIC_COACH.whatsapp,
+    email: live.email || null,
+    whatsapp: wa,
     whatsappLabel: waLabel,
   };
 }
@@ -272,9 +272,9 @@ async function postMemoryEvent(token: string, kind: string, text: string): Promi
 const STATE_KEY = 'andes:state:v1';
 const DEFAULT_STATE: AppState = {
   workouts:{}, blocks:{},
-  memory:[{at:Date.now()-86400000*2,kind:'system',text:'Athlete profile linked to Coach Andes.'}],
-  lastSync:{whoop:Date.now()-1000*60*14},
-  pendingCount:2,
+  memory:[],
+  lastSync:{},
+  pendingCount:0,
 };
 function useAppState() {
   const [state, setState] = useState<AppState>(DEFAULT_STATE);
@@ -447,19 +447,26 @@ function WeekMosaic({week, weekStart, weekLabel, weekOffset, onPrev, onNext, onT
           <button className="btn btn-ghost btn-icon" onClick={onNext}>›</button>
         </div>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:8}}>
-        {days.map(d=><div key={d}><DayHeader date={d} isToday={d===TODAY_KEY}/></div>)}
-        {days.map(d => {
-          const list = byDay[d]||[];
-          return (
-            <div key={`col-${d}`} onDragOver={e=>{e.preventDefault();setOver(d);}} onDragLeave={()=>setOver(o=>o===d?null:o)} onDrop={e=>{e.preventDefault();if(drag)onMove(drag,d);setDrag(null);setOver(null);}}
-              style={{minHeight:220,display:'flex',flexDirection:'column',gap:6,padding:4,background:over===d?'var(--aegean-wash)':'transparent',borderRadius:3,transition:'background 140ms'}}>
-              {list.map(w=><WorkoutCard key={w.id} w={w} draggable onDragStart={()=>setDrag(w.id)} onClick={()=>onOpen(w)} isDragOver={false}/>)}
-              {list.length===0&&<div style={{border:'1px dashed var(--rule-soft)',borderRadius:3,padding:'16px 8px',textAlign:'center',color:'var(--ink-faint)',fontSize:11,fontFamily:'var(--mono)'}}>rest</div>}
-            </div>
-          );
-        })}
-      </div>
+      {week.length===0?(
+        <div style={{padding:'32px 16px',textAlign:'center',border:'1.5px dashed var(--line,var(--rule-soft))',borderRadius:12,marginTop:8}}>
+          <p style={{fontSize:14,fontWeight:500,color:'var(--ink)',marginBottom:6}}>No workouts scheduled this week</p>
+          <p style={{fontSize:12,color:'var(--ink-mute)'}}>Your coach will add your training plan here. Check back soon.</p>
+        </div>
+      ):(
+        <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:8}}>
+          {days.map(d=><div key={d}><DayHeader date={d} isToday={d===TODAY_KEY}/></div>)}
+          {days.map(d => {
+            const list = byDay[d]||[];
+            return (
+              <div key={`col-${d}`} onDragOver={e=>{e.preventDefault();setOver(d);}} onDragLeave={()=>setOver(o=>o===d?null:o)} onDrop={e=>{e.preventDefault();if(drag)onMove(drag,d);setDrag(null);setOver(null);}}
+                style={{minHeight:220,display:'flex',flexDirection:'column',gap:6,padding:4,background:over===d?'var(--aegean-wash)':'transparent',borderRadius:3,transition:'background 140ms'}}>
+                {list.map(w=><WorkoutCard key={w.id} w={w} draggable onDragStart={()=>setDrag(w.id)} onClick={()=>onOpen(w)} isDragOver={false}/>)}
+                {list.length===0&&<div style={{border:'1px dashed var(--rule-soft)',borderRadius:3,padding:'16px 8px',textAlign:'center',color:'var(--ink-faint)',fontSize:11,fontFamily:'var(--mono)'}}>rest</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -511,67 +518,56 @@ function WeekSummary({week, athlete}: {week:WorkoutItem[];athlete:LiveAthlete}) 
 }
 
 // ─── BiometricsRail ───────────────────────────────────────────────────────────
-function BiometricsRail({visible}: {visible:boolean}) {
-  const [b, setB] = useState(BIOMETRICS);
-  const [syncing, setSyncing] = useState(false);
+function BiometricsRail({visible, biometrics, onNav}: {visible:boolean;biometrics:{readiness:number|null;hrv:number|null;sleep:number|null}|null;onNav:(t:string)=>void}) {
   if (!visible) return null;
-  const ringColor = b.recovery>=75?'var(--c-met)':b.recovery>=50?'var(--c-partial)':'var(--c-missed)';
-  function syncNow() {
-    if (syncing) return; setSyncing(true);
-    setTimeout(()=>{ setB(prev=>({...prev,recovery:Math.min(99,prev.recovery+Math.round((Math.random()-0.4)*6)),hrv:Math.max(35,prev.hrv+Math.round((Math.random()-0.5)*5)),rhr:Math.max(40,prev.rhr+Math.round((Math.random()-0.5)*3)),sleepHours:+(prev.sleepHours+(Math.random()-0.5)*0.4).toFixed(1),trend7:[...prev.trend7.slice(1),prev.recovery]})); setSyncing(false); }, 1100);
+  const hasData = biometrics && (biometrics.readiness !== null || biometrics.hrv !== null || biometrics.sleep !== null);
+  if (!hasData) {
+    return (
+      <div className="panel" style={{padding:22}}>
+        <span className="eyebrow">Readiness</span>
+        <div style={{padding:'16px',textAlign:'center',marginTop:12}}>
+          <p style={{fontSize:12,color:'var(--ink-mute)',marginBottom:8}}>No biometric data yet</p>
+          <p style={{fontSize:11,color:'var(--ink-mute)'}}>Connect your Oura Ring or Whoop in <button onClick={()=>onNav('settings:Apps & Devices')} style={{background:'none',border:'none',color:'var(--terracotta)',cursor:'pointer',fontSize:11,padding:0}}>Settings → Integrations</button></p>
+        </div>
+      </div>
+    );
   }
+  const recovery = biometrics.readiness ?? 0;
+  const ringColor = recovery>=75?'var(--c-met)':recovery>=50?'var(--c-partial)':'var(--c-missed)';
   return (
     <div className="panel" style={{padding:22}}>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,gap:8}}>
         <span className="eyebrow">Readiness</span>
-        <div style={{display:'flex',alignItems:'center',gap:6}}>
-          <span className="mono" style={{fontSize:9.5,color:'var(--ink-mute)'}}>{syncing?'syncing…':`${b.device}`}</span>
-          <button onClick={syncNow} className="btn btn-ghost btn-icon" style={{width:24,height:24,padding:0}} disabled={syncing}>
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className={syncing?'spin':''}>
-              <path d="M14 8a6 6 0 1 1-1.76-4.24M14 3v3.5h-3.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
-        </div>
+        <span className="mono" style={{fontSize:9.5,color:'var(--ink-mute)'}}>Oura</span>
       </div>
       <div style={{display:'flex',alignItems:'center',gap:16}}>
         <div style={{position:'relative',width:76,height:76}}>
           <svg width="76" height="76" viewBox="0 0 76 76" style={{transform:'rotate(-90deg)'}}>
             <circle cx="38" cy="38" r="32" stroke="var(--linen-deep)" strokeWidth="6" fill="none"/>
-            <circle cx="38" cy="38" r="32" stroke={ringColor} strokeWidth="6" fill="none" strokeDasharray={2*Math.PI*32} strokeDashoffset={2*Math.PI*32*(1-b.recovery/100)} strokeLinecap="round" style={{transition:'stroke-dashoffset 600ms'}}/>
+            <circle cx="38" cy="38" r="32" stroke={ringColor} strokeWidth="6" fill="none" strokeDasharray={2*Math.PI*32} strokeDashoffset={2*Math.PI*32*(1-recovery/100)} strokeLinecap="round" style={{transition:'stroke-dashoffset 600ms'}}/>
           </svg>
           <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column'}}>
-            <span className="display" style={{fontSize:22,lineHeight:1,color:'var(--ink)'}}>{b.recovery}</span>
+            <span className="display" style={{fontSize:22,lineHeight:1,color:'var(--ink)'}}>{recovery}</span>
             <span className="eyebrow" style={{fontSize:8,marginTop:2}}>recov</span>
           </div>
         </div>
         <div style={{flex:1,fontSize:12,color:'var(--ink-soft)',lineHeight:1.5}}>
-          <strong style={{color:'var(--ink)',fontWeight:500}}>{b.recovery>=75?'Green to train.':b.recovery>=50?'Train moderately.':'Recovery first.'}</strong>{' '}{b.recovery>=75?'HRV is up, sleep was strong.':b.recovery>=50?'Body is asking for steady work.':'Sleep & easy spin today.'}
+          <strong style={{color:'var(--ink)',fontWeight:500}}>{recovery>=75?'Green to train.':recovery>=50?'Train moderately.':'Recovery first.'}</strong>{' '}{recovery>=75?'HRV is up, sleep was strong.':recovery>=50?'Body is asking for steady work.':'Sleep & easy spin today.'}
         </div>
       </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginTop:18,paddingTop:16,borderTop:'1px solid var(--rule-soft)'}}>
-        {([['HRV',b.hrv,'ms','+4'],['Resting HR',b.rhr,'bpm','−2'],['Sleep',b.sleepHours,'h',`${b.sleepScore}%`],['Strain',b.strain,'','yest.']] as [string,number,string,string][]).map(([label,value,unit,delta])=>(
-          <div key={label}><div className="eyebrow" style={{fontSize:9}}>{label}</div><div style={{display:'flex',alignItems:'baseline',gap:4,marginTop:3}}><span className="display" style={{fontSize:18,color:'var(--ink)'}}>{value}</span>{unit&&<span className="mono" style={{fontSize:10,color:'var(--ink-mute)'}}>{unit}</span>}</div><div className="mono" style={{fontSize:9.5,color:'var(--ink-mute)',marginTop:2}}>{delta}</div></div>
+        {([['HRV',biometrics.hrv,'ms'],['Sleep',biometrics.sleep,'%']] as [string,number|null,string][]).map(([label,value,unit])=>(
+          <div key={label}><div className="eyebrow" style={{fontSize:9}}>{label}</div><div style={{display:'flex',alignItems:'baseline',gap:4,marginTop:3}}><span className="display" style={{fontSize:18,color:'var(--ink)'}}>{value??'—'}</span>{value!=null&&unit&&<span className="mono" style={{fontSize:10,color:'var(--ink-mute)'}}>{unit}</span>}</div></div>
         ))}
-      </div>
-      <div style={{marginTop:16,paddingTop:14,borderTop:'1px solid var(--rule-soft)'}}>
-        <span className="eyebrow" style={{fontSize:9}}>Recovery · 7 days</span>
-        <div className="bar-row" style={{height:32,marginTop:6}}>
-          {b.trend7.map((v,i)=><div key={i} style={{height:`${v}%`,background:v>=75?'var(--c-met)':v>=50?'var(--c-partial)':'var(--c-missed)',opacity:i===b.trend7.length-1?1:0.5,transition:'height 400ms'}}/>)}
-        </div>
       </div>
     </div>
   );
 }
 
 // ─── Season page ─────────────────────────────────────────────────────────────
-function buildSeasonData(): Record<string,WorkoutItem[]> {
+function buildSeasonData(currentWeek: WorkoutItem[], lastWeek: WorkoutItem[]): Record<string,WorkoutItem[]> {
   const map: Record<string,WorkoutItem[]> = {};
-  [...LAST_WEEK,...CURRENT_WEEK].forEach(w=>{ if(!map[w.date])map[w.date]=[]; map[w.date].push(w); });
-  const pattern: [string,string,PlannedData][] = [['swim','Threshold',{duration:'1:00:00',tss:55}],['bike','Race-pace',{duration:'1:45:00',tss:105}],['run','Tempo',{duration:'1:00:00',tss:70}],['strength','Lower',{duration:'0:45:00'}],['brick','Sim',{duration:'2:00:00',tss:130}],['rest','Recovery',{duration:'0:30:00'}],['run','Long',{duration:'2:30:00',tss:145}]];
-  const futureStart = new Date('2026-05-04');
-  for(let w=0;w<8;w++){for(let d=0;d<7;d++){const dt=new Date(futureStart);dt.setDate(futureStart.getDate()+w*7+d);const key=dt.toISOString().slice(0,10);if(!map[key])map[key]=[];const[sport,title,planned]=pattern[d];map[key].push(W(key,sport,title,planned,'planned'));}}
-  const pastStart = new Date('2026-01-05');
-  for(let w=0;w<15;w++){for(let d=0;d<7;d++){const dt=new Date(pastStart);dt.setDate(pastStart.getDate()+w*7+d);const key=dt.toISOString().slice(0,10);if(map[key])continue;const[sport,title,planned]=pattern[d];const r=Math.random();const status=r<0.78?'met':r<0.93?'partial':'missed';const compliance=status==='met'?1:status==='partial'?0.6+Math.random()*0.2:Math.random()*0.3;map[key]=[W(key,sport,title,planned,status,{compliance})];}}
+  [...lastWeek,...currentWeek].forEach(w=>{ if(!map[w.date])map[w.date]=[]; map[w.date].push(w); });
   return map;
 }
 
@@ -615,59 +611,70 @@ function DraggableBlockBar({blocks, onMove}: {blocks:typeof SEASON_BLOCKS;onMove
   );
 }
 
-function Season({onOpenWorkout, blockOverrides, onMoveBlock, seasonData}: {onOpenWorkout:(w:WorkoutItem)=>void;blockOverrides:Record<string,{order?:number}>;onMoveBlock:(id:string,order:number)=>void;seasonData:Record<string,WorkoutItem[]>}) {
+function Season({onOpenWorkout, seasonData}: {onOpenWorkout:(w:WorkoutItem)=>void;seasonData:Record<string,WorkoutItem[]>}) {
   const [hoverWeek, setHoverWeek] = useState<number|null>(null);
-  const blocks = useMemo(()=>{
-    const withOrder=SEASON_BLOCKS.map((b,i)=>({...b,order:blockOverrides[b.id]?.order??i}));
-    withOrder.sort((a,b)=>a.order-b.order);
-    let cursor=parseLocalDate('2026-01-05');
-    return withOrder.map(b=>{
-      const start=`${cursor.getFullYear()}-${String(cursor.getMonth()+1).padStart(2,'0')}-${String(cursor.getDate()).padStart(2,'0')}`;
-      const next=new Date(cursor);next.setDate(cursor.getDate()+b.weeks*7);cursor=next;
-      return{...b,start};
-    });
-  },[blockOverrides]);
+  const hasAnyWorkouts = useMemo(()=>Object.values(seasonData).some(v=>v.length>0), [seasonData]);
+  const todayD = useMemo(()=>new Date(), []);
+  // Build a range of weeks centered on today
   const weeks = useMemo(()=>{
-    const start=parseLocalDate('2026-01-05');
+    const now = new Date();
+    const dow = now.getDay();
+    const daysToMon = dow === 0 ? -6 : 1 - dow;
+    const firstMon = new Date(now);
+    firstMon.setDate(now.getDate() + daysToMon - 12*7); // 12 weeks back
     return Array.from({length:28},(_,i)=>{
-      const ws=new Date(start);ws.setDate(start.getDate()+i*7);
+      const ws=new Date(firstMon);ws.setDate(firstMon.getDate()+i*7);
       const days=Array.from({length:7},(_,d)=>{const dt=new Date(ws);dt.setDate(ws.getDate()+d);return`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;});
       return{idx:i,start:ws,days};
     });
   },[]);
-  function blockForWeek(ws: Date) {
-    return blocks.find(b=>{const bs=parseLocalDate(b.start);const be=new Date(bs);be.setDate(bs.getDate()+b.weeks*7);return ws>=bs&&ws<be;});
+  if (!hasAnyWorkouts) {
+    return (
+      <div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:24}}>
+        <div>
+          <div className="panel" style={{padding:'32px 16px',textAlign:'center'}}>
+            <p style={{fontSize:14,fontWeight:500,color:'var(--ink)',marginBottom:6}}>No season plan yet</p>
+            <p style={{fontSize:12,color:'var(--ink-mute)'}}>Your coach will set up your training blocks here.</p>
+          </div>
+        </div>
+        <aside style={{display:'flex',flexDirection:'column',gap:16}}>
+          <div className="panel" style={{padding:22}}>
+            <span className="eyebrow">Methodology</span>
+            <h3 className="display" style={{fontSize:18,margin:'6px 0 14px'}}>How we train</h3>
+            <div className="pullquote" style={{marginBottom:16,fontSize:15}}>"{STATIC_COACH.philosophy}"</div>
+            <div style={{display:'flex',flexDirection:'column',gap:16}}>
+              {METHODOLOGY.map((m,i)=>(
+                <div key={m.id}><div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:4}}><span className="mono" style={{fontSize:10,color:'var(--ink-mute)'}}>0{i+1}</span><h4 className="display" style={{fontSize:14,margin:0,color:'var(--ink)'}}>{m.title}</h4></div><p style={{margin:0,fontSize:12,color:'var(--ink-soft)',lineHeight:1.6,paddingLeft:24}}>{m.body}</p></div>
+              ))}
+            </div>
+          </div>
+        </aside>
+      </div>
+    );
   }
-  const todayD = parseLocalDate('2026-04-27');
   return (
     <div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:24}}>
       <div>
-        <div className="panel" style={{padding:20,marginBottom:20}}>
-          <div className="sec-h"><div><span className="eyebrow">Season</span><h2 style={{marginTop:4}}>Road to Lake Placid</h2><p className="mono" style={{marginTop:4,fontSize:10.5,color:'var(--ink-mute)'}}>Drag a block to re-sequence the season.</p></div><span className="mono" style={{fontSize:11,color:'var(--ink-mute)'}}>Jan 5 — Jul 26 · 28 weeks</span></div>
-          <DraggableBlockBar blocks={blocks} onMove={onMoveBlock}/>
-          <div style={{display:'flex',gap:2,marginTop:6}}>{blocks.map(b=><div key={b.id} style={{flex:b.weeks,fontSize:10,color:'var(--ink-mute)',fontFamily:'var(--mono)'}}>{fmtDate(b.start,{month:'short',day:'numeric'})}</div>)}</div>
-        </div>
         <div className="panel" style={{padding:0,overflow:'hidden'}}>
           <div style={{display:'grid',gridTemplateColumns:'60px 80px repeat(7,1fr) 70px',background:'var(--linen)',borderBottom:'1px solid var(--rule)',padding:'8px 14px'}}>
             <span className="eyebrow" style={{fontSize:9}}>Wk</span>
-            <span className="eyebrow" style={{fontSize:9}}>Phase</span>
+            <span className="eyebrow" style={{fontSize:9}}>Date</span>
             {['MON','TUE','WED','THU','FRI','SAT','SUN'].map(d=><span key={d} className="eyebrow" style={{fontSize:9,textAlign:'center'}}>{d}</span>)}
             <span className="eyebrow" style={{fontSize:9,textAlign:'right'}}>Comp</span>
           </div>
           <div style={{maxHeight:560,overflowY:'auto'}}>
             {weeks.map(wk=>{
-              const block=blockForWeek(wk.start);
               const cells=wk.days.map(date=>{const list=seasonData[date]||[];if(!list.length)return{status:'empty',sport:null,count:0,compliance:null};const w=list[0];return{status:w.status,sport:w.sport,count:list.length,compliance:w.compliance};});
               const done=cells.filter(c=>c.status==='met'||c.status==='partial'||c.status==='missed');
               const wkComp=done.length?Math.round(done.reduce((s,c)=>s+(c.compliance||0),0)/done.length*100):null;
-              const isCurrent=wk.start<=todayD&&todayD<new Date(wk.start.getTime()+7*86400000);
+              const wsMs = wk.start.getTime();
+              const isCurrent=wsMs<=todayD.getTime()&&todayD.getTime()<wsMs+7*86400000;
               return (
                 <div key={wk.idx} onMouseEnter={()=>setHoverWeek(wk.idx)} onMouseLeave={()=>setHoverWeek(null)}
                   style={{display:'grid',gridTemplateColumns:'60px 80px repeat(7,1fr) 70px',padding:'6px 14px',borderBottom:'1px solid var(--rule-soft)',background:isCurrent?'var(--aegean-wash)':hoverWeek===wk.idx?'var(--linen)':'transparent',alignItems:'center',gap:4}}>
                   <span className="mono" style={{fontSize:11,color:isCurrent?'var(--ink)':'var(--ink-mute)',fontWeight:isCurrent?600:400}}>W{wk.idx+1}</span>
                   <div>
                     <div className="mono" style={{fontSize:9.5,color:'var(--ink-mute)'}}>{wk.start.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>
-                    {block&&<div className="mono" style={{fontSize:9,color:`var(--${block.color}-deep)`,textTransform:'uppercase',letterSpacing:'0.1em',marginTop:1}}>{block.phase}</div>}
                   </div>
                   {cells.map((cell,di)=>{
                     const date=wk.days[di];const list=seasonData[date]||[];const w=list[0];
@@ -722,7 +729,7 @@ function CadenceBadge({cadence}: {cadence:string}) {
 function Profile({tab, onTab, memory, athlete, files, reports, uploading, onUpload, onDeleteFile, onToggleAiAccess, uploadError, coach}: {tab:string;onTab:(t:string)=>void;memory:{at:number;kind:string;text:string}[];athlete:LiveAthlete;files:AthleteFile[];reports:TrainingReport[];uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;onToggleAiAccess:(id:string,val:boolean)=>void;uploadError:string|null;coach:ReturnType<typeof buildCoachDisplay>}) {
   const [reportExpanded, setReportExpanded] = useState(false);
   const [openReport, setOpenReport] = useState<TrainingReport|null>(null);
-  const waNumber = (coach.whatsapp||'').replace(/[^\d]/g,'');
+  const waNumber = coach.whatsapp ? coach.whatsapp.replace(/[^\d]/g,'') : '';
   const latestReport = reports[0] ?? null;
   const pastReports = reports.slice(1);
   const waUrl = `https://wa.me/${waNumber}?text=${encodeURIComponent('Hey Coach — quick question about this week.')}`;
@@ -743,9 +750,9 @@ function Profile({tab, onTab, memory, athlete, files, reports, uploading, onUplo
         <div className="panel" style={{padding:22}}>
           <span className="eyebrow">Performance markers</span>
           <div style={{display:'flex',flexDirection:'column',gap:12,marginTop:14}}>
-            <BigStat label="FTP" value={String(athlete.ftp)} unit="W"/>
-            <BigStat label="Threshold pace" value={athlete.thresholdPace}/>
-            <BigStat label="CSS pace" value={athlete.cssPace}/>
+            <BigStat label="FTP" value={athlete.ftp != null ? String(athlete.ftp) : '—'} unit={athlete.ftp != null ? 'W' : undefined}/>
+            <BigStat label="Threshold pace" value={athlete.thresholdPace ?? '—'}/>
+            <BigStat label="CSS pace" value={athlete.cssPace ?? '—'}/>
           </div>
         </div>
         {athlete.aiProfile&&(
@@ -828,12 +835,8 @@ function Profile({tab, onTab, memory, athlete, files, reports, uploading, onUplo
                 )}
               </div>
             ) : (
-              <div className="panel" style={{padding:'48px 36px',textAlign:'center'}}>
-                <p style={{fontSize:32,margin:'0 0 12px'}}>📊</p>
-                <h2 className="display" style={{fontSize:22,margin:'0 0 8px',color:'var(--ink)'}}>No reports yet</h2>
-                <p style={{fontSize:14,color:'var(--ink-soft)',lineHeight:1.6,maxWidth:360,margin:'0 auto'}}>
-                  Your first report will appear here after your coach reviews your first week of training.
-                </p>
+              <div style={{padding:'24px',textAlign:'center',border:'1.5px dashed var(--line,var(--rule-soft))',borderRadius:10}}>
+                <p style={{fontSize:13,color:'var(--ink-mute)'}}>No reports published yet — check back after your first week of training.</p>
               </div>
             )}
 
@@ -910,7 +913,7 @@ function Profile({tab, onTab, memory, athlete, files, reports, uploading, onUplo
             </div>
             {uploadError&&<div style={{padding:'8px 12px',background:'var(--terracotta-wash)',border:'1px solid var(--terracotta-soft)',borderRadius:2,fontSize:12,color:'var(--terracotta-deep)',marginBottom:12}}>{uploadError}</div>}
             <p className="mono" style={{fontSize:10,color:'var(--ink-mute)',margin:'0 0 16px'}}>PDF · TXT · MD · CSV · max 50 MB</p>
-            {files.length===0?<div style={{textAlign:'center',padding:'2rem',color:'var(--ink-mute)'}}><p style={{fontSize:28,margin:'0 0 8px'}}>📁</p><p className="mono" style={{fontSize:11}}>No files uploaded yet</p></div>:(
+            {files.length===0?<div style={{padding:'24px',textAlign:'center',border:'1.5px dashed var(--line,var(--rule-soft))',borderRadius:10}}><p style={{fontSize:13,fontWeight:500,color:'var(--ink)',marginBottom:6}}>No files yet</p><p style={{fontSize:12,color:'var(--ink-mute)',marginBottom:12}}>Upload your medical records, race results, or training history so your coach can build a better plan.</p><label style={{display:'inline-block',padding:'8px 16px',background:'var(--terracotta)',color:'white',border:'none',borderRadius:8,fontSize:12,cursor:'pointer'}}><input id="file-upload-input" type="file" accept=".pdf,.txt,.md,.csv" onChange={e=>{const f=e.target.files?.[0];if(f)onUpload(f);e.target.value='';}} disabled={uploading} style={{display:'none'}}/>{uploading?'Uploading…':'Upload a file'}</label></div>:(
               <div style={{display:'flex',flexDirection:'column',gap:10}}>
                 {files.map(f=>{
                   const aiOn = f.ai_accessible !== false;
@@ -1097,7 +1100,7 @@ function Settings({tweaks, setTweak, section: sectionProp, onSection, onLogout, 
         )}
         {section==='Zones'&&(
           <div>
-            <FieldRow label="FTP" sub="Set or auto-detect from last test"><span style={{display:'flex',alignItems:'center',gap:8}}><input className="input" defaultValue={athlete.ftp} type="number" style={{maxWidth:140}}/> W</span></FieldRow>
+            <FieldRow label="FTP" sub="Set or auto-detect from last test"><span style={{display:'flex',alignItems:'center',gap:8}}><input className="input" defaultValue={athlete.ftp ?? ''} type="number" style={{maxWidth:140}}/> W</span></FieldRow>
             <FieldRow label="Threshold HR"><span style={{display:'flex',alignItems:'center',gap:8}}><input className="input" defaultValue="170" type="number" style={{maxWidth:140}}/> bpm</span></FieldRow>
             <SectionTitle>Cycling zones</SectionTitle>
             {[['Z1 · Recovery','0–155','<128'],['Z2 · Endurance','155–210','128–145'],['Z3 · Tempo','210–235','145–157'],['Z4 · Threshold','235–260','157–170'],['Z5 · VO₂ max','260–295','170–178'],['Z6 · Anaerobic','>295','>178']].map((z,i)=>(
@@ -1318,7 +1321,7 @@ function TopNav({active, onNav, onRefresh, refreshing, pendingCount, onLogout, a
 }
 
 // ─── Dashboard inner ──────────────────────────────────────────────────────────
-function DashboardInner({athlete, files, reports, onSignOut, uploading, onUpload, onDeleteFile, onToggleAiAccess, uploadError, initialCurrentWeek, initialLastWeek, authToken, coachProfile}: {athlete:LiveAthlete;files:AthleteFile[];reports:TrainingReport[];onSignOut:()=>void;uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;onToggleAiAccess:(id:string,val:boolean)=>void;uploadError:string|null;initialCurrentWeek:WorkoutItem[];initialLastWeek:WorkoutItem[];authToken:string|null;coachProfile:CoachProfile|null}) {
+function DashboardInner({athlete, files, reports, onSignOut, uploading, onUpload, onDeleteFile, onToggleAiAccess, uploadError, initialCurrentWeek, initialLastWeek, authToken, coachProfile, biometrics}: {athlete:LiveAthlete;files:AthleteFile[];reports:TrainingReport[];onSignOut:()=>void;uploading:boolean;onUpload:(f:File)=>void;onDeleteFile:(id:string)=>void;onToggleAiAccess:(id:string,val:boolean)=>void;uploadError:string|null;initialCurrentWeek:WorkoutItem[]|null;initialLastWeek:WorkoutItem[]|null;authToken:string|null;coachProfile:CoachProfile|null;biometrics:{readiness:number|null;hrv:number|null;sleep:number|null}|null}) {
   const [page, setPage] = useState<string>('today');
   const [profileTab, setProfileTab] = useState('report');
   const [settingsSection, setSettingsSection] = useState('Profile');
@@ -1329,12 +1332,11 @@ function DashboardInner({athlete, files, reports, onSignOut, uploading, onUpload
   const [toast, setToast] = useState<{title:string;body?:string}|null>(null);
   const [tweaks, setTweaks] = useState<Record<string,unknown>>({density:'comfy',showBiometrics:true,weekStart:'Mon'});
   const [seasonData, setSeasonData] = useState<Record<string,WorkoutItem[]>>({});
-  const [blockOverrides, setBlockOverrides] = useState<Record<string,{order?:number}>>({});
   const [appState, updateState, logMemory] = useAppState();
   const [dbMemory, setDbMemory] = useState<{at:number;kind:string;text:string}[]>([]);
   const coach = useMemo(()=>buildCoachDisplay(coachProfile), [coachProfile]);
 
-  useEffect(()=>{ setSeasonData(buildSeasonData()); },[]);
+  useEffect(()=>{ setSeasonData(buildSeasonData(currentWeek, lastWeek)); },[currentWeek, lastWeek]);
 
   // COA-117: load memory events from API on mount
   useEffect(()=>{
@@ -1358,8 +1360,8 @@ function DashboardInner({athlete, files, reports, onSignOut, uploading, onUpload
   const todayStr = useMemo(()=>new Date().toISOString().slice(0,10), []);
   const curBounds = useMemo(()=>getWeekBounds(0), []);
   const prevBounds = useMemo(()=>getWeekBounds(-1), []);
-  const currentWeek = useMemo(()=>mergeWorkouts(initialCurrentWeek.length>0?initialCurrentWeek:CURRENT_WEEK, appState.workouts),[initialCurrentWeek, appState.workouts]);
-  const lastWeek = useMemo(()=>initialLastWeek.length>0?initialLastWeek:LAST_WEEK, [initialLastWeek]);
+  const currentWeek = useMemo(()=>mergeWorkouts(initialCurrentWeek ?? [], appState.workouts),[initialCurrentWeek, appState.workouts]);
+  const lastWeek = useMemo(()=>initialLastWeek ?? [], [initialLastWeek]);
   const week = weekOffset===0?currentWeek:weekOffset===-1?lastWeek:currentWeek;
   const weekStart = weekOffset===0?curBounds.start:weekOffset===-1?prevBounds.start:curBounds.start;
   const weekLabel = weekOffset===0?curBounds.label:weekOffset===-1?prevBounds.label:curBounds.label;
@@ -1422,11 +1424,11 @@ function DashboardInner({athlete, files, reports, onSignOut, uploading, onUpload
               <WeekSummary week={week} athlete={athlete}/>
             </div>
             <aside style={{display:'flex',flexDirection:'column',gap:20}}>
-              <BiometricsRail visible={tweaks.showBiometrics as boolean}/>
+              <BiometricsRail visible={tweaks.showBiometrics as boolean} biometrics={biometrics} onNav={handleNav}/>
             </aside>
           </div>
         )}
-        {page==='season'&&<Season onOpenWorkout={setSelectedWorkout} blockOverrides={blockOverrides} onMoveBlock={(id,order)=>setBlockOverrides(prev=>({...prev,[id]:{...prev[id],order}}))} seasonData={seasonData}/>}
+        {page==='season'&&<Season onOpenWorkout={setSelectedWorkout} seasonData={seasonData}/>}
         {page==='profile'&&<Profile tab={profileTab} onTab={setProfileTab} memory={dbMemory.length>0?dbMemory:appState.memory} athlete={athlete} files={files} reports={reports} uploading={uploading} onUpload={onUpload} onDeleteFile={onDeleteFile} onToggleAiAccess={onToggleAiAccess} uploadError={uploadError} coach={coach}/>}
         {page==='settings'&&<Settings tweaks={tweaks} setTweak={(k,v)=>setTweaks(prev=>({...prev,[k]:v}))} section={settingsSection} onSection={setSettingsSection} onLogout={onSignOut} athlete={athlete} coach={coach} onSaveProfile={handleSaveProfile}/>}
       </main>
@@ -1446,8 +1448,9 @@ export default function AthleteDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string|null>(null);
-  const [currentWeekWorkouts, setCurrentWeekWorkouts] = useState<WorkoutItem[]>([]);
-  const [lastWeekWorkouts, setLastWeekWorkouts] = useState<WorkoutItem[]>([]);
+  const [currentWeekWorkouts, setCurrentWeekWorkouts] = useState<WorkoutItem[]|null>(null);
+  const [lastWeekWorkouts, setLastWeekWorkouts] = useState<WorkoutItem[]|null>(null);
+  const [biometrics, setBiometrics] = useState<{readiness:number|null;hrv:number|null;sleep:number|null}|null>(null);
   const [authToken, setAuthToken] = useState<string|null>(null);
   const [coachProfile, setCoachProfile] = useState<CoachProfile|null>(null);
   const [reports, setReports] = useState<TrainingReport[]>([]);
@@ -1483,22 +1486,27 @@ export default function AthleteDashboardPage() {
         fetch(`${BACKEND}/api/v1/athlete/reports`,{headers:{Authorization:`Bearer ${token}`}}),
       ]);
       if(profRes.status==='fulfilled'&&(profRes.value as Response).ok){
-        const p = await (profRes.value as Response).json() as Record<string,string>;
-        const fullName = p.full_name||'Athlete';
-        const goalDate = p.target_event_date||'';
+        const p = await (profRes.value as Response).json() as Record<string,unknown>;
+        const fullName = (p.full_name as string)||'Athlete';
+        const goalDate = (p.target_event_date as string)||'';
         setAthlete({
           firstName: fullName.split(' ')[0],
           fullName,
           initials: fullName.split(' ').map((n:string)=>n[0]).slice(0,2).join('').toUpperCase(),
-          email: p.email||'',
-          type: p.primary_sport?p.primary_sport.charAt(0).toUpperCase()+p.primary_sport.slice(1):'Triathlete',
-          goal: p.target_event_name||'Ironman Lake Placid',
+          email: (p.email as string)||'',
+          type: p.primary_sport?(p.primary_sport as string).charAt(0).toUpperCase()+(p.primary_sport as string).slice(1):'Triathlete',
+          goal: (p.target_event_name as string)||'',
           goalDate,
           weeksOut: weeksUntil(goalDate),
-          aiProfile: p.ai_profile_summary||'',
-          ftp: 248,
-          thresholdPace: '4:12/km',
-          cssPace: '1:32/100m',
+          aiProfile: (p.ai_profile_summary as string)||'',
+          ftp: typeof p.ftp === 'number' ? p.ftp : null,
+          thresholdPace: (p.threshold_pace as string) || null,
+          cssPace: (p.css_pace as string) || null,
+        });
+        setBiometrics({
+          readiness: typeof p.oura_readiness === 'number' ? p.oura_readiness : null,
+          hrv: typeof p.oura_hrv === 'number' ? p.oura_hrv : null,
+          sleep: typeof p.oura_sleep_score === 'number' ? p.oura_sleep_score : null,
         });
       } else {
         // Profile fetch failed (RLS, network, or missing data) — show error state
@@ -1586,7 +1594,7 @@ export default function AthleteDashboardPage() {
     );
   }
 
-  return <DashboardInner athlete={athlete} files={files} reports={reports} onSignOut={handleSignOut} uploading={uploading} onUpload={handleUpload} onDeleteFile={handleDeleteFile} onToggleAiAccess={handleToggleAiAccess} uploadError={uploadError} initialCurrentWeek={currentWeekWorkouts} initialLastWeek={lastWeekWorkouts} authToken={authToken} coachProfile={coachProfile}/>;
+  return <DashboardInner athlete={athlete} files={files} reports={reports} onSignOut={handleSignOut} uploading={uploading} onUpload={handleUpload} onDeleteFile={handleDeleteFile} onToggleAiAccess={handleToggleAiAccess} uploadError={uploadError} initialCurrentWeek={currentWeekWorkouts} initialLastWeek={lastWeekWorkouts} authToken={authToken} coachProfile={coachProfile} biometrics={biometrics}/>;
 }
 
 // ─── Stat / Field / Comment helpers ──────────────────────────────────────────
