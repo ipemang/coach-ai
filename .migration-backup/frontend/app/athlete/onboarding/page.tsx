@@ -391,12 +391,13 @@ function StepAboutYou({ athleteType, coachName, onNext, onBack }: {
 
 // ── Step 2: Athletic background ───────────────────────────────────────────────
 
-function StepAthleticBackground({ athleteType, onNext, onBack }: {
+function StepAthleticBackground({ athleteType, onNext, onBack, initialSport, initialLevel }: {
   athleteType: string; onNext: (d: object) => Promise<void>; onBack: () => void;
+  initialSport?: string; initialLevel?: string;
 }) {
-  const [primarySport, setPrimarySport] = useState("");
+  const [primarySport, setPrimarySport] = useState(initialSport ?? "");
   const [secondary, setSecondary] = useState<string[]>([]);
-  const [fitnessLevel, setFitnessLevel] = useState("");
+  const [fitnessLevel, setFitnessLevel] = useState(initialLevel ?? "");
   const [years, setYears] = useState("");
   const [previousCoaches, setPreviousCoaches] = useState("");
   const [competitiveHistory, setCompetitiveHistory] = useState("");
@@ -428,6 +429,11 @@ function StepAthleticBackground({ athleteType, onNext, onBack }: {
 
   return (
     <form onSubmit={submit} style={{ display: "grid", gap: "1.25rem" }}>
+      {(initialSport || initialLevel) && (
+        <div style={{ padding: "8px 12px", background: "var(--aegean-wash)", border: "1px solid oklch(0.78 0.045 200)", borderRadius: 2, fontSize: 12, color: "var(--aegean-deep)", display: "flex", gap: 8, alignItems: "center" }}>
+          <span>✦</span> Your coach pre-filled some of these fields. Review and adjust as needed.
+        </div>
+      )}
       <div>
         <FieldLabel>Primary sport</FieldLabel>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
@@ -468,10 +474,11 @@ function StepAthleticBackground({ athleteType, onNext, onBack }: {
 
 // ── Step 3: Training baseline ─────────────────────────────────────────────────
 
-function StepTrainingBaseline({ token, onNext, onBack }: {
+function StepTrainingBaseline({ token, onNext, onBack, initialHours }: {
   token: string; onNext: (d: object) => Promise<void>; onBack: () => void;
+  initialHours?: string;
 }) {
-  const [hours, setHours] = useState("");
+  const [hours, setHours] = useState(initialHours ?? "");
   const [typicalWeek, setTypicalWeek] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -511,9 +518,12 @@ function StepTrainingBaseline({ token, onNext, onBack }: {
 
 // ── Step 4: Goals & race calendar ─────────────────────────────────────────────
 
-function StepGoals({ onNext, onBack }: { onNext: (d: object) => Promise<void>; onBack: () => void }) {
-  const [eventName, setEventName] = useState("");
-  const [eventDate, setEventDate] = useState("");
+function StepGoals({ onNext, onBack, initialEventName, initialEventDate }: {
+  onNext: (d: object) => Promise<void>; onBack: () => void;
+  initialEventName?: string; initialEventDate?: string;
+}) {
+  const [eventName, setEventName] = useState(initialEventName ?? "");
+  const [eventDate, setEventDate] = useState(initialEventDate ?? "");
   const [eventDistance, setEventDistance] = useState("");
   const [goal, setGoal] = useState("");
   const [success, setSuccess] = useState("");
@@ -541,6 +551,11 @@ function StepGoals({ onNext, onBack }: { onNext: (d: object) => Promise<void>; o
 
   return (
     <form onSubmit={submit} style={{ display: "grid", gap: "1.25rem" }}>
+      {(initialEventName || initialEventDate) && (
+        <div style={{ padding: "8px 12px", background: "var(--aegean-wash)", border: "1px solid oklch(0.78 0.045 200)", borderRadius: 2, fontSize: 12, color: "var(--aegean-deep)", display: "flex", gap: 8, alignItems: "center" }}>
+          <span>✦</span> Your coach pre-filled your target race. Confirm or update the details below.
+        </div>
+      )}
       <div style={{ padding: "10px 14px", background: "var(--linen-deep)", borderRadius: 2, fontSize: 12, color: "var(--ink-soft)" }}>
         Your A-priority race — the main event you&apos;re training toward.
       </div>
@@ -602,8 +617,11 @@ function StepGoals({ onNext, onBack }: { onNext: (d: object) => Promise<void>; o
 
 // ── Step 5: Health & body ─────────────────────────────────────────────────────
 
-function StepHealth({ onNext, onBack }: { onNext: (d: object) => Promise<void>; onBack: () => void }) {
-  const [injuries, setInjuries] = useState("");
+function StepHealth({ onNext, onBack, initialInjuries }: {
+  onNext: (d: object) => Promise<void>; onBack: () => void;
+  initialInjuries?: string;
+}) {
+  const [injuries, setInjuries] = useState(initialInjuries ?? "");
   const [medical, setMedical] = useState("");
   const [medications, setMedications] = useState("");
   const [limiters, setLimiters] = useState("");
@@ -629,6 +647,11 @@ function StepHealth({ onNext, onBack }: { onNext: (d: object) => Promise<void>; 
       <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: 0, lineHeight: 1.65 }}>
         Share only what you&apos;re comfortable with. All fields are optional. This helps your coach and AI give you safer, smarter training recommendations.
       </p>
+      {initialInjuries && (
+        <div style={{ padding: "8px 12px", background: "var(--aegean-wash)", border: "1px solid oklch(0.78 0.045 200)", borderRadius: 2, fontSize: 12, color: "var(--aegean-deep)", display: "flex", gap: 8, alignItems: "center" }}>
+          <span>✦</span> Your coach has added injury notes. Review and update as needed.
+        </div>
+      )}
       <VoiceField label="Injury history" optional value={injuries} onChange={setInjuries} rows={3}
         placeholder="e.g. Right IT band issues above 15K. Stress fracture (right tibia) 2023, fully healed. Left shoulder impingement — affects swimming." />
       <VoiceField label="Current performance limiters" optional value={limiters} onChange={setLimiters} rows={2}
@@ -816,6 +839,15 @@ function GeneratingScreen() {
 
 // ── Page orchestrator ─────────────────────────────────────────────────────────
 
+interface PreProfile {
+  sport?: string;
+  experience_level?: string;
+  weekly_training_hours?: number;
+  target_race?: string;
+  target_race_date?: string;
+  injury_notes?: string;
+}
+
 function OnboardingInner() {
   const router = useRouter();
   // step 0 = type fork, 1–7 = intake steps, 8 = done
@@ -826,6 +858,7 @@ function OnboardingInner() {
   const [aiProfile, setAiProfile] = useState("");
   const [token, setToken] = useState("");
   const [completing, setCompleting] = useState(false);
+  const [preProfile, setPreProfile] = useState<PreProfile>({});
 
   async function getToken(): Promise<string> {
     const supabase = createBrowserSupabase();
@@ -851,6 +884,16 @@ function OnboardingInner() {
       } catch { /* non-fatal */ }
     })();
   }, [router]);
+
+  // Fetch coach's pre-filled profile data from the invite token stored in localStorage
+  useEffect(() => {
+    const inviteToken = localStorage.getItem("pending_athlete_invite");
+    if (!inviteToken) return;
+    fetch(`/api/athletes/invite/pre-profile?token=${encodeURIComponent(inviteToken)}`)
+      .then(r => r.json())
+      .then(data => { if (data?.pre_profile && Object.keys(data.pre_profile).length) setPreProfile(data.pre_profile); })
+      .catch(() => {});
+  }, []);
 
   async function post(endpoint: string, body: object) {
     const t = await getToken();
@@ -916,10 +959,10 @@ function OnboardingInner() {
 
         {step === 0 && <StepTypeFork coachName={coachName} onSelect={handleType} />}
         {step === 1 && <StepAboutYou athleteType={athleteType} coachName={coachName} onNext={(d) => handleStep(1, "background", d)} onBack={() => setStep(0)} />}
-        {step === 2 && <StepAthleticBackground athleteType={athleteType} onNext={(d) => handleStep(2, "background", d)} onBack={() => setStep(1)} />}
-        {step === 3 && <StepTrainingBaseline token={token} onNext={(d) => handleStep(3, "training", d)} onBack={() => setStep(2)} />}
-        {step === 4 && <StepGoals onNext={(d) => handleStep(4, "goals", d)} onBack={() => setStep(3)} />}
-        {step === 5 && <StepHealth onNext={(d) => handleStep(5, "health", d)} onBack={() => setStep(4)} />}
+        {step === 2 && <StepAthleticBackground athleteType={athleteType} onNext={(d) => handleStep(2, "background", d)} onBack={() => setStep(1)} initialSport={preProfile.sport} initialLevel={preProfile.experience_level} />}
+        {step === 3 && <StepTrainingBaseline token={token} onNext={(d) => handleStep(3, "training", d)} onBack={() => setStep(2)} initialHours={preProfile.weekly_training_hours != null ? String(preProfile.weekly_training_hours) : undefined} />}
+        {step === 4 && <StepGoals onNext={(d) => handleStep(4, "goals", d)} onBack={() => setStep(3)} initialEventName={preProfile.target_race} initialEventDate={preProfile.target_race_date} />}
+        {step === 5 && <StepHealth onNext={(d) => handleStep(5, "health", d)} onBack={() => setStep(4)} initialInjuries={preProfile.injury_notes} />}
         {step === 6 && <StepLifestyle onNext={(d) => handleStep(6, "lifestyle", d)} onBack={() => setStep(5)} />}
         {step === 7 && <StepDocuments token={token} onComplete={handleComplete} onBack={() => setStep(6)} />}
         {step === 8 && <StepDone athleteName={athleteName} aiProfile={aiProfile} />}

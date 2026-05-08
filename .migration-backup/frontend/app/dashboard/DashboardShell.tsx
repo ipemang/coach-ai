@@ -1611,37 +1611,66 @@ function RefineModal({ suggestion, onClose, onSend }: {
   );
 }
 
-// ─── Invite Modal (COA-53 / COA-78) ──────────────────────────────────────────
+// ─── Invite Modal (COA-53 / COA-78 / COA-110) ────────────────────────────────
+// Step 1: basic contact info. Step 2: optional athlete pre-fill.
+// Pre-fill data is stored in athlete_connect_tokens.pre_profile and surfaced
+// during the athlete's onboarding so fields arrive pre-populated.
+
+const SPORTS_LIST = ["Triathlon", "Running", "Cycling", "Swimming", "Duathlon", "Trail Running", "Mountain Biking", "Open Water Swimming", "Duathlon", "Other"];
+const LEVELS_LIST = ["Beginner", "Intermediate", "Advanced", "Elite"];
 
 function InviteModal({ onClose }: { onClose: () => void }) {
+  // Step management
+  const [step, setStep] = useState<1 | 2>(1);
+
+  // Step 1 — contact
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [countryCode, setCountryCode] = useState("");
   const [phoneLocal, setPhoneLocal] = useState("");
+
+  // Step 2 — pre-fill (all optional)
+  const [sport, setSport] = useState("");
+  const [level, setLevel] = useState("");
+  const [weeklyHours, setWeeklyHours] = useState("");
+  const [targetRace, setTargetRace] = useState("");
+  const [targetRaceDate, setTargetRaceDate] = useState("");
+  const [injuryNotes, setInjuryNotes] = useState("");
+  const [coachNotes, setCoachNotes] = useState("");
+
+  // Status
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ invite_url: string; sent_whatsapp: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Combine country code + local number into a single string for the API.
-  // Both parts are free-form — no formatting enforced.
   function buildPhoneNumber(): string | undefined {
     const cc = countryCode.trim();
     const local = phoneLocal.trim();
     if (!local) return undefined;
-    if (cc) return `${cc}${local}`;
-    return local;
+    return cc ? `${cc}${local}` : local;
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!name.trim() || !email.trim()) return;
+  function buildPreProfile(): Record<string, unknown> | undefined {
+    const p: Record<string, unknown> = {};
+    if (sport) p.sport = sport;
+    if (level) p.experience_level = level;
+    if (weeklyHours) p.weekly_training_hours = Number(weeklyHours);
+    if (targetRace) p.target_race = targetRace;
+    if (targetRaceDate) p.target_race_date = targetRaceDate;
+    if (injuryNotes.trim()) p.injury_notes = injuryNotes.trim();
+    if (coachNotes.trim()) p.coach_notes = coachNotes.trim();
+    return Object.keys(p).length ? p : undefined;
+  }
+
+  async function handleSend() {
     setLoading(true);
     setError(null);
     try {
       const supabase = createBrowserSupabase();
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token ?? "";
+      const pre_profile = buildPreProfile();
       const res = await fetch("/api/athletes/invite", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -1649,6 +1678,7 @@ function InviteModal({ onClose }: { onClose: () => void }) {
           full_name: name.trim(),
           email: email.trim(),
           phone_number: buildPhoneNumber(),
+          ...(pre_profile ? { pre_profile } : {}),
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -1681,88 +1711,154 @@ function InviteModal({ onClose }: { onClose: () => void }) {
     color: "var(--ink)",
     outline: "none",
     boxSizing: "border-box",
+    width: "100%",
   };
+  const selectStyle: React.CSSProperties = { ...inputStyle, appearance: "none", cursor: "pointer" };
+  const labelStyle: React.CSSProperties = {
+    display: "block", fontFamily: "var(--mono)", fontSize: 10.5,
+    letterSpacing: "0.15em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 6,
+  };
+
+  const maxW = step === 2 ? 560 : 440;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "oklch(0.28 0.022 55 / 0.4)", backdropFilter: "blur(4px)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={onClose}>
-      <div className="ca-panel" style={{ width: "100%", maxWidth: 440, padding: 32 }} onClick={e => e.stopPropagation()}>
-        <div className="ca-eyebrow ca-eyebrow-terra" style={{ marginBottom: 8 }}>New member</div>
-        <h2 className="ca-display" style={{ fontSize: 26, margin: "0 0 20px 0" }}>Invite an athlete</h2>
+      <div className="ca-panel" style={{ width: "100%", maxWidth: maxW, padding: 32, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
 
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+          <div className="ca-eyebrow ca-eyebrow-terra">New member · Step {result ? "done" : step} of 2</div>
+          {step === 2 && !result && (
+            <button onClick={() => setStep(1)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "var(--ink-mute)", fontFamily: "var(--body)" }}>← Back</button>
+          )}
+        </div>
+        <h2 className="ca-display" style={{ fontSize: 26, margin: "0 0 20px 0" }}>
+          {result ? "Invite sent" : step === 1 ? "Invite an athlete" : "Pre-fill their profile"}
+        </h2>
+
+        {/* ── Result view ── */}
         {result ? (
           <div>
-            {result.sent_whatsapp ? (
-              <p style={{ fontSize: 14, color: "var(--ink-soft)", fontFamily: "var(--serif)", marginBottom: 16 }}>
-                ✅ Invite sent to {name} via WhatsApp. You can also share this link directly:
-              </p>
-            ) : (
-              <p style={{ fontSize: 14, color: "var(--ink-soft)", fontFamily: "var(--serif)", marginBottom: 16 }}>
-                Share this onboarding link with {name}:
-              </p>
-            )}
+            <p style={{ fontSize: 14, color: "var(--ink-soft)", fontFamily: "var(--serif)", marginBottom: 16 }}>
+              {result.sent_whatsapp
+                ? `✅ Invite sent to ${name} via WhatsApp. You can also share this link directly:`
+                : `Share this onboarding link with ${name}:`}
+            </p>
             <div style={{ padding: "12px 14px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontSize: 12, fontFamily: "var(--mono)", color: "var(--aegean-deep)", wordBreak: "break-all", marginBottom: 12 }}>
               {result.invite_url}
             </div>
             <div style={{ display: "flex", gap: 10 }}>
-              <button className="ca-btn ca-btn-primary" style={{ flex: 1 }} onClick={handleCopy}>
-                {copied ? "✓ Copied!" : "Copy link"}
-              </button>
+              <button className="ca-btn ca-btn-primary" style={{ flex: 1 }} onClick={handleCopy}>{copied ? "✓ Copied!" : "Copy link"}</button>
               <button className="ca-btn ca-btn-ghost" onClick={onClose}>Done</button>
             </div>
             <p style={{ marginTop: 12, fontSize: 12, color: "var(--ink-mute)", fontFamily: "var(--serif)", fontStyle: "italic" }}>
-              Link expires in 30 days. Athlete completes their profile and is added to your roster.
+              Link expires in 30 days. When {name.split(" ")[0]} opens it, their onboarding form will be pre-populated with whatever you filled in.
             </p>
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
 
-            {/* Full name */}
+        ) : step === 1 ? (
+          /* ── Step 1: Contact info ── */
+          <form onSubmit={e => { e.preventDefault(); setStep(2); }} style={{ display: "grid", gap: 14 }}>
             <div>
-              <label style={{ display: "block", fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.15em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 6 }}>Full name</label>
-              <input type="text" value={name} onChange={e => setName(e.target.value)} required placeholder="Alex Thompson" style={{ ...inputStyle, width: "100%" }} />
+              <label style={labelStyle}>Full name</label>
+              <input type="text" value={name} onChange={e => setName(e.target.value)} required placeholder="Alex Thompson" style={inputStyle} />
             </div>
-
-            {/* Email */}
             <div>
-              <label style={{ display: "block", fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.15em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 6 }}>Email address</label>
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="alex@example.com" style={{ ...inputStyle, width: "100%" }} />
+              <label style={labelStyle}>Email address</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="alex@example.com" style={inputStyle} />
             </div>
-
-            {/* WhatsApp — country code + free-form number */}
             <div>
-              <label style={{ display: "block", fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: "0.15em", textTransform: "uppercase", color: "var(--ink-mute)", marginBottom: 6 }}>
-                WhatsApp number <span style={{ fontWeight: 400, opacity: 0.6 }}>(optional)</span>
-              </label>
+              <label style={labelStyle}>WhatsApp number <span style={{ fontWeight: 400, opacity: 0.6 }}>(optional)</span></label>
               <div style={{ display: "flex", gap: 8 }}>
-                <input
-                  type="text"
-                  value={countryCode}
-                  onChange={e => setCountryCode(e.target.value)}
-                  placeholder="+1"
-                  style={{ ...inputStyle, width: 64, flexShrink: 0 }}
-                />
-                <input
-                  type="text"
-                  value={phoneLocal}
-                  onChange={e => setPhoneLocal(e.target.value)}
-                  placeholder="5550001234"
-                  style={{ ...inputStyle, flex: 1 }}
-                />
+                <input type="text" value={countryCode} onChange={e => setCountryCode(e.target.value)} placeholder="+1" style={{ ...inputStyle, width: 64, flex: "none" }} />
+                <input type="text" value={phoneLocal} onChange={e => setPhoneLocal(e.target.value)} placeholder="5550001234" style={{ ...inputStyle }} />
               </div>
               <p style={{ marginTop: 5, fontSize: 11, color: "var(--ink-mute)", fontFamily: "var(--serif)", fontStyle: "italic" }}>
-                Any format is fine — spaces, dashes, parentheses all work.
+                If provided, the invite is sent automatically via WhatsApp.
               </p>
             </div>
-
-            <p style={{ fontSize: 12, color: "var(--ink-mute)", fontFamily: "var(--serif)", fontStyle: "italic", margin: 0 }}>
-              If a WhatsApp number is provided, the invite link is sent automatically. Otherwise you&apos;ll get a link to share manually.
-            </p>
             {error && <div style={{ padding: "10px 14px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13 }}>{error}</div>}
             <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-              <button type="submit" disabled={loading || !name.trim() || !email.trim()} className="ca-btn ca-btn-terra" style={{ flex: 1 }}>{loading ? "Creating…" : "Send invite →"}</button>
+              <button type="submit" disabled={!name.trim() || !email.trim()} className="ca-btn ca-btn-terra" style={{ flex: 1 }}>
+                Continue: pre-fill profile →
+              </button>
               <button type="button" className="ca-btn ca-btn-ghost" onClick={onClose}>Cancel</button>
             </div>
           </form>
+
+        ) : (
+          /* ── Step 2: Pre-fill ── */
+          <div>
+            <p style={{ fontSize: 13, color: "var(--ink-soft)", fontFamily: "var(--serif)", fontStyle: "italic", margin: "0 0 20px", lineHeight: 1.6 }}>
+              Fill in what you already know about {name.split(" ")[0]}. These fields will arrive pre-populated in their onboarding form — they can still edit everything.
+            </p>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              {/* Sport */}
+              <div>
+                <label style={labelStyle}>Primary sport <span style={{ opacity: 0.5, fontWeight: 400, letterSpacing: 0, textTransform: "none" }}>optional</span></label>
+                <select value={sport} onChange={e => setSport(e.target.value)} style={selectStyle}>
+                  <option value="">Select sport…</option>
+                  {SPORTS_LIST.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+
+              {/* Level */}
+              <div>
+                <label style={labelStyle}>Experience level <span style={{ opacity: 0.5, fontWeight: 400, letterSpacing: 0, textTransform: "none" }}>optional</span></label>
+                <select value={level} onChange={e => setLevel(e.target.value)} style={selectStyle}>
+                  <option value="">Select level…</option>
+                  {LEVELS_LIST.map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </div>
+
+              {/* Weekly hours */}
+              <div>
+                <label style={labelStyle}>Weekly training hours <span style={{ opacity: 0.5, fontWeight: 400, letterSpacing: 0, textTransform: "none" }}>optional</span></label>
+                <input type="number" min={1} max={40} value={weeklyHours} onChange={e => setWeeklyHours(e.target.value)} placeholder="e.g. 10" style={inputStyle} />
+              </div>
+
+              {/* Target race date */}
+              <div>
+                <label style={labelStyle}>Target race date <span style={{ opacity: 0.5, fontWeight: 400, letterSpacing: 0, textTransform: "none" }}>optional</span></label>
+                <input type="date" value={targetRaceDate} onChange={e => setTargetRaceDate(e.target.value)} style={inputStyle} />
+              </div>
+            </div>
+
+            {/* Target race */}
+            <div style={{ marginTop: 14 }}>
+              <label style={labelStyle}>Target race / goal event <span style={{ opacity: 0.5, fontWeight: 400, letterSpacing: 0, textTransform: "none" }}>optional</span></label>
+              <input type="text" value={targetRace} onChange={e => setTargetRace(e.target.value)} placeholder="e.g. Boston Marathon 2026" style={inputStyle} />
+            </div>
+
+            {/* Injuries */}
+            <div style={{ marginTop: 14 }}>
+              <label style={labelStyle}>Injury / health notes <span style={{ opacity: 0.5, fontWeight: 400, letterSpacing: 0, textTransform: "none" }}>optional — shown to athlete</span></label>
+              <textarea value={injuryNotes} onChange={e => setInjuryNotes(e.target.value)} rows={2} placeholder="e.g. Right knee tendinopathy — avoid impact >30 min" style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }} />
+            </div>
+
+            {/* Internal coach notes */}
+            <div style={{ marginTop: 14 }}>
+              <label style={labelStyle}>
+                Private coach notes <span style={{ opacity: 0.5, fontWeight: 400, letterSpacing: 0, textTransform: "none" }}>optional — not shown to athlete</span>
+              </label>
+              <textarea value={coachNotes} onChange={e => setCoachNotes(e.target.value)} rows={2} placeholder="e.g. Motivated but overtrained last season. Focus on easy base first." style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }} />
+            </div>
+
+            {error && <div style={{ marginTop: 14, padding: "10px 14px", background: "var(--terracotta-soft)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, color: "var(--terracotta-deep)", fontSize: 13 }}>{error}</div>}
+
+            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+              <button onClick={handleSend} disabled={loading} className="ca-btn ca-btn-terra" style={{ flex: 1 }}>
+                {loading ? "Sending…" : "Send invite →"}
+              </button>
+              <button onClick={onClose} disabled={loading} className="ca-btn ca-btn-ghost" style={{ whiteSpace: "nowrap" }}>
+                Cancel
+              </button>
+            </div>
+            <p style={{ marginTop: 10, fontSize: 11, color: "var(--ink-mute)", fontFamily: "var(--serif)", fontStyle: "italic" }}>
+              You can always update the profile later from the athlete sidebar.
+            </p>
+          </div>
         )}
       </div>
     </div>
