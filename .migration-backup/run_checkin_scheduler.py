@@ -3,7 +3,11 @@ COA-29: Railway Cron entrypoint for proactive athlete check-in scheduler.
 
 Deploy as a Railway Cron Service:
   Start command: python run_checkin_scheduler.py
-  Schedule: 0 13 * * *  (1pm UTC = 9am ET / 6am PT)
+  Schedule: */30 * * * *  (every 30 min — catches all timezones)
+
+  WHY every 30 min: trigger_window_minutes defaults to 30. Running hourly risks
+  missing athletes if the cron fires just outside their window. The scheduler is
+  idempotent (dedupe_key prevents double-sends), so running more often is safe.
 
 Required env vars:
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,

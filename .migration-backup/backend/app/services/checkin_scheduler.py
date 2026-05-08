@@ -154,7 +154,12 @@ class CheckinScheduler:
         athletes: list[CheckinAthlete] = []
         for row in rows:
             timezone_name = str(row.get("timezone_name") or row.get("timezone") or "UTC")
-            scheduled_time = self._parse_time(row.get("scheduled_time")) or self.config.default_scheduled_time
+            # morning_pulse_time is the dashboard-facing field; scheduled_time is the legacy name
+            scheduled_time = (
+                self._parse_time(row.get("morning_pulse_time"))
+                or self._parse_time(row.get("scheduled_time"))
+                or self.config.default_scheduled_time
+            )
             enabled = row.get("checkins_enabled")
             if enabled is None:
                 enabled = row.get("enabled", True)
