@@ -28,9 +28,19 @@ const MOSAIC_BG = {
   backgroundSize: "auto, auto, 28px 28px",
 } as const;
 
-function WordMark({ size = 26 }: { size?: number }) {
+const ATHLETE_MOSAIC_BG = {
+  backgroundColor: "oklch(0.28 0.022 55)",
+  backgroundImage: [
+    "radial-gradient(circle at 25% 35%, oklch(0.42 0.080 200 / 0.25) 0, transparent 40%)",
+    "radial-gradient(circle at 75% 65%, oklch(0.52 0.130 38 / 0.20) 0, transparent 40%)",
+    "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'><g fill='none' stroke='%23ffffff' stroke-width='0.4' opacity='0.12'><path d='M0 14 L14 0 L28 14 L14 28 Z'/><path d='M7 7 L21 7 L21 21 L7 21 Z'/></g></svg>\")",
+  ].join(", "),
+  backgroundSize: "auto, auto, 28px 28px",
+} as const;
+
+function WordMark({ size = 26, light = false }: { size?: number; light?: boolean }) {
   return (
-    <span style={{ fontFamily: SERIF, fontWeight: 500, fontSize: size, letterSpacing: "-0.01em", color: INK }}>
+    <span style={{ fontFamily: SERIF, fontWeight: 500, fontSize: size, letterSpacing: "-0.01em", color: light ? "oklch(0.94 0.015 70)" : INK }}>
       Andes<span style={{ color: TERRA_DEEP }}>.</span>IA
     </span>
   );
@@ -49,6 +59,7 @@ function GoogleIcon() {
 
 export default function LoginPage() {
   const router = useRouter();
+  const [role, setRole] = useState<"coach" | "athlete">("coach");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -94,50 +105,88 @@ export default function LoginPage() {
     transition: "border-color 160ms ease",
   };
 
+  const isCoach = role === "coach";
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 480px", minHeight: "100vh" }}>
       {/* Left — brand panel */}
-      <div style={{ ...MOSAIC_BG, display: "flex", alignItems: "center", justifyContent: "center", padding: "64px 56px" }}>
-        <div style={{ maxWidth: 460 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+      {isCoach ? (
+        <div style={{ ...MOSAIC_BG, display: "flex", alignItems: "center", justifyContent: "center", padding: "64px 56px" }}>
+          <div style={{ maxWidth: 460 }}>
             <WordMark size={32} />
-          </div>
-
-          <h1 style={{
-            fontFamily: SERIF, fontSize: 56, fontWeight: 500,
-            letterSpacing: "-0.015em", lineHeight: 1.0,
-            color: INK, margin: "32px 0 0",
-          }}>
-            Welcome back.
-          </h1>
-          <p style={{
-            fontFamily: SERIF, fontStyle: "italic",
-            fontSize: 18, lineHeight: 1.55,
-            color: INK_SOFT, marginTop: 16,
-          }}>
-            Your athletes are waiting on you. Andes is waiting on you, too — quietly, at the kitchen table.
-          </p>
-
-          {/* Decorative mosaic pattern */}
-          <svg width="180" height="180" viewBox="0 0 180 180" style={{ display: "block", marginTop: 40, opacity: 0.35 }} aria-hidden>
-            {Array.from({ length: 6 }).map((_, r) =>
-              Array.from({ length: 6 }).map((_, c) => {
-                const x = c * 30, y = r * 30;
-                return (
-                  <g key={`${r}-${c}`} fill="none" stroke="oklch(0.52 0.130 38)" strokeWidth="0.6">
-                    <path d={`M${x+15},${y} L${x+30},${y+15} L${x+15},${y+30} L${x},${y+15} Z`}/>
-                  </g>
-                );
-              })
-            )}
-          </svg>
-
-          <div style={{ marginTop: 32, display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.16em", textTransform: "uppercase", color: TERRA_DEEP, background: "oklch(0.86 0.055 45)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, padding: "3px 10px" }}>Coach portal</span>
-            <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.16em", textTransform: "uppercase", color: INK_MUTE, background: LINEN, border: `1px solid ${RULE}`, borderRadius: 2, padding: "3px 10px" }}>v 0.9</span>
+            <h1 style={{
+              fontFamily: SERIF, fontSize: 56, fontWeight: 500,
+              letterSpacing: "-0.015em", lineHeight: 1.0,
+              color: INK, margin: "32px 0 0",
+            }}>
+              Welcome back,<br />
+              <em style={{ fontStyle: "italic", color: TERRA_DEEP }}>Coach.</em>
+            </h1>
+            <p style={{
+              fontFamily: SERIF, fontStyle: "italic",
+              fontSize: 18, lineHeight: 1.55,
+              color: INK_SOFT, marginTop: 16,
+            }}>
+              Your athletes are waiting on you. Andes is waiting on you too — quietly, at the kitchen table.
+            </p>
+            <svg width="180" height="180" viewBox="0 0 180 180" style={{ display: "block", marginTop: 40, opacity: 0.35 }} aria-hidden>
+              {Array.from({ length: 6 }).map((_, r) =>
+                Array.from({ length: 6 }).map((_, c) => {
+                  const x = c * 30, y = r * 30;
+                  return (
+                    <g key={`${r}-${c}`} fill="none" stroke="oklch(0.52 0.130 38)" strokeWidth="0.6">
+                      <path d={`M${x+15},${y} L${x+30},${y+15} L${x+15},${y+30} L${x},${y+15} Z`}/>
+                    </g>
+                  );
+                })
+              )}
+            </svg>
+            <div style={{ marginTop: 32, display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.16em", textTransform: "uppercase", color: TERRA_DEEP, background: "oklch(0.86 0.055 45)", border: "1px solid oklch(0.80 0.08 45)", borderRadius: 2, padding: "3px 10px" }}>Coach portal</span>
+              <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.16em", textTransform: "uppercase", color: INK_MUTE, background: LINEN, border: `1px solid ${RULE}`, borderRadius: 2, padding: "3px 10px" }}>v 0.9</span>
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div style={{ ...ATHLETE_MOSAIC_BG, display: "flex", alignItems: "center", justifyContent: "center", padding: "64px 56px" }}>
+          <div style={{ maxWidth: 460 }}>
+            <WordMark size={32} light />
+            <h1 style={{
+              fontFamily: SERIF, fontSize: 56, fontWeight: 500,
+              letterSpacing: "-0.015em", lineHeight: 1.0,
+              color: "oklch(0.94 0.015 70)", margin: "32px 0 0",
+            }}>
+              Welcome back,<br />
+              <em style={{ fontStyle: "italic", color: TERRA_DEEP }}>Athlete.</em>
+            </h1>
+            <p style={{
+              fontFamily: SERIF, fontStyle: "italic",
+              fontSize: 18, lineHeight: 1.55,
+              color: "oklch(0.75 0.015 70)", marginTop: 16,
+            }}>
+              Your coach set up your account. Log in to see your training pulse, check-ins, and weekly messages.
+            </p>
+            <div style={{ marginTop: 40, display: "flex", flexDirection: "column", gap: 14 }}>
+              {[
+                "Daily pulse check-ins tailored to your week",
+                "Messages from your coach, in their own words",
+                "Training context & progress at a glance",
+              ].map((item, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                  <span style={{ color: TERRA_DEEP, flexShrink: 0, marginTop: 2 }}>✓</span>
+                  <span style={{ fontFamily: BODY, fontSize: 14.5, color: "oklch(0.80 0.015 70)", lineHeight: 1.5 }}>{item}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 40, borderTop: "1px solid oklch(1 0 0 / 0.1)", paddingTop: 24 }}>
+              <p style={{ fontFamily: BODY, fontSize: 13, color: "oklch(0.65 0.015 70)", margin: 0, lineHeight: 1.6 }}>
+                Don&apos;t have an account yet?{" "}
+                <span style={{ color: "oklch(0.80 0.015 70)" }}>Your coach will send you an invitation link to get started.</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Right — form panel */}
       <div style={{
@@ -150,8 +199,38 @@ export default function LoginPage() {
         <div style={{ width: "100%", maxWidth: 380, margin: "0 auto" }}>
 
           {/* Wordmark */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
             <WordMark size={22} />
+          </div>
+
+          {/* Role tabs */}
+          <div style={{ display: "flex", border: `1px solid ${RULE}`, borderRadius: 2, overflow: "hidden", marginBottom: 16 }}>
+            <button
+              type="button"
+              onClick={() => { setRole("coach"); setError(null); }}
+              style={{
+                flex: 1, padding: "9px 10px",
+                background: isCoach ? INK : "transparent",
+                color: isCoach ? PARCHMENT : INK_MUTE,
+                fontFamily: MONO, fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase",
+                border: "none", cursor: "pointer", transition: "all 120ms ease",
+              }}
+            >
+              Coach
+            </button>
+            <button
+              type="button"
+              onClick={() => { setRole("athlete"); setError(null); }}
+              style={{
+                flex: 1, padding: "9px 10px",
+                background: !isCoach ? INK : "transparent",
+                color: !isCoach ? PARCHMENT : INK_MUTE,
+                fontFamily: MONO, fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase",
+                border: "none", cursor: "pointer", transition: "all 120ms ease",
+              }}
+            >
+              Athlete
+            </button>
           </div>
 
           {/* Mode tabs */}
@@ -159,40 +238,52 @@ export default function LoginPage() {
             <span style={{ flex: 1, padding: "9px 10px", background: INK, color: PARCHMENT, fontFamily: MONO, fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", textAlign: "center" }}>
               Sign in
             </span>
-            <Link href="/signup" style={{ flex: 1, padding: "9px 10px", background: "transparent", color: INK_MUTE, fontFamily: MONO, fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", textAlign: "center", textDecoration: "none" }}>
-              Create account
-            </Link>
+            {isCoach ? (
+              <Link href="/signup" style={{ flex: 1, padding: "9px 10px", background: "transparent", color: INK_MUTE, fontFamily: MONO, fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", textAlign: "center", textDecoration: "none" }}>
+                Create account
+              </Link>
+            ) : (
+              <span style={{ flex: 1, padding: "9px 10px", background: "transparent", color: INK_MUTE, fontFamily: MONO, fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", textAlign: "center", opacity: 0.4 }}>
+                Via invite
+              </span>
+            )}
           </div>
 
           <h2 style={{ fontFamily: SERIF, fontSize: 30, fontWeight: 500, color: INK, margin: "0 0 6px" }}>
-            Sign in to your portal
+            {isCoach ? "Sign in to your portal" : "Sign in to your app"}
           </h2>
           <p style={{ fontFamily: BODY, fontSize: 13.5, color: INK_SOFT, margin: "0 0 20px" }}>
-            Use your coaching email — or continue with Google.
+            {isCoach
+              ? "Use your coaching email — or continue with Google."
+              : "Use the email your coach invited you with."}
           </p>
 
-          {/* Google */}
-          <button
-            type="button"
-            disabled={loading}
-            style={{
-              width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-              padding: "11px 14px",
-              background: PARCHMENT, border: `1px solid ${RULE}`, borderRadius: 2,
-              fontFamily: BODY, fontSize: 13, fontWeight: 500, color: INK,
-              cursor: loading ? "not-allowed" : "pointer",
-            }}
-          >
-            <GoogleIcon />
-            Continue with Google
-          </button>
+          {/* Google (coach only) */}
+          {isCoach && (
+            <>
+              <button
+                type="button"
+                disabled={loading}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                  padding: "11px 14px",
+                  background: PARCHMENT, border: `1px solid ${RULE}`, borderRadius: 2,
+                  fontFamily: BODY, fontSize: 13, fontWeight: 500, color: INK,
+                  cursor: loading ? "not-allowed" : "pointer",
+                }}
+              >
+                <GoogleIcon />
+                Continue with Google
+              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "20px 0" }}>
+                <div style={{ flex: 1, height: 1, background: RULE }} />
+                <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.18em", textTransform: "uppercase", color: INK_MUTE }}>or</span>
+                <div style={{ flex: 1, height: 1, background: RULE }} />
+              </div>
+            </>
+          )}
 
-          {/* Divider */}
-          <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "20px 0" }}>
-            <div style={{ flex: 1, height: 1, background: RULE }} />
-            <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.18em", textTransform: "uppercase", color: INK_MUTE }}>or</span>
-            <div style={{ flex: 1, height: 1, background: RULE }} />
-          </div>
+          {!isCoach && <div style={{ height: 8 }} />}
 
           <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 0 }}>
             <div style={{ marginBottom: 16 }}>
@@ -205,7 +296,7 @@ export default function LoginPage() {
                 onChange={e => setEmail(e.target.value)}
                 required
                 autoComplete="email"
-                placeholder="coach@example.com"
+                placeholder={isCoach ? "coach@example.com" : "athlete@example.com"}
                 style={inputStyle}
               />
             </div>
@@ -257,12 +348,21 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <p style={{ fontFamily: BODY, fontSize: 13, color: INK_SOFT, textAlign: "center", marginTop: 22 }}>
-            No account yet?{" "}
-            <Link href="/signup" style={{ color: TERRA_DEEP, textDecoration: "none", fontWeight: 500 }}>
-              Create one →
-            </Link>
-          </p>
+          {isCoach ? (
+            <p style={{ fontFamily: BODY, fontSize: 13, color: INK_SOFT, textAlign: "center", marginTop: 22 }}>
+              No account yet?{" "}
+              <Link href="/signup" style={{ color: TERRA_DEEP, textDecoration: "none", fontWeight: 500 }}>
+                Create one →
+              </Link>
+            </p>
+          ) : (
+            <p style={{ fontFamily: BODY, fontSize: 12.5, color: INK_MUTE, textAlign: "center", marginTop: 22, lineHeight: 1.6 }}>
+              Athletes join via invite from their coach.{" "}
+              <Link href="/athlete/join" style={{ color: TERRA_DEEP, textDecoration: "none" }}>
+                Have an invite code? →
+              </Link>
+            </p>
+          )}
         </div>
       </div>
     </div>

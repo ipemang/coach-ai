@@ -295,23 +295,27 @@ function KpiTile({ eyebrow, value, label, glyph, large = false, valueColor = "va
 
 // ─── TopBand ──────────────────────────────────────────────────────────────────
 
-function TopBand({ totalPending, onInvite, onSignOut, coachName, searchQuery, onSearchChange }: {
+function TopBand({ totalPending, onInvite, onSignOut, coachName }: {
   totalPending: number;
   onInvite: () => void;
   onSignOut: () => void;
   coachName: string | null;
-  searchQuery: string;
-  onSearchChange: (q: string) => void;
 }) {
   const initials = coachName
     ? coachName.split(" ").slice(0, 2).map(w => w[0] ?? "").join("").toUpperCase()
     : "?";
+  const [signingOut, setSigningOut] = useState(false);
+
+  function handleSignOutClick() {
+    setSigningOut(true);
+    onSignOut();
+  }
 
   return (
     <header style={{ borderBottom: "1px solid var(--rule)", background: "var(--linen)", position: "sticky", top: 0, zIndex: 30 }}>
       <div style={{ maxWidth: 1440, margin: "0 auto", padding: "14px 32px", display: "flex", alignItems: "center", gap: 24 }}>
-        {/* Mosaic wordmark */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {/* Mosaic wordmark — links back to landing page */}
+        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
           <svg width="32" height="32" viewBox="0 0 32 32">
             <rect x="2" y="2" width="28" height="28" fill="none" stroke="var(--ink)" strokeWidth="1" />
             <g fill="var(--terracotta)" opacity="0.85">
@@ -326,20 +330,14 @@ function TopBand({ totalPending, onInvite, onSignOut, coachName, searchQuery, on
             </g>
           </svg>
           <div>
-            <div className="ca-display" style={{ fontSize: 20, lineHeight: 1 }}>
+            <div className="ca-display" style={{ fontSize: 20, lineHeight: 1, color: "var(--ink)" }}>
               Andes<span style={{ color: "var(--terracotta-deep)" }}>.</span>IA
             </div>
             <div className="ca-eyebrow" style={{ fontSize: 8.5, marginTop: 2 }}>THE ATHLETE'S ATHLETE</div>
           </div>
-        </div>
+        </Link>
 
         <div style={{ flex: 1 }} />
-
-        {/* Search */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, width: 260 }}>
-          <G.Search size={14} color="var(--ink-mute)" />
-          <input placeholder="Find an athlete…" value={searchQuery} onChange={e => onSearchChange(e.target.value)} style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontFamily: "var(--body)", fontSize: 13, color: "var(--ink)" }} />
-        </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button className="ca-btn ca-btn-terra" onClick={onInvite} style={{ fontSize: 12 }}>
@@ -350,7 +348,6 @@ function TopBand({ totalPending, onInvite, onSignOut, coachName, searchQuery, on
               {totalPending} pending
             </div>
           )}
-          {/* Coach identity — portrait + name, matching design spec */}
           {coachName && (
             <div style={{ display: "flex", alignItems: "center", gap: 10, paddingLeft: 12, borderLeft: "1px solid var(--rule)" }}>
               <Portrait initials={initials} size={32} tone="ochre" />
@@ -362,7 +359,14 @@ function TopBand({ totalPending, onInvite, onSignOut, coachName, searchQuery, on
               </div>
             </div>
           )}
-          <button className="ca-btn ca-btn-ghost" onClick={onSignOut} style={{ fontSize: 12 }}>Sign out</button>
+          <button
+            className="ca-btn ca-btn-ghost"
+            onClick={handleSignOutClick}
+            disabled={signingOut}
+            style={{ fontSize: 12, opacity: signingOut ? 0.55 : 1 }}
+          >
+            {signingOut ? "Signing out…" : "Sign out"}
+          </button>
         </div>
       </div>
     </header>
@@ -1260,6 +1264,8 @@ function formatHours(h: unknown): string {
   return `${h[0]} – ${h[1]}`;
 }
 
+const DEFAULT_HOURS = { start: "09:00", end: "17:00" };
+
 function OfficeHoursView({ data, onToggle, toggleLoading }: {
   data: OfficeHoursData | null;
   onToggle: () => void;
@@ -1279,7 +1285,56 @@ function OfficeHoursView({ data, onToggle, toggleLoading }: {
   const [keywords, setKeywords] = useState<string[]>(DEFAULT_KEYWORDS);
   const [newKeyword, setNewKeyword] = useState("");
 
+  // ── Schedule edit state ──
+  type DaySchedule = { enabled: boolean; start: string; end: string };
+  const initDaySchedule = (key: string): DaySchedule => {
+    const h = oh?.[key] as string[] | undefined;
+    if (h && h.length >= 2) return { enabled: true, start: h[0], end: h[1] };
+    return { enabled: false, ...DEFAULT_HOURS };
+  };
+  const [editingSchedule, setEditingSchedule] = useState(false);
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [daySchedule, setDaySchedule] = useState<Record<string, DaySchedule>>(() =>
+    Object.fromEntries(DAY_KEYS.map(k => [k, initDaySchedule(k)]))
+  );
+
+  // Reset daySchedule when data loads
+  useEffect(() => {
+    if (oh) {
+      setDaySchedule(Object.fromEntries(DAY_KEYS.map(k => [k, initDaySchedule(k)])));
+    }
+  }, [oh]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleSaveSchedule() {
+    setSavingSchedule(true);
+    setScheduleError(null);
+    const body: Record<string, unknown> = { timezone: "America/New_York", office_hours_enabled: true };
+    for (const k of DAY_KEYS) {
+      const d = daySchedule[k];
+      body[k] = d.enabled ? [d.start, d.end] : null;
+    }
+    try {
+      const res = await fetch("/api/office-hours", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setEditingSchedule(false);
+      } else {
+        const j = await res.json().catch(() => ({}));
+        setScheduleError(j.error ?? "Save failed — try again");
+      }
+    } catch {
+      setScheduleError("Network error — try again");
+    } finally {
+      setSavingSchedule(false);
+    }
+  }
+
   const schedule = DAY_KEYS.map((k, i) => ({
+    key: k,
     day: DAY_NAMES[i],
     hours: formatHours(oh?.[k]),
   }));
@@ -1320,16 +1375,97 @@ function OfficeHoursView({ data, onToggle, toggleLoading }: {
         </div>
 
         <Fret opacity={0.35} />
-        <div style={{ marginTop: 20, display: "flex", flexDirection: "column" }}>
-          {(data ? schedule : DAY_NAMES.map(d => ({ day: d, hours: "—" }))).map((oh, i) => {
-            const closed = oh.hours === "Closed";
-            return (
-              <div key={oh.day} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "14px 0", borderBottom: i < DAY_NAMES.length - 1 ? "1px dashed var(--rule)" : "none" }}>
-                <span className="ca-display" style={{ fontSize: 18, color: closed ? "var(--ink-mute)" : "var(--ink)" }}>{oh.day}</span>
-                <span className="ca-mono" style={{ fontSize: 14, color: closed ? "var(--ink-mute)" : "var(--aegean-deep)" }}>{oh.hours}</span>
+
+        {/* Schedule */}
+        <div style={{ marginTop: 20 }}>
+          {!editingSchedule ? (
+            <>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {schedule.map((row, i) => {
+                  const closed = row.hours === "Closed";
+                  return (
+                    <div key={row.day} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "12px 0", borderBottom: i < DAY_NAMES.length - 1 ? "1px dashed var(--rule)" : "none" }}>
+                      <span className="ca-display" style={{ fontSize: 17, color: closed ? "var(--ink-mute)" : "var(--ink)" }}>{row.day}</span>
+                      <span className="ca-mono" style={{ fontSize: 13, color: closed ? "var(--ink-mute)" : "var(--aegean-deep)" }}>{row.hours}</span>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+              <button
+                className="ca-btn"
+                onClick={() => setEditingSchedule(true)}
+                style={{ marginTop: 18, width: "100%", fontSize: 12 }}
+              >
+                Edit schedule
+              </button>
+            </>
+          ) : (
+            <div>
+              {DAY_KEYS.map((k, i) => {
+                const ds = daySchedule[k];
+                return (
+                  <div key={k} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: i < DAY_KEYS.length - 1 ? "1px dashed var(--rule)" : "none" }}>
+                    {/* Toggle */}
+                    <button
+                      type="button"
+                      onClick={() => setDaySchedule(prev => ({ ...prev, [k]: { ...prev[k], enabled: !prev[k].enabled } }))}
+                      style={{
+                        width: 36, height: 20, borderRadius: 10, border: "none", cursor: "pointer", flexShrink: 0,
+                        background: ds.enabled ? "var(--aegean-deep)" : "var(--rule)",
+                        position: "relative", transition: "background 160ms ease",
+                      }}
+                    >
+                      <span style={{ position: "absolute", top: 2, left: ds.enabled ? 18 : 2, width: 16, height: 16, borderRadius: "50%", background: "white", transition: "left 160ms ease" }} />
+                    </button>
+                    <span className="ca-display" style={{ fontSize: 16, width: 90, color: ds.enabled ? "var(--ink)" : "var(--ink-mute)" }}>
+                      {DAY_NAMES[i]}
+                    </span>
+                    {ds.enabled ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
+                        <input
+                          type="time"
+                          value={ds.start}
+                          onChange={e => setDaySchedule(prev => ({ ...prev, [k]: { ...prev[k], start: e.target.value } }))}
+                          style={{ padding: "4px 8px", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink)", background: "var(--parchment)", outline: "none" }}
+                        />
+                        <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-mute)" }}>→</span>
+                        <input
+                          type="time"
+                          value={ds.end}
+                          onChange={e => setDaySchedule(prev => ({ ...prev, [k]: { ...prev[k], end: e.target.value } }))}
+                          style={{ padding: "4px 8px", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink)", background: "var(--parchment)", outline: "none" }}
+                        />
+                      </div>
+                    ) : (
+                      <span className="ca-mono" style={{ fontSize: 12, color: "var(--ink-mute)", flex: 1 }}>Closed</span>
+                    )}
+                  </div>
+                );
+              })}
+              {scheduleError && (
+                <div style={{ marginTop: 12, padding: "8px 12px", background: "oklch(0.94 0.025 25)", border: "1px solid oklch(0.80 0.060 25)", borderRadius: 2, color: "oklch(0.38 0.090 25)", fontSize: 12, fontFamily: "var(--body)" }}>
+                  {scheduleError}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                <button
+                  className="ca-btn ca-btn-primary"
+                  onClick={handleSaveSchedule}
+                  disabled={savingSchedule}
+                  style={{ flex: 1, fontSize: 12 }}
+                >
+                  {savingSchedule ? "Saving…" : "Save schedule"}
+                </button>
+                <button
+                  className="ca-btn ca-btn-ghost"
+                  onClick={() => { setEditingSchedule(false); setScheduleError(null); }}
+                  style={{ fontSize: 12 }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1649,7 +1785,6 @@ export default function DashboardShell({
   const [filter, setFilter] = useState<Filter>("all");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [refineTarget, setRefineTarget] = useState<Suggestion | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
 
   // ── Live suggestions (start from SSR data, updated by real-time + actions) ──
   const [suggestions, setSuggestions] = useState<Suggestion[]>(initialSuggestions);
@@ -1997,7 +2132,7 @@ export default function DashboardShell({
         return diff >= 0 && diff <= 4; // show ≤4 weeks for "racing soon" filter
       });
       return athletes;
-    })().filter(a => searchQuery === '' || a.full_name?.toLowerCase().includes(searchQuery.toLowerCase()));
+    })();
 
     // Urgency sort: high AI flags → pending suggestions → medium AI flags → rest
     return [...base].sort((a, b) => {
@@ -2020,7 +2155,7 @@ export default function DashboardShell({
 
   return (
     <div className="mosaic-bg" style={{ minHeight: "100vh" }}>
-      <TopBand totalPending={totalPending} onInvite={() => setInviteOpen(true)} onSignOut={handleSignOut} coachName={coachName} searchQuery={searchQuery} onSearchChange={setSearchQuery} />
+      <TopBand totalPending={totalPending} onInvite={() => setInviteOpen(true)} onSignOut={handleSignOut} coachName={coachName} />
 
       <div style={{ maxWidth: 1440, margin: "0 auto", padding: "24px 32px 60px 32px" }}>
         <Greeting athleteCount={athletes.length} racingCount={racing} coachName={coachName} />

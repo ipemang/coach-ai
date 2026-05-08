@@ -42,27 +42,27 @@ function WordMark() {
 
 const NAV_LINKS = [
   ["Features", "/features"],
-  ["How it works", "/#how-it-works"],
+  ["How it works", "/how-it-works"],
   ["Methodology", "/methodology"],
-  ["Pricing", "/#pricing"],
-  ["FAQ", "/#faq"],
+  ["Pricing", "/pricing"],
+  ["FAQ", "/faq"],
 ];
 
 const FOOTER_COLS = [
   {
     head: "Product",
-    links: [["Features", "/features"], ["How it works", "/#how-it-works"], ["Methodology", "/methodology"], ["Pricing", "/#pricing"]],
+    links: [["Features", "/features"], ["How it works", "/how-it-works"], ["Methodology", "/methodology"], ["Pricing", "/pricing"]],
   },
   {
     head: "For coaches",
-    links: [["Onboarding guide", "/onboarding-guide"], ["Voice cloning", "/voice-cloning"], ["Contact us", "/contact"]],
+    links: [["FAQ", "/faq"], ["Security", "/security"], ["Contact us", "/contact"]],
   },
   {
     head: "Resources",
-    links: [["FAQ", "/#faq"], ["Contact", "/contact"]],
+    links: [["Changelog", "/changelog"], ["Contact", "/contact"]],
   },
   {
-    head: "Product",
+    head: "Access",
     links: [["Sign in", "/login"], ["Create account", "/signup"], ["Athlete access", "/athlete/join"]],
   },
 ];

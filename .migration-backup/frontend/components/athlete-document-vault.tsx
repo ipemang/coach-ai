@@ -241,7 +241,7 @@ export function AthleteDocumentVault({ athleteId }: Props) {
               <div>
                 <label style={{ fontSize: 11, fontFamily: "var(--mono)", letterSpacing: "0.08em",
                   textTransform: "uppercase", color: "var(--ink-mute)", display: "block", marginBottom: 4 }}>
-                  File (PDF, TXT, MD, CSV — max 50 MB)
+                  File (PDF, TXT, MD, CSV — max 100 MB)
                 </label>
                 <input
                   ref={fileInputRef}
