@@ -1269,6 +1269,16 @@ function OfficeHoursView({ data, onToggle, toggleLoading }: {
   const autonomous = data?.is_currently_autonomous ?? false;
   const override = data?.ai_autonomy_override ?? false;
 
+  const DEFAULT_VOICE = "Your coach is off the pitch until morning. I've taken your note and they'll see it first thing. If this is urgent — pain, illness, racing today — reply URGENT.";
+  const DEFAULT_KEYWORDS = ["URGENT", "PAIN", "INJURY", "RACE", "EMERGENCY", "SICK"];
+
+  const [voiceModal, setVoiceModal] = useState(false);
+  const [urgencyModal, setUrgencyModal] = useState(false);
+  const [voiceText, setVoiceText] = useState(DEFAULT_VOICE);
+  const [savedVoice, setSavedVoice] = useState(DEFAULT_VOICE);
+  const [keywords, setKeywords] = useState<string[]>(DEFAULT_KEYWORDS);
+  const [newKeyword, setNewKeyword] = useState("");
+
   const schedule = DAY_KEYS.map((k, i) => ({
     day: DAY_NAMES[i],
     hours: formatHours(oh?.[k]),
@@ -1328,16 +1338,84 @@ function OfficeHoursView({ data, onToggle, toggleLoading }: {
         <h2 className="ca-display" style={{ margin: "8px 0 4px 0", fontSize: 28, color: "oklch(0.98 0.02 50)" }}>After-hours reply</h2>
         <Fret opacity={0.3} />
         <div style={{ marginTop: 20, padding: "18px 22px", background: "oklch(1 0 0 / 0.1)", border: "1px solid oklch(1 0 0 / 0.2)", borderRadius: 2, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 17, lineHeight: 1.55, color: "oklch(0.98 0.02 50)" }}>
-          &ldquo;Your coach is off the pitch until morning. I&apos;ve taken your note and they&apos;ll see it first thing. If this is urgent — pain, illness, racing today — reply URGENT.&rdquo;
+          &ldquo;{savedVoice}&rdquo;
         </div>
         <div style={{ marginTop: 18, display: "flex", gap: 10 }}>
-          {[{ label: "Edit voice" }, { label: "Urgency rules" }].map(b => (
-            <button key={b.label} className="ca-btn" title="Coming soon" onClick={() => alert('Coming soon — this feature is in development.')} style={{ background: "oklch(1 0 0 / 0.15)", color: "oklch(0.98 0.02 50)", borderColor: "oklch(1 0 0 / 0.3)", fontSize: 12 }}>
-              {b.label}
-            </button>
-          ))}
+          <button className="ca-btn" onClick={() => { setVoiceText(savedVoice); setVoiceModal(true); }} style={{ background: "oklch(1 0 0 / 0.15)", color: "oklch(0.98 0.02 50)", borderColor: "oklch(1 0 0 / 0.3)", fontSize: 12 }}>
+            Edit voice
+          </button>
+          <button className="ca-btn" onClick={() => setUrgencyModal(true)} style={{ background: "oklch(1 0 0 / 0.15)", color: "oklch(0.98 0.02 50)", borderColor: "oklch(1 0 0 / 0.3)", fontSize: 12 }}>
+            Urgency rules
+          </button>
         </div>
       </div>
+
+      {/* ── Edit voice modal ── */}
+      {voiceModal && (
+        <div style={{ position: "fixed", inset: 0, background: "oklch(0.28 0.022 55 / 0.45)", backdropFilter: "blur(4px)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={() => setVoiceModal(false)}>
+          <div className="ca-panel" style={{ width: "100%", maxWidth: 540, padding: 32 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+              <div>
+                <div className="ca-eyebrow ca-eyebrow-terra" style={{ marginBottom: 6 }}>After-hours understudy</div>
+                <h2 className="ca-display" style={{ fontSize: 24, margin: 0 }}>Edit voice message</h2>
+              </div>
+              <button className="ca-btn ca-btn-ghost" onClick={() => setVoiceModal(false)} style={{ padding: "4px 8px", fontSize: 18 }}>×</button>
+            </div>
+            <p style={{ fontFamily: "var(--body)", fontSize: 13, color: "var(--ink-soft)", margin: "0 0 16px", lineHeight: 1.55 }}>
+              This message is sent automatically when an athlete messages outside your office hours. Write it in your own tone — they&apos;ll hear you, not a bot.
+            </p>
+            <textarea
+              value={voiceText}
+              onChange={e => setVoiceText(e.target.value)}
+              rows={5}
+              style={{ width: "100%", padding: "12px 14px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 15, color: "var(--ink)", outline: "none", resize: "vertical", lineHeight: 1.6, boxSizing: "border-box" }}
+            />
+            <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
+              <button className="ca-btn ca-btn-ghost" onClick={() => setVoiceModal(false)}>Cancel</button>
+              <button className="ca-btn ca-btn-primary" onClick={() => { setSavedVoice(voiceText); setVoiceModal(false); }}>Save message</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Urgency rules modal ── */}
+      {urgencyModal && (
+        <div style={{ position: "fixed", inset: 0, background: "oklch(0.28 0.022 55 / 0.45)", backdropFilter: "blur(4px)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={() => setUrgencyModal(false)}>
+          <div className="ca-panel" style={{ width: "100%", maxWidth: 500, padding: 32 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+              <div>
+                <div className="ca-eyebrow ca-eyebrow-terra" style={{ marginBottom: 6 }}>After-hours escalation</div>
+                <h2 className="ca-display" style={{ fontSize: 24, margin: 0 }}>Urgency keywords</h2>
+              </div>
+              <button className="ca-btn ca-btn-ghost" onClick={() => setUrgencyModal(false)} style={{ padding: "4px 8px", fontSize: 18 }}>×</button>
+            </div>
+            <p style={{ fontFamily: "var(--body)", fontSize: 13, color: "var(--ink-soft)", margin: "0 0 20px", lineHeight: 1.55 }}>
+              If an athlete&apos;s after-hours message contains any of these words, Andes flags it as urgent and will notify you immediately — even outside office hours.
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
+              {keywords.map(kw => (
+                <span key={kw} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "oklch(0.94 0.025 25)", border: "1px solid oklch(0.80 0.060 25)", borderRadius: 2, padding: "5px 10px", fontFamily: "var(--mono)", fontSize: 11, letterSpacing: "0.10em", color: "oklch(0.38 0.090 25)" }}>
+                  {kw}
+                  <button onClick={() => setKeywords(keywords.filter(k => k !== kw))} style={{ background: "none", border: "none", cursor: "pointer", color: "oklch(0.52 0.090 25)", fontSize: 14, lineHeight: 1, padding: 0, marginLeft: 2 }}>×</button>
+                </span>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                value={newKeyword}
+                onChange={e => setNewKeyword(e.target.value.toUpperCase())}
+                onKeyDown={e => { if (e.key === "Enter" && newKeyword.trim()) { setKeywords([...keywords, newKeyword.trim()]); setNewKeyword(""); } }}
+                placeholder="Add keyword…"
+                style={{ flex: 1, padding: "9px 12px", background: "var(--parchment)", border: "1px solid var(--rule)", borderRadius: 2, fontFamily: "var(--mono)", fontSize: 12, letterSpacing: "0.08em", color: "var(--ink)", outline: "none" }}
+              />
+              <button className="ca-btn ca-btn-primary" onClick={() => { if (newKeyword.trim()) { setKeywords([...keywords, newKeyword.trim()]); setNewKeyword(""); } }}>Add</button>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 20 }}>
+              <button className="ca-btn ca-btn-primary" onClick={() => setUrgencyModal(false)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

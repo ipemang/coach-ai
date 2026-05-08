@@ -1246,7 +1246,7 @@ function Settings({tweaks, setTweak, section: sectionProp, onSection, onLogout, 
         )}
         {(section==='Help'||section==='Privacy'||section==='Terms')&&(
           <div style={{display:'flex',flexDirection:'column',gap:14}}>
-            {['Terms of Use','Privacy Policy','HIPAA','Sources & Citations'].map(l=><a key={l} href="#" style={{fontSize:14,color:'var(--ink)',textDecoration:'none',padding:'12px 16px',border:'1px solid var(--rule-soft)',borderRadius:3,background:'var(--linen)',display:'flex',justifyContent:'space-between'}}>{l} <span style={{color:'var(--ink-faint)'}}>↗</span></a>)}
+            {([['Terms of Use','/terms'],['Privacy Policy','/privacy'],['Security','/security'],['Changelog','/changelog']] as [string,string][]).map(([l,href])=><a key={l} href={href} style={{fontSize:14,color:'var(--ink)',textDecoration:'none',padding:'12px 16px',border:'1px solid var(--rule-soft)',borderRadius:3,background:'var(--linen)',display:'flex',justifyContent:'space-between'}}>{l} <span style={{color:'var(--ink-faint)'}}>↗</span></a>)}
           </div>
         )}
         {section==='Profile'&&(

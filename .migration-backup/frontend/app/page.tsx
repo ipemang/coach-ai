@@ -39,6 +39,77 @@ const MOSAIC_BG = {
 
 const TESSERA_OVERLAY = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60'><g fill='none' stroke='%23a89375' stroke-width='0.4' opacity='0.18'><rect x='0.5' y='0.5' width='18' height='18'/><rect x='20.5' y='0.5' width='18' height='18'/><rect x='40.5' y='0.5' width='18' height='18'/><rect x='0.5' y='20.5' width='18' height='18'/><rect x='20.5' y='20.5' width='18' height='18'/><rect x='40.5' y='20.5' width='18' height='18'/><rect x='0.5' y='40.5' width='18' height='18'/><rect x='20.5' y='40.5' width='18' height='18'/><rect x='40.5' y='40.5' width='18' height='18'/></g></svg>")`;
 
+/* ─── Integration SVG logos ──────────────────────────────────────────────── */
+function GarminLogo() {
+  return (
+    <svg viewBox="0 0 32 32" width="28" height="28" fill="none" aria-label="Garmin">
+      <circle cx="16" cy="16" r="14" fill="white" opacity="0.18"/>
+      <path d="M16 5 L22 17 H18.5 V27 H13.5 V17 H10 Z" fill="white" opacity="0.9"/>
+    </svg>
+  );
+}
+function StravaLogo() {
+  return (
+    <svg viewBox="0 0 32 32" width="28" height="28" fill="none" aria-label="Strava">
+      <path d="M19 4 L11 18 H15.5 L11 28 L25 14 H20.5 Z" fill="white" opacity="0.9"/>
+    </svg>
+  );
+}
+function WhoopLogo() {
+  return (
+    <svg viewBox="0 0 32 32" width="28" height="28" fill="none" aria-label="WHOOP">
+      <path d="M4 9 L9 23 L16 11 L23 23 L28 9" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" opacity="0.9"/>
+    </svg>
+  );
+}
+function OuraLogo() {
+  return (
+    <svg viewBox="0 0 32 32" width="28" height="28" fill="none" aria-label="Oura">
+      <circle cx="16" cy="16" r="9" stroke="white" strokeWidth="2.5" opacity="0.9"/>
+      <circle cx="16" cy="16" r="4" fill="white" opacity="0.35"/>
+    </svg>
+  );
+}
+function TrainingPeaksLogo() {
+  return (
+    <svg viewBox="0 0 32 32" width="28" height="28" fill="none" aria-label="TrainingPeaks">
+      <polyline points="3,24 10,10 17,18 24,7 29,24" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" opacity="0.9"/>
+    </svg>
+  );
+}
+function WahooLogo() {
+  return (
+    <svg viewBox="0 0 32 32" width="28" height="28" fill="none" aria-label="Wahoo">
+      <path d="M16 4 L9 16 H13 L10 28 L23 12 H19 L22 4 Z" fill="white" opacity="0.9"/>
+    </svg>
+  );
+}
+function ZwiftLogo() {
+  return (
+    <svg viewBox="0 0 32 32" width="28" height="28" fill="none" aria-label="Zwift">
+      <path d="M5 8 H27 L10 24 H27" stroke="white" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" opacity="0.9"/>
+    </svg>
+  );
+}
+function AppleHealthLogo() {
+  return (
+    <svg viewBox="0 0 32 32" width="28" height="28" fill="none" aria-label="Apple Health">
+      <path d="M16 27 C16 27 4 19 4 11 C4 7.5 6.7 5 10 5 C12.5 5 14.5 6.3 16 8 C17.5 6.3 19.5 5 22 5 C25.3 5 28 7.5 28 11 C28 19 16 27 16 27 Z" fill="white" opacity="0.9"/>
+    </svg>
+  );
+}
+
+const INTEGRATIONS = [
+  { name: "Garmin",        color: "#006B99", Icon: GarminLogo },
+  { name: "Strava",        color: "#FC4C02", Icon: StravaLogo },
+  { name: "WHOOP",         color: "#0d0d0d", Icon: WhoopLogo },
+  { name: "Oura",          color: "#5B3FA8", Icon: OuraLogo },
+  { name: "TrainingPeaks", color: "#1E5C97", Icon: TrainingPeaksLogo },
+  { name: "Wahoo",         color: "#D93025", Icon: WahooLogo },
+  { name: "Zwift",         color: "#E85D04", Icon: ZwiftLogo },
+  { name: "Apple Health",  color: "#C0223A", Icon: AppleHealthLogo },
+];
+
 /* ─── Pricing sub-component ──────────────────────────────────────────────── */
 function PricingSection() {
   const [period, setPeriod] = useState<"monthly" | "yearly">("yearly");
@@ -154,7 +225,7 @@ function FaqSection() {
 export default function LandingPage() {
   return (
     <MarketingShell>
-      {/* Hero */}
+      {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <section style={{ ...MOSAIC_BG, padding: "80px 32px 96px" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", display: "grid", gridTemplateColumns: "1.05fr 0.95fr", gap: 64, alignItems: "center" }}>
           <div>
@@ -178,10 +249,12 @@ export default function LandingPage() {
               ))}
             </div>
           </div>
-          {/* Tessera hero card */}
+
+          {/* Tessera hero card — live coach interface mock */}
           <div style={{ position: "relative", background: LINEN, border: `1px solid ${RULE}`, borderRadius: 4, boxShadow: `0 1px 0 oklch(1 0 0 / 0.6) inset, 0 6px 20px -12px oklch(0.3 0.05 60 / 0.25)`, padding: "22px 24px", overflow: "hidden" }}>
             <div style={{ position: "absolute", inset: 0, backgroundImage: TESSERA_OVERLAY, opacity: 0.6, pointerEvents: "none" }} />
             <div style={{ position: "relative", zIndex: 1 }}>
+              {/* Card header */}
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
                 <div style={{ width: 40, height: 40, borderRadius: 2, background: AEGEAN_WASH, border: `1px solid ${AEGEAN_SOFT}`, display: "grid", placeItems: "center", fontFamily: SERIF, fontWeight: 500, fontSize: 16, color: AEGEAN, flexShrink: 0 }}>PT</div>
                 <div style={{ flex: 1 }}>
@@ -190,23 +263,36 @@ export default function LandingPage() {
                 </div>
                 <span style={{ background: TERRA_SOFT, border: `1px solid oklch(0.80 0.08 45)`, borderRadius: 2, padding: "2px 9px", fontFamily: MONO, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", color: TERRA_DEEP }}>1 Pending</span>
               </div>
+              {/* Athlete message */}
               <div style={{ borderLeft: `2px solid ${OCHRE}`, paddingLeft: 12, marginBottom: 14, fontFamily: SERIF, fontStyle: "italic", fontSize: 13.5, color: INK_SOFT, lineHeight: 1.55 }}>
                 &ldquo;Legs felt heavy on the long run today, but held target pace. Should I rest tomorrow?&rdquo;
               </div>
+              {/* AI draft badge */}
               <div style={{ background: PARCHMENT2, border: `1px solid ${RULE_SOFT}`, borderRadius: 2, padding: "12px 14px", marginBottom: 12 }}>
                 <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: AEGEAN, marginBottom: 6 }}>Suggested reply · <span style={{ color: TERRA_DEEP }}>in your voice</span></div>
                 <p style={{ margin: 0, fontFamily: BODY, fontSize: 13, color: INK, lineHeight: 1.5 }}>Heavy legs after a long run at target pace is a great sign — your body is adapting. Take Tuesday easy, then we&apos;ll see how Thursday&apos;s intervals feel. Trust the process.</p>
               </div>
+              {/* Actions */}
               <div style={{ display: "flex", gap: 8 }}>
                 <button style={{ flex: 1, padding: "10px 16px", background: AEGEAN, color: "oklch(0.97 0.02 190)", border: "none", borderRadius: 2, fontFamily: BODY, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Approve &amp; send</button>
                 <button style={{ padding: "10px 18px", background: PARCHMENT, border: `1px solid ${RULE}`, borderRadius: 2, fontFamily: BODY, fontSize: 13, color: INK, cursor: "pointer" }}>Edit</button>
+              </div>
+              {/* Biometric mini-strip */}
+              <div style={{ marginTop: 14, display: "flex", gap: 8, paddingTop: 14, borderTop: `1px solid ${RULE_SOFT}` }}>
+                {[["HRV", "62", "+4%", AEGEAN], ["Sleep", "7.2h", "−0.3h", OLIVE_DEEP], ["Load", "78", "↑ high", TERRA_DEEP]].map(([label, val, delta, col]) => (
+                  <div key={label as string} style={{ flex: 1, background: PARCHMENT, border: `1px solid ${RULE_SOFT}`, borderRadius: 2, padding: "8px 10px" }}>
+                    <div style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: "0.12em", textTransform: "uppercase", color: INK_MUTE }}>{label}</div>
+                    <div style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 500, color: INK, lineHeight: 1.1, marginTop: 2 }}>{val}</div>
+                    <div style={{ fontFamily: MONO, fontSize: 9, color: col as string, marginTop: 2 }}>{delta}</div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Social proof strip */}
+      {/* ── Social proof strip ───────────────────────────────────────────── */}
       <div style={{ background: LINEN_DEEP, borderTop: `1px solid ${RULE}`, borderBottom: `1px solid ${RULE}` }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "20px 32px", display: "flex", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
           <span style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: INK_MUTE, flexShrink: 0 }}>Trusted by coaches at</span>
@@ -218,7 +304,7 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* ─── CYCLICAL DAILY LOOP ─────────────────────────────────────────── */}
+      {/* ── CYCLICAL DAILY LOOP ──────────────────────────────────────────── */}
       <section id="how-it-works" style={{ background: LINEN_DEEP, borderBottom: `1px solid ${RULE}` }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "80px 32px" }}>
           <div style={{ textAlign: "center", marginBottom: 56 }}>
@@ -231,39 +317,69 @@ export default function LandingPage() {
             </p>
           </div>
 
-          {/* Storyboard: horizontal left-to-right with cyclical loop */}
           <div style={{ position: "relative" }}>
-            {/* Step cards */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 0 }}>
               {[
-                { num: "01", icon: "💬", label: "Listen", sublabel: "Athlete checks in", desc: "A voice note or message on WhatsApp. Andes transcribes, tags sentiment, and flags anything urgent.", color: AEGEAN, colorLight: AEGEAN_WASH },
-                { num: "02", icon: "✍️", label: "Draft", sublabel: "AI writes in your voice", desc: "Pulls in the training plan, last 7 days, and your voice model. Drafts one reply ready to approve.", color: TERRA, colorLight: TERRA_SOFT },
-                { num: "03", icon: "✓", label: "Decide", sublabel: "You approve & send", desc: "One tap to approve, edit, or regenerate. The reply goes from your number. You stay the coach.", color: OLIVE_DEEP, colorLight: "oklch(0.88 0.025 125)" },
-                { num: "04", icon: "↑", label: "Learn", sublabel: "AI improves from your choice", desc: "Each approval or edit is fed back into your voice model. The next draft is already better.", color: OCHRE, colorLight: OCHRE_SOFT },
+                { num: "01", label: "Listen", sublabel: "Athlete checks in", desc: "A voice note or message on WhatsApp. Andes transcribes, tags sentiment, and flags anything urgent.", color: AEGEAN, colorLight: AEGEAN_WASH,
+                  graphic: (
+                    <svg viewBox="0 0 48 48" width="40" height="40" fill="none" style={{ marginBottom: 12 }}>
+                      <circle cx="24" cy="24" r="22" stroke={AEGEAN} strokeWidth="1" opacity="0.3"/>
+                      <rect x="18" y="14" width="12" height="18" rx="6" stroke={AEGEAN} strokeWidth="1.8"/>
+                      <path d="M12 24 C12 31 18 36 24 36 C30 36 36 31 36 24" stroke={AEGEAN} strokeWidth="1.8" strokeLinecap="round"/>
+                      <line x1="24" y1="36" x2="24" y2="42" stroke={AEGEAN} strokeWidth="1.8" strokeLinecap="round"/>
+                    </svg>
+                  )
+                },
+                { num: "02", label: "Draft", sublabel: "AI writes in your voice", desc: "Pulls in the training plan, last 7 days, and your voice model. Drafts one reply ready to approve.", color: TERRA, colorLight: TERRA_SOFT,
+                  graphic: (
+                    <svg viewBox="0 0 48 48" width="40" height="40" fill="none" style={{ marginBottom: 12 }}>
+                      <circle cx="24" cy="24" r="22" stroke={TERRA} strokeWidth="1" opacity="0.3"/>
+                      <rect x="12" y="14" width="24" height="20" rx="2" stroke={TERRA} strokeWidth="1.8"/>
+                      <line x1="16" y1="20" x2="28" y2="20" stroke={TERRA} strokeWidth="1.5" strokeLinecap="round"/>
+                      <line x1="16" y1="24" x2="32" y2="24" stroke={TERRA} strokeWidth="1.5" strokeLinecap="round"/>
+                      <line x1="16" y1="28" x2="26" y2="28" stroke={TERRA} strokeWidth="1.5" strokeLinecap="round"/>
+                    </svg>
+                  )
+                },
+                { num: "03", label: "Decide", sublabel: "You approve & send", desc: "One tap to approve, edit, or regenerate. The reply goes from your number. You stay the coach.", color: OLIVE_DEEP, colorLight: "oklch(0.88 0.025 125)",
+                  graphic: (
+                    <svg viewBox="0 0 48 48" width="40" height="40" fill="none" style={{ marginBottom: 12 }}>
+                      <circle cx="24" cy="24" r="22" stroke={OLIVE_DEEP} strokeWidth="1" opacity="0.3"/>
+                      <circle cx="24" cy="24" r="11" stroke={OLIVE_DEEP} strokeWidth="1.8"/>
+                      <path d="M18 24 L22 28 L30 20" stroke={OLIVE_DEEP} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  )
+                },
+                { num: "04", label: "Learn", sublabel: "AI improves from your choice", desc: "Each approval or edit is fed back into your voice model. The next draft is already better.", color: OCHRE, colorLight: OCHRE_SOFT,
+                  graphic: (
+                    <svg viewBox="0 0 48 48" width="40" height="40" fill="none" style={{ marginBottom: 12 }}>
+                      <circle cx="24" cy="24" r="22" stroke={OCHRE} strokeWidth="1" opacity="0.3"/>
+                      <path d="M14 32 L18 22 L22 27 L27 18 L32 24 L36 16" stroke={OCHRE} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                      <circle cx="36" cy="16" r="2.5" fill={OCHRE}/>
+                    </svg>
+                  )
+                },
               ].map((step, i) => (
                 <div key={step.num} style={{ position: "relative" }}>
-                  {/* Connector arrow between cards */}
                   {i < 3 && (
                     <div style={{ position: "absolute", right: -18, top: "50%", transform: "translateY(-50%)", zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, background: PARCHMENT, border: `1px solid ${RULE}`, borderRadius: "50%" }}>
                       <span style={{ fontFamily: MONO, fontSize: 12, color: INK_MUTE }}>→</span>
                     </div>
                   )}
                   <div style={{ background: LINEN, border: `1px solid ${RULE}`, borderRadius: 4, padding: "28px 24px", margin: "0 2px", height: "100%", boxSizing: "border-box" }}>
-                    {/* Step number */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
-                      <div style={{ width: 32, height: 32, borderRadius: 2, background: step.colorLight, border: `1px solid ${step.color}`, display: "grid", placeItems: "center", flexShrink: 0 }}>
-                        <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 600, color: step.color }}>{step.num}</span>
+                    {step.graphic}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                      <div style={{ width: 28, height: 28, borderRadius: 2, background: step.colorLight, border: `1px solid ${step.color}`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                        <span style={{ fontFamily: MONO, fontSize: 9, fontWeight: 600, color: step.color }}>{step.num}</span>
                       </div>
                       <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: step.color, fontWeight: 600 }}>{step.label}</div>
                     </div>
-                    <div style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500, color: INK, marginBottom: 10 }}>{step.sublabel}</div>
+                    <div style={{ fontFamily: SERIF, fontSize: 19, fontWeight: 500, color: INK, marginBottom: 10 }}>{step.sublabel}</div>
                     <p style={{ fontFamily: BODY, fontSize: 13.5, color: INK_SOFT, lineHeight: 1.6, margin: 0 }}>{step.desc}</p>
                   </div>
                 </div>
               ))}
             </div>
-
-            {/* Loop-back arrow: goes from step 4 back to step 1 */}
             <div style={{ marginTop: 20, display: "flex", alignItems: "center", justifyContent: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 0, width: "100%" }}>
                 <div style={{ flex: 1, height: 2, background: `linear-gradient(to right, ${OCHRE}, ${AEGEAN})`, borderRadius: 1 }} />
@@ -283,17 +399,17 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Feature triptych */}
+      {/* ── Feature triptych ─────────────────────────────────────────────── */}
       <section id="features" style={{ maxWidth: 1200, margin: "0 auto", padding: "80px 32px" }}>
         <div style={{ textAlign: "center", marginBottom: 56 }}>
           <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: TERRA_DEEP, marginBottom: 12 }}>What it does</div>
           <h2 style={{ fontFamily: SERIF, fontSize: 42, fontWeight: 500, margin: 0, color: INK }}>Three ways Andes makes your week back.</h2>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20 }}>
-          {/* Feature 1 — WhatsApp style */}
+
+          {/* Feature 1 — WhatsApp */}
           <div>
-            <div style={{ background: "#ECE5DD", borderRadius: "8px 8px 0 0", overflow: "hidden", marginBottom: 0 }}>
-              {/* WhatsApp header */}
+            <div style={{ background: "#ECE5DD", borderRadius: "8px 8px 0 0", overflow: "hidden" }}>
               <div style={{ background: "#075E54", padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 }}>
                 <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#25D366", display: "grid", placeItems: "center", fontFamily: BODY, fontSize: 12, fontWeight: 700, color: "#fff" }}>C</div>
                 <div>
@@ -322,15 +438,19 @@ export default function LandingPage() {
           {/* Feature 2 — Training plan mosaic */}
           <div>
             <div style={{ background: LINEN, border: `1px solid ${RULE}`, borderRadius: "4px 4px 0 0", padding: "24px", minHeight: 200 }}>
+              <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: INK_MUTE, marginBottom: 12 }}>Week 8 · Build Phase</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                 {[
-                  { label: "VO₂", bg: TERRA_SOFT, color: TERRA_DEEP, span: 1 },
-                  { label: "Threshold · Build", bg: AEGEAN_WASH, color: AEGEAN, span: 2 },
-                  { label: "Long Run", bg: LINEN_DEEP, color: INK, span: 1 },
-                  { label: "Recover", bg: OCHRE_SOFT, color: OLIVE_DEEP, span: 1 },
-                  { label: "Tempo", bg: TERRA_SOFT, color: TERRA_DEEP, span: 1 },
+                  { label: "VO₂ Max", sub: "6×4min", bg: TERRA_SOFT, color: TERRA_DEEP, span: 1 },
+                  { label: "Threshold", sub: "Build block", bg: AEGEAN_WASH, color: AEGEAN, span: 2 },
+                  { label: "Long Run", sub: "32 km", bg: LINEN_DEEP, color: INK, span: 1 },
+                  { label: "Recovery", sub: "Easy", bg: OCHRE_SOFT, color: OLIVE_DEEP, span: 1 },
+                  { label: "Tempo", sub: "3×8min", bg: TERRA_SOFT, color: TERRA_DEEP, span: 1 },
                 ].map((tile, i) => (
-                  <div key={i} style={{ background: tile.bg, border: `1px solid ${RULE}`, borderRadius: 2, padding: "10px 12px", fontFamily: MONO, fontSize: 10, letterSpacing: "0.10em", textTransform: "uppercase", color: tile.color, gridColumn: tile.span === 2 ? "span 2" : undefined }}>{tile.label}</div>
+                  <div key={i} style={{ background: tile.bg, border: `1px solid ${RULE}`, borderRadius: 2, padding: "10px 12px", gridColumn: tile.span === 2 ? "span 2" : undefined }}>
+                    <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.10em", textTransform: "uppercase", color: tile.color, fontWeight: 600 }}>{tile.label}</div>
+                    <div style={{ fontFamily: SERIF, fontSize: 12, color: tile.color, opacity: 0.75, marginTop: 3 }}>{tile.sub}</div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -340,20 +460,18 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Feature 3 — Integrations with brand colors */}
+          {/* Feature 3 — Integration logos */}
           <div>
-            <div style={{ background: LINEN, border: `1px solid ${RULE}`, borderRadius: "4px 4px 0 0", padding: "24px", minHeight: 200, display: "flex", flexWrap: "wrap", gap: 8, alignContent: "flex-start" }}>
-              {[
-                { name: "Garmin", color: "#006B99" }, { name: "Strava", color: "#FC4C02" },
-                { name: "WHOOP", color: "#000000" }, { name: "Oura", color: "#6B4FBB" },
-                { name: "Wahoo", color: "#E63F2A" }, { name: "Zwift", color: "#FF6600" },
-                { name: "TrainingPeaks", color: "#1E5C97" }, { name: "Apple Health", color: "#FF2D55" },
-                { name: "Strava", color: "#FC4C02" },
-              ].filter((v, i, a) => a.findIndex(x => x.name === v.name) === i).map(int => (
-                <span key={int.name} style={{ background: int.color, borderRadius: 4, padding: "5px 12px", fontFamily: BODY, fontSize: 12.5, color: "#fff", fontWeight: 600, letterSpacing: "0.01em" }}>
-                  {int.name}
-                </span>
-              ))}
+            <div style={{ background: LINEN, border: `1px solid ${RULE}`, borderRadius: "4px 4px 0 0", padding: "20px", minHeight: 200 }}>
+              <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: INK_MUTE, marginBottom: 12 }}>Connected platforms</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+                {INTEGRATIONS.map(({ name, color, Icon }) => (
+                  <div key={name} title={name} style={{ background: color, borderRadius: 4, aspectRatio: "1", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, padding: "8px 4px", cursor: "default" }}>
+                    <Icon />
+                    <span style={{ fontFamily: MONO, fontSize: 7, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.75)", textAlign: "center", lineHeight: 1.2 }}>{name.replace(" ", "\n")}</span>
+                  </div>
+                ))}
+              </div>
             </div>
             <div style={{ background: LINEN, border: `1px solid ${RULE}`, borderTop: "none", borderRadius: "0 0 4px 4px", padding: "20px 20px 24px" }}>
               <h3 style={{ fontFamily: SERIF, fontSize: 22, fontWeight: 500, margin: "0 0 10px", color: INK }}>Connects to the wearables they already wear.</h3>
@@ -368,7 +486,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Methodology CTA strip */}
+      {/* ── Methodology strip ─────────────────────────────────────────────── */}
       <div style={{ background: LINEN_DEEP, borderTop: `1px solid ${RULE}`, borderBottom: `1px solid ${RULE}`, padding: "32px" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
           <div>
@@ -381,7 +499,7 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* For coaches — dark band */}
+      {/* ── For coaches — dark band ───────────────────────────────────────── */}
       <section id="for-coaches" style={{ background: INK, color: "oklch(0.94 0.015 70)" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "80px 32px" }}>
           <div style={{ textAlign: "center", marginBottom: 48 }}>
@@ -410,7 +528,57 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Testimonials */}
+      {/* ── By the numbers ───────────────────────────────────────────────── */}
+      <section style={{ background: PARCHMENT, borderBottom: `1px solid ${RULE}` }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "72px 32px" }}>
+          <div style={{ textAlign: "center", marginBottom: 52 }}>
+            <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: TERRA_DEEP, marginBottom: 12 }}>By the numbers</div>
+            <h2 style={{ fontFamily: SERIF, fontSize: 38, fontWeight: 500, margin: 0, color: INK }}>What coaches see after 4 weeks.</h2>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 1, background: RULE, border: `1px solid ${RULE}`, borderRadius: 4, overflow: "hidden" }}>
+            {[
+              { stat: "2.5h", unit: "/ day", label: "Saved on athlete comms", sub: "Average across active coaches", color: AEGEAN, icon: (
+                <svg viewBox="0 0 36 36" width="32" height="32" fill="none">
+                  <circle cx="18" cy="18" r="14" stroke={AEGEAN} strokeWidth="1.5" opacity="0.3"/>
+                  <path d="M18 10 V18 L23 23" stroke={AEGEAN} strokeWidth="2" strokeLinecap="round"/>
+                </svg>
+              )},
+              { stat: "94%", unit: "", label: "Draft approval rate", sub: "After 4 weeks of use", color: OLIVE_DEEP, icon: (
+                <svg viewBox="0 0 36 36" width="32" height="32" fill="none">
+                  <circle cx="18" cy="18" r="14" stroke={OLIVE_DEEP} strokeWidth="1.5" opacity="0.3"/>
+                  <path d="M11 18 L16 23 L25 13" stroke={OLIVE_DEEP} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )},
+              { stat: "8s", unit: "", label: "Average draft generation", sub: "From check-in to reply ready", color: TERRA_DEEP, icon: (
+                <svg viewBox="0 0 36 36" width="32" height="32" fill="none">
+                  <circle cx="18" cy="18" r="14" stroke={TERRA_DEEP} strokeWidth="1.5" opacity="0.3"/>
+                  <path d="M20 10 L13 18 H17 L16 26 L23 18 H19 Z" fill={TERRA_DEEP} opacity="0.8"/>
+                </svg>
+              )},
+              { stat: "31", unit: " athletes", label: "Avg roster on paid plans", sub: "Up from 12 before Andes", color: OCHRE, icon: (
+                <svg viewBox="0 0 36 36" width="32" height="32" fill="none">
+                  <circle cx="18" cy="18" r="14" stroke={OCHRE} strokeWidth="1.5" opacity="0.3"/>
+                  <circle cx="14" cy="16" r="3.5" stroke={OCHRE} strokeWidth="1.8"/>
+                  <circle cx="22" cy="16" r="3.5" stroke={OCHRE} strokeWidth="1.8"/>
+                  <path d="M8 26 C8 22 11 20 14 20 C17 20 19 21 19 21 C19 21 21 20 22 20 C25 20 28 22 28 26" stroke={OCHRE} strokeWidth="1.8" strokeLinecap="round"/>
+                </svg>
+              )},
+            ].map(item => (
+              <div key={item.stat} style={{ background: LINEN, padding: "36px 32px" }}>
+                <div style={{ marginBottom: 16 }}>{item.icon}</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 8 }}>
+                  <span style={{ fontFamily: SERIF, fontSize: 52, fontWeight: 500, lineHeight: 1, color: item.color }}>{item.stat}</span>
+                  {item.unit && <span style={{ fontFamily: BODY, fontSize: 15, color: INK_MUTE }}>{item.unit}</span>}
+                </div>
+                <div style={{ fontFamily: BODY, fontSize: 14, fontWeight: 600, color: INK, marginBottom: 4 }}>{item.label}</div>
+                <div style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 13, color: INK_MUTE }}>{item.sub}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Testimonials ─────────────────────────────────────────────────── */}
       <section style={{ maxWidth: 1200, margin: "0 auto", padding: "80px 32px" }}>
         <div style={{ textAlign: "center", marginBottom: 48 }}>
           <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: TERRA_DEEP, marginBottom: 12 }}>Coaches say</div>
@@ -422,6 +590,11 @@ export default function LandingPage() {
             { q: "I was nervous about the AI replying for me. After two weeks I trust it more than I trust my own typing on the phone at 9pm.", initials: "SL", name: "Sara Lima", sub: "Marathon · 14 athletes", bg: OCHRE_SOFT, c: OLIVE_DEEP },
           ].map(t => (
             <div key={t.initials} style={{ background: LINEN, border: `1px solid ${RULE}`, borderRadius: 4, padding: "36px" }}>
+              {/* Quote graphic */}
+              <svg viewBox="0 0 40 28" width="40" height="28" fill="none" style={{ marginBottom: 20, opacity: 0.3 }}>
+                <path d="M0 28 C0 14 6 6 18 0 L20 4 C12 8 8 14 8 20 H16 V28 Z" fill={t.c}/>
+                <path d="M22 28 C22 14 28 6 40 0 L42 4 C34 8 30 14 30 20 H38 V28 Z" fill={t.c}/>
+              </svg>
               <q style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 20, lineHeight: 1.6, color: INK, display: "block", marginBottom: 28, quotes: "none" }}>&ldquo;{t.q}&rdquo;</q>
               <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                 <div style={{ width: 40, height: 40, borderRadius: 2, background: t.bg, border: `1px solid ${RULE}`, display: "grid", placeItems: "center", fontFamily: SERIF, fontSize: 14, fontWeight: 500, color: t.c, flexShrink: 0 }}>{t.initials}</div>
@@ -435,19 +608,52 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── Integrations full strip ───────────────────────────────────────── */}
+      <section style={{ background: LINEN_DEEP, borderTop: `1px solid ${RULE}`, borderBottom: `1px solid ${RULE}` }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "64px 32px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1.6fr", gap: 64, alignItems: "center" }}>
+            <div>
+              <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: TERRA_DEEP, marginBottom: 16 }}>Works with</div>
+              <h2 style={{ fontFamily: SERIF, fontSize: 36, fontWeight: 500, color: INK, margin: "0 0 16px", lineHeight: 1.15 }}>Every platform your athletes already use.</h2>
+              <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 16, color: INK_SOFT, lineHeight: 1.65, margin: "0 0 24px" }}>
+                Garmin GPS files, WHOOP recovery scores, Oura ring data, Strava activities — all flow into the athlete profile automatically when they authorize the connection.
+              </p>
+              <Link href="/features" style={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: BODY, fontSize: 14, color: AEGEAN, textDecoration: "none", fontWeight: 500 }}>
+                See all integrations →
+              </Link>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+              {INTEGRATIONS.map(({ name, color, Icon }) => (
+                <div key={name} style={{ background: color, borderRadius: 6, padding: "20px 16px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, boxShadow: `0 2px 8px ${color}40` }}>
+                  <Icon />
+                  <span style={{ fontFamily: BODY, fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.9)", textAlign: "center", lineHeight: 1.3 }}>{name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       <PricingSection />
       <FaqSection />
 
-      {/* Bottom CTA */}
-      <section style={{ background: `linear-gradient(160deg, ${TERRA} 0%, ${TERRA_DEEP} 100%)`, padding: "80px 32px", textAlign: "center" }}>
-        <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: "oklch(0.88 0.05 45)", marginBottom: 20 }}>Ready when you are</div>
-        <h2 style={{ fontFamily: SERIF, fontSize: 48, fontWeight: 500, margin: "0 auto 16px", color: "oklch(0.98 0.02 50)", maxWidth: 640, lineHeight: 1.1 }}>
-          You stay the coach. <em style={{ fontStyle: "italic" }}>Andes gives you the time back.</em>
-        </h2>
-        <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 18, color: "oklch(0.92 0.03 50)", marginBottom: 36 }}>14 days free. Coach the way you actually want to.</p>
-        <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-          <Link href="/signup" style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "13px 28px", background: "oklch(1 0 0 / 0.15)", border: "1px solid oklch(1 0 0 / 0.3)", color: "oklch(0.98 0.02 50)", borderRadius: 2, textDecoration: "none", fontFamily: BODY, fontSize: 15, fontWeight: 600 }}>Get started →</Link>
-          <Link href="/contact" style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "13px 28px", background: "transparent", border: "1px solid oklch(1 0 0 / 0.22)", color: "oklch(0.95 0.03 50)", borderRadius: 2, textDecoration: "none", fontFamily: BODY, fontSize: 15 }}>Book a 15-min walkthrough</Link>
+      {/* ── Bottom CTA ───────────────────────────────────────────────────── */}
+      <section style={{ background: `linear-gradient(160deg, ${TERRA} 0%, ${TERRA_DEEP} 100%)`, padding: "80px 32px", textAlign: "center", position: "relative", overflow: "hidden" }}>
+        {/* Decorative SVG background */}
+        <svg viewBox="0 0 800 200" width="100%" height="200" style={{ position: "absolute", bottom: 0, left: 0, opacity: 0.08, pointerEvents: "none" }} aria-hidden>
+          <path d="M0 120 Q200 60 400 120 Q600 180 800 100 L800 200 L0 200 Z" fill="white"/>
+          <path d="M0 150 Q200 90 400 140 Q600 190 800 130 L800 200 L0 200 Z" fill="white" opacity="0.5"/>
+        </svg>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: "oklch(0.88 0.05 45)", marginBottom: 20 }}>Ready when you are</div>
+          <h2 style={{ fontFamily: SERIF, fontSize: 48, fontWeight: 500, margin: "0 auto 16px", color: "oklch(0.98 0.02 50)", maxWidth: 640, lineHeight: 1.1 }}>
+            You stay the coach. <em style={{ fontStyle: "italic" }}>Andes gives you the time back.</em>
+          </h2>
+          <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 18, color: "oklch(0.92 0.03 50)", marginBottom: 36 }}>14 days free. Coach the way you actually want to.</p>
+          <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+            <Link href="/signup" style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "13px 28px", background: "oklch(1 0 0 / 0.15)", border: "1px solid oklch(1 0 0 / 0.3)", color: "oklch(0.98 0.02 50)", borderRadius: 2, textDecoration: "none", fontFamily: BODY, fontSize: 15, fontWeight: 600 }}>Get started →</Link>
+            <Link href="/contact" style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "13px 28px", background: "transparent", border: "1px solid oklch(1 0 0 / 0.22)", color: "oklch(0.95 0.03 50)", borderRadius: 2, textDecoration: "none", fontFamily: BODY, fontSize: 15 }}>Book a 15-min walkthrough</Link>
+          </div>
         </div>
       </section>
     </MarketingShell>
