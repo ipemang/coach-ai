@@ -137,10 +137,12 @@ class CheckinScheduler:
     async def list_candidate_athletes(self) -> list[CheckinAthlete]:
         """Load athlete scheduling rows from Supabase and normalize them."""
 
-        scope = require_scope(self.scope, context="Check-in scheduler")
         table = self.supabase_client.table(self.config.athletes_table)
         query = table.select("*") if hasattr(table, "select") else table
-        query = apply_scope_query(query, scope)
+        # Only apply scope filters when configured — cron runs with service role
+        # and processes all enabled athletes across all coaches.
+        if self.scope and self.scope.is_configured():
+            query = apply_scope_query(query, self.scope)
         if hasattr(query, "eq"):
             query = query.eq("checkins_enabled", True)
         if hasattr(query, "execute"):
@@ -189,11 +191,10 @@ class CheckinScheduler:
     async def _reserve_send_slot(self, send_log: CheckinSendLog) -> bool:
         """Create or reuse a queued log row to prevent duplicate sends."""
 
-        scope = require_scope(self.scope, context="Check-in scheduler send log")
         table = self.supabase_client.table(self.config.send_log_table)
         existing = None
         if hasattr(table, "select") and hasattr(table, "eq"):
-            query = apply_scope_query(table.select("*").eq("dedupe_key", send_log.dedupe_key), scope)
+            query = table.select("*").eq("dedupe_key", send_log.dedupe_key)
             if hasattr(query, "execute"):
                 response = await query.execute()
             else:
@@ -205,7 +206,7 @@ class CheckinScheduler:
             status = str(existing.get("status", "queued"))
             return status not in {"queued", "sent"}
 
-        payload = apply_scope_payload(send_log.to_row(), scope)
+        payload = send_log.to_row()
         if hasattr(table, "insert"):
             insert_result = table.insert(payload)
             if hasattr(insert_result, "execute"):
