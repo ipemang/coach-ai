@@ -94,12 +94,21 @@ export function AthleteSidebar({
   const [coachNotes, setCoachNotes] = useState((cs.coach_notes as string) ?? "");
   const [savingNotes, setSavingNotes] = useState(false);
 
+  async function getAuthHeader(): Promise<Record<string, string>> {
+    const supabase = createBrowserSupabase();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token
+      ? { Authorization: `Bearer ${session.access_token}` }
+      : {};
+  }
+
   async function saveProfile() {
     setSavingProfile(true);
     try {
+      const authHeader = await getAuthHeader();
       const res = await fetch(`/api/athletes/${athlete.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeader },
         body: JSON.stringify({ stable_profile: profileForm }),
       });
       if (res.ok) {
@@ -115,9 +124,10 @@ export function AthleteSidebar({
   async function saveCoachNotes() {
     setSavingNotes(true);
     try {
+      const authHeader = await getAuthHeader();
       const res = await fetch(`/api/athletes/${athlete.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeader },
         body: JSON.stringify({ current_state: { ...cs, coach_notes: coachNotes } }),
       });
       if (res.ok) setEditingNotes(false);
