@@ -125,8 +125,8 @@ export function MarketingShell({ children }: { children: ReactNode }) {
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 32px", borderTop: `1px solid ${RULE}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
           <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: INK_MUTE }}>© 2026 Andes.IA</span>
           <div style={{ display: "flex", gap: 20 }}>
-            {["Privacy", "Terms", "Security"].map(l => (
-              <Link key={l} href="/contact" style={{ fontFamily: BODY, fontSize: 13, color: INK_MUTE, textDecoration: "none" }}>{l}</Link>
+            {([["Privacy", "/privacy"], ["Terms", "/terms"], ["Security", "/security"], ["Changelog", "/changelog"]] as [string, string][]).map(([label, href]) => (
+              <Link key={label} href={href} style={{ fontFamily: BODY, fontSize: 13, color: INK_MUTE, textDecoration: "none" }}>{label}</Link>
             ))}
           </div>
         </div>
