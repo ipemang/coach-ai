@@ -27,14 +27,17 @@ logger = logging.getLogger(__name__)
 
 
 async def main(dry_run: bool = False) -> None:
-    from supabase import create_client
+    from supabase import acreate_client, create_client
 
     from app.core.config import get_settings
     from app.main import WhatsAppGraphClient
     from app.services.checkin_scheduler import CheckinScheduler, WhatsAppTaskAdapter
 
     settings = get_settings()
-    supabase = create_client(settings.supabase_url, settings.supabase_service_role_key)
+    # Sync client for WhatsAppTaskAdapter (_sync_rows calls execute() directly)
+    supabase_sync = create_client(settings.supabase_url, settings.supabase_service_role_key)
+    # Async client for CheckinScheduler (uses `await query.execute()` internally)
+    supabase_async = await acreate_client(settings.supabase_url, settings.supabase_service_role_key)
 
     whatsapp = WhatsAppGraphClient(
         access_token=settings.whatsapp_access_token,
@@ -54,9 +57,9 @@ async def main(dry_run: bool = False) -> None:
 
         adapter = DryRunAdapter()
     else:
-        adapter = WhatsAppTaskAdapter(whatsapp_client=whatsapp, supabase_client=supabase)
+        adapter = WhatsAppTaskAdapter(whatsapp_client=whatsapp, supabase_client=supabase_sync)
 
-    scheduler = CheckinScheduler(task_queue=adapter, supabase_client=supabase)
+    scheduler = CheckinScheduler(task_queue=adapter, supabase_client=supabase_async)
     result = await scheduler.run()
     logger.info(
         "Check-in scheduler run complete: scanned=%d due=%d reserved=%d skipped=%d",
