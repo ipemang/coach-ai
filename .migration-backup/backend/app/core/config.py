@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 class Settings(BaseSettings):
     groq_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
-    openai_model: str = "gpt-4-turbo"
+    # LLM model selection — read by LLMClient directly from env (LLM_PROVIDER, LLM_MODEL).
+    # Do not add model defaults here; LLMClient owns that logic.
     stripe_secret_key: Optional[str] = None
     supabase_url: Optional[str] = None
     supabase_service_role_key: Optional[str] = None
@@ -54,6 +55,30 @@ if not settings.coach_id:
     logger.warning(
         "COACH_ID env var is not set — webhook scope will be unconfigured. "
         "Set COACH_ID in Railway environment variables."
+    )
+if not settings.internal_api_secret:
+    logger.warning(
+        "INTERNAL_API_SECRET env var is not set — the suggestion send endpoint "
+        "(/api/v1/coach/suggestions/{id}/send) is unprotected and accepts any request. "
+        "Set INTERNAL_API_SECRET in Railway env vars on BOTH the backend and frontend services."
+    )
+if not settings.supabase_url or not settings.supabase_service_role_key:
+    logger.warning(
+        "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env var is not set — "
+        "all database operations will fail."
+    )
+if not settings.whatsapp_access_token or not settings.whatsapp_phone_number_id:
+    logger.warning(
+        "WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID env var is not set — "
+        "all WhatsApp sends will fail."
+    )
+# LLM provider — warn if neither key is set
+_has_llm_key = settings.groq_api_key or settings.openai_api_key
+if not _has_llm_key:
+    logger.warning(
+        "Neither GROQ_API_KEY nor OPENAI_API_KEY env var is set — "
+        "all AI/LLM calls will fail at runtime. Set LLM_PROVIDER and the "
+        "matching API key in Railway environment variables."
     )
 
 

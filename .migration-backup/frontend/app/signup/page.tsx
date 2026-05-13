@@ -174,10 +174,10 @@ export default function SignupPage() {
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 480px", minHeight: "100vh" }}>
-      {/* Left — brand panel */}
+    <div className="ca-split-grid">
+      {/* Left — brand panel (hidden on mobile via .ca-split-brand) */}
       {isCoach ? (
-        <div style={{ ...MOSAIC_BG, display: "flex", alignItems: "center", justifyContent: "center", padding: "64px 56px" }}>
+        <div className="ca-split-brand" style={{ ...MOSAIC_BG, alignItems: "center", justifyContent: "center", padding: "64px 56px" }}>
           <div style={{ maxWidth: 460 }}>
             <WordMark size={32} />
             <h1 style={{
@@ -222,7 +222,7 @@ export default function SignupPage() {
           </div>
         </div>
       ) : (
-        <div style={{ ...ATHLETE_MOSAIC_BG, display: "flex", alignItems: "center", justifyContent: "center", padding: "64px 56px" }}>
+        <div className="ca-split-brand" style={{ ...ATHLETE_MOSAIC_BG, alignItems: "center", justifyContent: "center", padding: "64px 56px" }}>
           <div style={{ maxWidth: 460 }}>
             <WordMark size={32} light />
             <h1 style={{

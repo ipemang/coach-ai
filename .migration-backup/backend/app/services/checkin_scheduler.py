@@ -145,6 +145,8 @@ class CheckinScheduler:
             query = apply_scope_query(query, self.scope)
         if hasattr(query, "eq"):
             query = query.eq("checkins_enabled", True)
+        if hasattr(query, "is_"):
+            query = query.is_("archived_at", "null")
         if hasattr(query, "execute"):
             response = await query.execute()
         elif hasattr(query, "data"):

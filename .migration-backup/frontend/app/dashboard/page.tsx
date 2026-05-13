@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { createServerSupabase } from "@/app/lib/supabase-server";
 import DashboardShell from "./DashboardShell";
 import type { Athlete, Suggestion } from "@/app/lib/types";
 
@@ -10,18 +11,26 @@ type BiometricBaseline = {
 };
 
 async function getData() {
+  // Use session-aware client for athletes — RLS policy filters by coach_id claim
+  // so each coach only sees their own athletes. Service role bypasses RLS and
+  // would expose all athletes to any logged-in coach.
+  const supabaseAuth = createServerSupabase();
+
+  // Service role client kept for tables that have no authenticated RLS policy
+  // (biometric_snapshots, suggestions) or for batch cross-athlete queries.
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
   );
 
-  // Fetch athletes + pending suggestions
+  // Fetch athletes — RLS handles coach_id scoping via JWT claims
   const athletes: Athlete[] = (
-    await supabase
+    await supabaseAuth
       .from("athletes")
       .select(
         "id, full_name, phone_number, organization_id, coach_id, stable_profile, current_state, created_at",
       )
+      .is("archived_at", null)
       .order("created_at", { ascending: false })
   ).data ?? [];
 

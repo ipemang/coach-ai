@@ -9,8 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-
-const BACKEND = (process.env.BACKEND_URL ?? "").replace(/\/+$/, "");
+import { BACKEND } from "@/app/lib/backend";
 
 function serverSupabase() {
   const cookieStore = cookies();

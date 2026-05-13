@@ -1,6 +1,6 @@
 # Supabase RLS (Row Level Security) — Andes.IA
 
-**Last updated:** 2026-04-16  
+**Last updated:** 2026-05-08  
 **Supabase project:** `qnvajgifeolwwcyjostm`  
 **Migration:** `coa_68_rls_policies_core_tables`
 
@@ -19,9 +19,9 @@ Supabase uses two key roles:
 
 ## Current Policy Strategy
 
-**Phase:** Pre-auth (COA-62 not yet built)
+**Phase:** Active — COA-62 shipped (2026-04-22)
 
-The backend currently uses the `service_role` key for all DB operations, which bypasses RLS entirely. The RLS policies defined here are **forward-looking** — they will gate real-time subscriptions and direct authenticated queries once COA-62 (coach auth with Google/Apple/email) ships.
+COA-62 shipped the JWT hook that injects `coach_id` and `organization_id` claims into every authenticated session. RLS policies are live and active. The Next.js dashboard uses `createServerSupabase()` (anon key + session cookies) for athlete queries so RLS scoping applies automatically. The FastAPI backend still uses the `service_role` key directly — it is expected to bypass RLS and must apply its own scope filters via `DataScope`.
 
 The policies use a JWT claim pattern:
 ```sql

@@ -4,6 +4,17 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserSupabase } from "@/app/lib/supabase";
 
+const INK      = "oklch(0.28 0.022 55)";
+const INK_SOFT = "oklch(0.42 0.022 60)";
+const INK_MUTE = "oklch(0.58 0.018 65)";
+const PARCHMENT = "oklch(0.965 0.018 85)";
+const LINEN    = "oklch(0.925 0.025 78)";
+const RULE     = "oklch(0.80 0.025 70)";
+const AEGEAN   = "oklch(0.42 0.080 200)";
+const SERIF    = "'Cormorant Garamond', Georgia, serif";
+const BODY     = "'Work Sans', ui-sans-serif, system-ui, sans-serif";
+const MONO     = "'JetBrains Mono', ui-monospace, monospace";
+
 export default function ResetPasswordPage() {
   const router = useRouter();
   const [password, setPassword] = useState("");
@@ -39,36 +50,46 @@ export default function ResetPasswordPage() {
 
   return (
     <div style={{
-      minHeight: "100vh", background: "#0f1117",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      minHeight: "100vh",
+      background: PARCHMENT,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontFamily: BODY,
+      padding: "24px 16px",
     }}>
       <div style={{
-        background: "#1a1d2e", border: "1px solid #2a2d3e",
-        borderRadius: "16px", padding: "48px",
-        width: "100%", maxWidth: "400px",
+        background: "#fff",
+        border: `1px solid ${RULE}`,
+        borderRadius: 12,
+        padding: "44px 40px",
+        width: "100%",
+        maxWidth: 400,
+        boxShadow: "0 2px 16px oklch(0.28 0.022 55 / 0.06)",
       }}>
-        <div style={{ marginBottom: "32px", textAlign: "center" }}>
-          <div style={{
-            width: "48px", height: "48px", borderRadius: "12px",
-            background: "linear-gradient(135deg, #6c63ff, #4f46e5)",
-            margin: "0 auto 16px",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: "24px",
-          }}>🔒</div>
-          <h1 style={{ color: "#fff", fontSize: "20px", fontWeight: 700, margin: 0 }}>
+        {/* Header */}
+        <div style={{ marginBottom: 28, textAlign: "center" }}>
+          <p style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.16em", textTransform: "uppercase", color: AEGEAN, margin: "0 0 14px" }}>
+            Andes.IA
+          </p>
+          <h1 style={{ fontFamily: SERIF, fontSize: 26, fontWeight: 500, color: INK, margin: "0 0 8px", letterSpacing: "-0.01em" }}>
             Set a new password
           </h1>
-          <p style={{ color: "#6b7280", fontSize: "14px", marginTop: "6px" }}>
+          <p style={{ fontFamily: BODY, fontSize: 13.5, color: INK_MUTE, margin: 0 }}>
             Choose a strong password for your account.
           </p>
         </div>
 
-        <form onSubmit={handleReset} style={{ display: "grid", gap: "14px" }}>
+        <form onSubmit={handleReset} style={{ display: "grid", gap: 14 }}>
           <div>
             <label style={{
-              display: "block", fontSize: "13px", fontWeight: 500,
-              color: "#9ca3af", marginBottom: "6px",
+              display: "block",
+              fontFamily: MONO,
+              fontSize: 9.5,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              color: INK_SOFT,
+              marginBottom: 6,
             }}>
               New password
             </label>
@@ -80,18 +101,29 @@ export default function ResetPasswordPage() {
               autoComplete="new-password"
               placeholder="At least 8 characters"
               style={{
-                width: "100%", padding: "10px 14px",
-                background: "#0f1117", border: "1px solid #2a2d3e",
-                borderRadius: "8px", color: "#fff", fontSize: "14px",
-                boxSizing: "border-box", outline: "none",
+                width: "100%",
+                padding: "10px 13px",
+                background: LINEN,
+                border: `1px solid ${RULE}`,
+                borderRadius: 6,
+                color: INK,
+                fontFamily: BODY,
+                fontSize: 14,
+                boxSizing: "border-box",
+                outline: "none",
               }}
             />
           </div>
 
           <div>
             <label style={{
-              display: "block", fontSize: "13px", fontWeight: 500,
-              color: "#9ca3af", marginBottom: "6px",
+              display: "block",
+              fontFamily: MONO,
+              fontSize: 9.5,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              color: INK_SOFT,
+              marginBottom: 6,
             }}>
               Confirm new password
             </label>
@@ -103,19 +135,29 @@ export default function ResetPasswordPage() {
               autoComplete="new-password"
               placeholder="••••••••"
               style={{
-                width: "100%", padding: "10px 14px",
-                background: "#0f1117", border: "1px solid #2a2d3e",
-                borderRadius: "8px", color: "#fff", fontSize: "14px",
-                boxSizing: "border-box", outline: "none",
+                width: "100%",
+                padding: "10px 13px",
+                background: LINEN,
+                border: `1px solid ${RULE}`,
+                borderRadius: 6,
+                color: INK,
+                fontFamily: BODY,
+                fontSize: 14,
+                boxSizing: "border-box",
+                outline: "none",
               }}
             />
           </div>
 
           {error && (
             <div style={{
-              background: "#3b1219", color: "#f87171",
-              border: "1px solid #7f1d1d",
-              borderRadius: "8px", padding: "10px 14px", fontSize: "13px",
+              background: "oklch(0.96 0.04 25)",
+              color: "oklch(0.45 0.18 25)",
+              border: "1px solid oklch(0.85 0.08 25)",
+              borderRadius: 6,
+              padding: "10px 13px",
+              fontFamily: BODY,
+              fontSize: 13,
             }}>
               {error}
             </div>
@@ -125,12 +167,17 @@ export default function ResetPasswordPage() {
             type="submit"
             disabled={loading}
             style={{
-              width: "100%", padding: "11px",
-              background: loading ? "#374151" : "linear-gradient(135deg, #6c63ff, #4f46e5)",
-              border: "none", borderRadius: "8px",
-              color: "#fff", fontSize: "14px", fontWeight: 600,
+              width: "100%",
+              padding: "11px",
+              background: loading ? RULE : AEGEAN,
+              border: "none",
+              borderRadius: 6,
+              color: "#fff",
+              fontFamily: BODY,
+              fontSize: 14,
+              fontWeight: 600,
               cursor: loading ? "not-allowed" : "pointer",
-              marginTop: "4px",
+              marginTop: 4,
             }}
           >
             {loading ? "Updating…" : "Update password"}

@@ -178,9 +178,8 @@ async def send_athlete_invite(
                 f"Create your account here (link valid 7 days):\n{invite_url}\n\n"
                 f"Once you sign up you'll see your training plan and can chat with your AI coach."
             )
-            import asyncio
-            asyncio.create_task(whatsapp_client.send_message(to=phone, body=message))
-            logger.info("[send-invite] Queued WhatsApp invite to athlete %s", athlete_id[:8])
+            await whatsapp_client.send_message(to=phone, body=message)
+            logger.info("[send-invite] Sent WhatsApp invite to athlete %s", athlete_id[:8])
         except Exception:
             logger.warning("[send-invite] WhatsApp send failed for athlete %s", athlete_id[:8], exc_info=True)
 

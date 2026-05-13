@@ -36,11 +36,36 @@ export interface Athlete {
   id: string;
   full_name: string;
   phone_number: string | null;
+  email: string | null;
   organization_id: string | null;
   coach_id: string;
   stable_profile: StableProfile;
   current_state: CurrentState;
   created_at: string;
+  // Auth
+  auth_user_id: string | null;
+  // Onboarding
+  onboarding_step?: number;
+  onboarding_complete?: boolean;
+  ai_profile_summary?: string | null;
+  // Sport profile
+  primary_sport?: string | null;
+  secondary_sports?: string[] | null;
+  athlete_type?: string | null;
+  fitness_level?: string | null;
+  years_training?: number | null;
+  // Target event
+  target_event_name?: string | null;
+  target_event_date?: string | null;
+  target_event_distance?: string | null;
+  // Soft delete
+  archived_at?: string | null;
+  // Check-ins
+  checkins_enabled?: boolean;
+  morning_pulse_time?: string | null;
+  scheduled_time?: string | null;
+  trigger_window_minutes?: number;
+  // Dashboard computed fields
   pending_suggestions?: number;
   total_checkins?: number;
   last_checkin_at?: string | null;

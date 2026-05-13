@@ -4,6 +4,17 @@ import { useState } from "react";
 import Link from "next/link";
 import { createBrowserSupabase } from "@/app/lib/supabase";
 
+const INK      = "oklch(0.28 0.022 55)";
+const INK_SOFT = "oklch(0.42 0.022 60)";
+const INK_MUTE = "oklch(0.58 0.018 65)";
+const PARCHMENT = "oklch(0.965 0.018 85)";
+const LINEN    = "oklch(0.925 0.025 78)";
+const RULE     = "oklch(0.80 0.025 70)";
+const AEGEAN   = "oklch(0.42 0.080 200)";
+const SERIF    = "'Cormorant Garamond', Georgia, serif";
+const BODY     = "'Work Sans', ui-sans-serif, system-ui, sans-serif";
+const MONO     = "'JetBrains Mono', ui-monospace, monospace";
+
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -31,27 +42,32 @@ export default function ForgotPasswordPage() {
 
   return (
     <div style={{
-      minHeight: "100vh", background: "#0f1117",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      minHeight: "100vh",
+      background: PARCHMENT,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontFamily: BODY,
+      padding: "24px 16px",
     }}>
       <div style={{
-        background: "#1a1d2e", border: "1px solid #2a2d3e",
-        borderRadius: "16px", padding: "48px",
-        width: "100%", maxWidth: "400px",
+        background: "#fff",
+        border: `1px solid ${RULE}`,
+        borderRadius: 12,
+        padding: "44px 40px",
+        width: "100%",
+        maxWidth: 400,
+        boxShadow: "0 2px 16px oklch(0.28 0.022 55 / 0.06)",
       }}>
-        <div style={{ marginBottom: "32px", textAlign: "center" }}>
-          <div style={{
-            width: "48px", height: "48px", borderRadius: "12px",
-            background: "linear-gradient(135deg, #6c63ff, #4f46e5)",
-            margin: "0 auto 16px",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: "24px",
-          }}>🔑</div>
-          <h1 style={{ color: "#fff", fontSize: "20px", fontWeight: 700, margin: 0 }}>
+        {/* Header */}
+        <div style={{ marginBottom: 28, textAlign: "center" }}>
+          <p style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.16em", textTransform: "uppercase", color: AEGEAN, margin: "0 0 14px" }}>
+            Andes.IA
+          </p>
+          <h1 style={{ fontFamily: SERIF, fontSize: 26, fontWeight: 500, color: INK, margin: "0 0 8px", letterSpacing: "-0.01em" }}>
             Reset your password
           </h1>
-          <p style={{ color: "#6b7280", fontSize: "14px", marginTop: "6px" }}>
+          <p style={{ fontFamily: BODY, fontSize: 13.5, color: INK_MUTE, margin: 0, lineHeight: 1.5 }}>
             {sent
               ? "Check your inbox for a reset link."
               : "Enter your email and we'll send you a reset link."}
@@ -59,11 +75,16 @@ export default function ForgotPasswordPage() {
         </div>
 
         {!sent ? (
-          <form onSubmit={handleSubmit} style={{ display: "grid", gap: "16px" }}>
+          <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16 }}>
             <div>
               <label style={{
-                display: "block", fontSize: "13px", fontWeight: 500,
-                color: "#9ca3af", marginBottom: "6px",
+                display: "block",
+                fontFamily: MONO,
+                fontSize: 9.5,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: INK_SOFT,
+                marginBottom: 6,
               }}>
                 Email address
               </label>
@@ -75,19 +96,29 @@ export default function ForgotPasswordPage() {
                 autoComplete="email"
                 placeholder="coach@example.com"
                 style={{
-                  width: "100%", padding: "10px 14px",
-                  background: "#0f1117", border: "1px solid #2a2d3e",
-                  borderRadius: "8px", color: "#fff", fontSize: "14px",
-                  boxSizing: "border-box", outline: "none",
+                  width: "100%",
+                  padding: "10px 13px",
+                  background: LINEN,
+                  border: `1px solid ${RULE}`,
+                  borderRadius: 6,
+                  color: INK,
+                  fontFamily: BODY,
+                  fontSize: 14,
+                  boxSizing: "border-box",
+                  outline: "none",
                 }}
               />
             </div>
 
             {error && (
               <div style={{
-                background: "#3b1219", color: "#f87171",
-                border: "1px solid #7f1d1d",
-                borderRadius: "8px", padding: "10px 14px", fontSize: "13px",
+                background: "oklch(0.96 0.04 25)",
+                color: "oklch(0.45 0.18 25)",
+                border: "1px solid oklch(0.85 0.08 25)",
+                borderRadius: 6,
+                padding: "10px 13px",
+                fontFamily: BODY,
+                fontSize: 13,
               }}>
                 {error}
               </div>
@@ -97,11 +128,17 @@ export default function ForgotPasswordPage() {
               type="submit"
               disabled={loading}
               style={{
-                width: "100%", padding: "11px",
-                background: loading ? "#374151" : "linear-gradient(135deg, #6c63ff, #4f46e5)",
-                border: "none", borderRadius: "8px",
-                color: "#fff", fontSize: "14px", fontWeight: 600,
+                width: "100%",
+                padding: "11px",
+                background: loading ? RULE : AEGEAN,
+                border: "none",
+                borderRadius: 6,
+                color: "#fff",
+                fontFamily: BODY,
+                fontSize: 14,
+                fontWeight: 600,
                 cursor: loading ? "not-allowed" : "pointer",
+                marginTop: 4,
               }}
             >
               {loading ? "Sending…" : "Send reset link"}
@@ -109,16 +146,16 @@ export default function ForgotPasswordPage() {
           </form>
         ) : (
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: "40px", marginBottom: "16px" }}>📬</div>
-            <p style={{ color: "#9ca3af", fontSize: "14px", lineHeight: 1.6, margin: "0 0 24px" }}>
+            <div style={{ fontSize: 36, marginBottom: 14 }}>📬</div>
+            <p style={{ fontFamily: BODY, color: INK_SOFT, fontSize: 14, lineHeight: 1.6, margin: "0 0 24px" }}>
               We sent a password reset link to{" "}
-              <strong style={{ color: "#fff" }}>{email}</strong>.
+              <strong style={{ color: INK }}>{email}</strong>.
             </p>
           </div>
         )}
 
-        <p style={{ textAlign: "center", marginTop: "24px", fontSize: "13px", color: "#6b7280" }}>
-          <Link href="/login" style={{ color: "#6c63ff", textDecoration: "none", fontWeight: 500 }}>
+        <p style={{ textAlign: "center", marginTop: 24, fontFamily: BODY, fontSize: 13, color: INK_MUTE }}>
+          <Link href="/login" style={{ color: AEGEAN, textDecoration: "none", fontWeight: 500 }}>
             ← Back to sign in
           </Link>
         </p>

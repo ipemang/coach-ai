@@ -28,3 +28,32 @@ body {
 ::selection {
   background: rgba(96, 165, 250, 0.35);
 }
+
+/* ── Responsive two-column auth split layout ──────────────────────────────
+   Login and signup pages use .ca-split-grid. On desktop: left brand panel
+   + right form panel. On mobile: form only (brand panel hides). */
+.ca-split-grid {
+  display: grid;
+  grid-template-columns: 1fr 480px;
+  min-height: 100vh;
+}
+.ca-split-grid .ca-split-brand {
+  display: flex;
+}
+@media (max-width: 700px) {
+  .ca-split-grid {
+    grid-template-columns: 1fr;
+  }
+  .ca-split-grid .ca-split-brand {
+    display: none;
+  }
+}
+
+/* ── Page transition ────────────────────────────────────────────────────── */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.page-enter {
+  animation: page-enter 280ms ease-out both;
+}

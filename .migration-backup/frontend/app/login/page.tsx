@@ -108,10 +108,10 @@ export default function LoginPage() {
   const isCoach = role === "coach";
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 480px", minHeight: "100vh" }}>
-      {/* Left — brand panel */}
+    <div className="ca-split-grid">
+      {/* Left — brand panel (hidden on mobile via .ca-split-brand) */}
       {isCoach ? (
-        <div style={{ ...MOSAIC_BG, display: "flex", alignItems: "center", justifyContent: "center", padding: "64px 56px" }}>
+        <div className="ca-split-brand" style={{ ...MOSAIC_BG, alignItems: "center", justifyContent: "center", padding: "64px 56px" }}>
           <div style={{ maxWidth: 460 }}>
             <WordMark size={32} />
             <h1 style={{
@@ -148,7 +148,7 @@ export default function LoginPage() {
           </div>
         </div>
       ) : (
-        <div style={{ ...ATHLETE_MOSAIC_BG, display: "flex", alignItems: "center", justifyContent: "center", padding: "64px 56px" }}>
+        <div className="ca-split-brand" style={{ ...ATHLETE_MOSAIC_BG, alignItems: "center", justifyContent: "center", padding: "64px 56px" }}>
           <div style={{ maxWidth: 460 }}>
             <WordMark size={32} light />
             <h1 style={{
@@ -304,7 +304,7 @@ export default function LoginPage() {
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.14em", textTransform: "uppercase", color: INK_SOFT, marginBottom: 6 }}>
                 <span>Password</span>
-                <Link href="/forgot-password" style={{ fontFamily: BODY, fontSize: 12, color: INK_MUTE, textDecoration: "none", textTransform: "none", letterSpacing: 0 }}>Forgot?</Link>
+                <Link href="/auth/forgot-password" style={{ fontFamily: BODY, fontSize: 12, color: INK_MUTE, textDecoration: "none", textTransform: "none", letterSpacing: 0 }}>Forgot?</Link>
               </label>
               <input
                 type="password"
