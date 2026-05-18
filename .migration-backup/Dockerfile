@@ -15,7 +15,7 @@ COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r backend/requirements.txt
 
-COPY backend/ ./backend/
+COPY run_checkin_scheduler.py ./run_checkin_scheduler.py
 
 EXPOSE 8000
 
